@@ -71,6 +71,8 @@ export default function Home() {
   const [newSizeLabel, setNewSizeLabel] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
   const importInputRef = useRef<HTMLInputElement>(null);
+  const backupInputRef = useRef<HTMLInputElement>(null);
+  const [showBackupModal, setShowBackupModal] = useState(false);
   const [modelForm, setModelForm] = useState<ModelFormState>(() => blankModelForm(demoSizeGroups[0].id));
   const [notice, setNotice] = useState<{ message: string; kind: 'success' | 'error' | 'info' } | null>(null);
   const [historySearch, setHistorySearch] = useState('');
@@ -480,6 +482,117 @@ export default function Home() {
     }
   }
 
+  function exportFullBackup() {
+    if (!ready) {
+      setNoticeMessage('Espera a que termine de cargar el inventario antes de crear el respaldo.', 'info');
+      return;
+    }
+    try {
+      const payload = {
+        app: 'TelaStock',
+        backupType: 'full',
+        schemaVersion: 1,
+        exportedAt: new Date().toISOString(),
+        data: { sizeGroups, sizes, models, pieces, movements },
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `telastock-respaldo-completo-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setNoticeMessage('Respaldo completo descargado. Guárdalo en un lugar seguro; incluye modelos, moldes, tallas y todo el historial.');
+    } catch {
+      setNoticeMessage('No se pudo crear el respaldo. Comprueba que el navegador permita descargar archivos.', 'error');
+    }
+  }
+
+  async function importFullBackup(file?: File) {
+    if (!file) return;
+    try {
+      const raw = JSON.parse(await file.text()) as unknown;
+      const isRecord = (value: unknown): value is Record<string, unknown> =>
+        Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+      if (!isRecord(raw) || raw.app !== 'TelaStock' || raw.backupType !== 'full' || raw.schemaVersion !== 1 || !isRecord(raw.data)) {
+        throw new Error('Este no es un respaldo completo de TelaStock compatible.');
+      }
+      const data = raw.data;
+      const getRows = (key: string): Record<string, unknown>[] => {
+        const value = data[key];
+        if (!Array.isArray(value) || !value.every(isRecord)) {
+          throw new Error(`El apartado "${key}" no existe o está dañado.`);
+        }
+        if (!value.every((row) => typeof row.id === 'string' && row.id.trim().length > 0)) {
+          throw new Error(`Hay registros sin identificador válido en "${key}".`);
+        }
+        const ids = value.map((row) => row.id as string);
+        if (new Set(ids).size !== ids.length) throw new Error(`Hay identificadores duplicados en "${key}".`);
+        return value;
+      };
+
+      const importedGroups = getRows('sizeGroups') as unknown as SizeGroup[];
+      const importedSizes = getRows('sizes') as unknown as Size[];
+      const importedModels = getRows('models') as unknown as ManufacturingModel[];
+      const importedPieces = getRows('pieces') as unknown as ModelPiece[];
+      const importedMovements = getRows('movements') as unknown as PieceMovement[];
+      const hasText = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
+      const groupIds = new Set(importedGroups.map((item) => item.id));
+      const sizeIds = new Set(importedSizes.map((item) => item.id));
+      const modelIds = new Set(importedModels.map((item) => item.id));
+      const pieceIds = new Set(importedPieces.map((item) => item.id));
+
+      if (!importedGroups.every((item) => hasText(item.name))) throw new Error('Hay grupos de tallas sin nombre.');
+      if (!importedSizes.every((item) => hasText(item.label) && groupIds.has(item.groupId) && Number.isInteger(item.sortOrder))) throw new Error('Hay tallas incompletas o vinculadas a un grupo inexistente.');
+      if (!importedModels.every((item) => hasText(item.name) && groupIds.has(item.sizeGroupId))) throw new Error('Hay modelos incompletos o vinculados a un grupo inexistente.');
+      if (!importedPieces.every((item) =>
+        hasText(item.name) &&
+        modelIds.has(item.modelId) &&
+        Number.isInteger(item.unitsPerGarment) &&
+        item.unitsPerGarment > 0 &&
+        ['simetrica', 'izquierda', 'derecha', 'ninguna'].includes(item.laterality) &&
+        Number.isInteger(item.sortOrder)
+      )) throw new Error('Hay moldes incompletos o con datos de fabricación inválidos.');
+      if (!importedMovements.every((item) =>
+        pieceIds.has(item.pieceId) &&
+        sizeIds.has(item.sizeId) &&
+        Number.isInteger(item.delta) &&
+        ['entrada', 'salida', 'ajuste'].includes(item.kind) &&
+        hasText(item.date) &&
+        typeof item.note === 'string' &&
+        (item.side === undefined || item.side === 'izquierda' || item.side === 'derecha')
+      )) throw new Error('Hay movimientos inválidos o vinculados a moldes/tallas inexistentes.');
+
+      const confirmed = window.confirm(
+        `Vas a restaurar ${importedModels.length} modelos, ${importedPieces.length} moldes y ${importedMovements.length} movimientos. Esto reemplazará todos los datos guardados actualmente en este navegador. Exporta un respaldo de lo actual antes de continuar si lo necesitas. ¿Continuar?`
+      );
+      if (!confirmed) return;
+
+      setSizeGroups(importedGroups);
+      setSizes(importedSizes);
+      setModels(importedModels);
+      setPieces(importedPieces.map((piece) => ({
+        ...piece,
+        fabricType: piece.fabricType ?? 'Sin especificar',
+        color: piece.color ?? 'Sin especificar',
+      })));
+      setMovements(importedMovements);
+      setExpandedModels(importedModels.slice(0, 1).map((model) => model.id));
+      setSelectedModelId(importedModels[0]?.id ?? '');
+      setSelectedSizeIds([]);
+      setStockAmounts({});
+      setStockEntryModes({});
+      setShowBackupModal(false);
+      setNoticeMessage(`Respaldo restaurado correctamente: ${importedModels.length} modelos y ${importedMovements.length} movimientos. Los datos se guardaron en este navegador.`);
+    } catch (error) {
+      setNoticeMessage(`No se pudo restaurar el respaldo: ${error instanceof Error ? error.message : 'archivo no válido'}`, 'error');
+    } finally {
+      if (backupInputRef.current) backupInputRef.current.value = '';
+    }
+  }
+
   function exportCsv() {
     const rows = [['Modelo', 'Grupo de tallas', 'Talla', 'Molde', 'Tipo de tela', 'Color', 'Piezas físicas en stock', 'Stock izquierdo', 'Stock derecho', 'Paridades completas', 'Piezas por prenda', 'Unidades fabricables', 'Faltante para siguiente unidad']];
     for (const model of models) {
@@ -569,7 +682,7 @@ export default function Home() {
       <section className="main-area">
         <header className="topbar">
           <div className="crumb">Fábrica / <strong>{view === 'inventario' ? 'Inventario de piezas' : view === 'modelos' ? 'Modelos y moldes' : 'Historial'}</strong></div>
-          <div className="top-actions"><span className="local-pill"><i /> Prototipo local</span><button className="icon-button" title="Ayuda sobre cálculo" onClick={() => setNoticeMessage('Las unidades fabricables se calculan con el molde más limitante: todos los moldes requeridos deben alcanzar. Es una capacidad de fabricación con el stock actual, no una cantidad de prendas ya confeccionadas.', 'info')}>?</button></div>
+          <div className="top-actions"><button className="backup-trigger" onClick={() => setShowBackupModal(true)} title="Importar o exportar todos los datos" aria-label="Importar o exportar todos los datos"><span aria-hidden="true">⇅</span><span className="backup-trigger-label">Respaldo</span></button><span className="local-pill"><i /> Prototipo local</span><button className="icon-button" title="Ayuda sobre cálculo" onClick={() => setNoticeMessage('Las unidades fabricables se calculan con el molde más limitante: todos los moldes requeridos deben alcanzar. Es una capacidad de fabricación con el stock actual, no una cantidad de prendas ya confeccionadas.', 'info')}>?</button></div>
         </header>
 
         <div className="mobile-nav" role="navigation" aria-label="Módulos">
@@ -788,6 +901,30 @@ export default function Home() {
           </section>
         </div>;
       })()}
+
+
+      {showBackupModal && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowBackupModal(false); }}>
+        <section className="modal backup-modal" role="dialog" aria-modal="true" aria-labelledby="backup-modal-title">
+          <div className="modal-heading"><div><div className="eyebrow">DATOS LOCALES</div><h2 id="backup-modal-title">Importar y exportar datos</h2><p>Haz una copia completa para guardar o trasladar tu inventario a otro navegador.</p></div><button className="icon-button" onClick={() => setShowBackupModal(false)} aria-label="Cerrar">×</button></div>
+          <div className="backup-options">
+            <article className="backup-option">
+              <div className="backup-option-icon export">↓</div>
+              <h3>Guardar una copia</h3>
+              <p>Descarga modelos, moldes, tallas, stock por lado y todo el historial en un solo archivo.</p>
+              <button type="button" className="button primary" disabled={!ready} onClick={exportFullBackup}>Descargar respaldo</button>
+            </article>
+            <article className="backup-option">
+              <div className="backup-option-icon import">↑</div>
+              <h3>Restaurar una copia</h3>
+              <p>Selecciona un archivo de respaldo completo de TelaStock para recuperar tus datos.</p>
+              <button type="button" className="button secondary" disabled={!ready} onClick={() => backupInputRef.current?.click()}>Elegir archivo JSON</button>
+              <input ref={backupInputRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importFullBackup(event.target.files?.[0])} />
+            </article>
+          </div>
+          <div className="backup-warning"><strong>Importante:</strong> restaurar reemplaza los datos de este navegador. Si quieres conservar ambos inventarios, descarga una copia antes de restaurar.</div>
+          <div className="form-actions"><button type="button" className="button secondary" onClick={() => setShowBackupModal(false)}>Cerrar</button></div>
+        </section>
+      </div>}
 
       <footer className="mobile-footer"><span>●</span> TelaStock · Inventario de fabricación</footer>
     </main>
