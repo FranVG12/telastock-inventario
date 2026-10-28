@@ -325,3 +325,20 @@
   .shortage-metric small{font-size:8px}
   .shortage-metric strong{font-size:9.5px}
 }
+
+/* Copias de seguridad locales completas */
+.backup-trigger{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;padding:7px 11px;border:1px solid #e0e4ec;border-radius:9px;background:#fff;color:#556176;font-size:10px;font-weight:800;white-space:nowrap}
+.backup-trigger:hover{border-color:#cfcaff;background:#fbfaff;color:#5146c7}
+.backup-trigger>span:first-child{font-size:17px;line-height:1;color:#6257d9}
+.backup-modal{width:min(100%,640px)}
+.backup-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:14px}
+.backup-option{display:flex;flex-direction:column;align-items:flex-start;min-width:0;padding:15px;border:1px solid #e8eaf1;border-radius:12px;background:#fcfcff}
+.backup-option-icon{display:grid;place-items:center;width:34px;height:34px;border-radius:10px;font-size:20px;font-weight:800;margin-bottom:11px}
+.backup-option-icon.export{background:#eaf8f2;color:#19866a}
+.backup-option-icon.import{background:#f0efff;color:#6257d9}
+.backup-option h3{margin:0 0 6px;font:800 13px Manrope,sans-serif;color:#29354a}
+.backup-option p{margin:0;color:#7e899b;font-size:10px;line-height:1.6;flex:1}
+.backup-option .button{width:100%;margin-top:14px;min-height:39px}
+.backup-warning{padding:11px 12px;border:1px solid #f3e4be;border-radius:9px;background:#fff8e9;color:#8c6c2e;font-size:10px;line-height:1.6;margin-bottom:14px}
+.backup-warning strong{color:#795518}
+@media(max-width:720px){.backup-trigger{min-height:28px;width:29px;height:28px;padding:4px;border-radius:8px}.backup-trigger-label{display:none}.backup-trigger>span:first-child{font-size:17px}.backup-options{grid-template-columns:1fr;gap:9px}.backup-option{padding:12px}.backup-option-icon{width:30px;height:30px;margin-bottom:8px}.backup-option h3{font-size:12px}.backup-option p{font-size:9px}.backup-option .button{margin-top:10px}}
