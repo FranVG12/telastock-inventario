@@ -92,3 +92,16 @@ La migración incluye comprobación de correspondencia entre el grupo de tallas 
 - Las tarjetas de moldes usan los indicadores compactos **Stock**, **Rinde** y **Meta**. El stock simétrico se presenta como `N par.` si está equilibrado o `izquierda/derecha` si no lo está.
 - El formulario **Registrar stock** reduce etiquetas y espacios, y usa **Paridad** por defecto. Cada par suma una unidad izquierda y una derecha; **Por lado** queda disponible para cantidades diferentes.
 - Al abrir un faltante para registrar stock, las piezas simétricas con faltantes equilibrados se precargan por paridad. Cuando el faltante izquierdo y derecho difiere, se activa el ingreso por lado para completar exactamente lo necesario.
+
+
+## Copia de seguridad local
+
+En la cabecera de la aplicación, abre **Respaldo** para descargar o restaurar una copia completa.
+
+- **Descargar respaldo** crea un archivo JSON con grupos de tallas, tallas, modelos, moldes, existencias representadas por todos sus movimientos, y el historial completo.
+- **Restaurar una copia** valida que el archivo sea un respaldo completo compatible y pide confirmación antes de reemplazar los datos del navegador actual.
+- Para trasladar tu inventario a otro equipo o navegador, descarga el archivo en el equipo original y restaura ese archivo en el otro.
+- Guarda copias en una ubicación segura y realiza respaldos periódicos. El archivo contiene información de inventario e historial.
+- Los datos siguen siendo locales al navegador; importar/exportar no activa sincronización entre personas o dispositivos.
+
+El CSV disponible en Inventario sirve para consultar el stock en Excel; el JSON de respaldo es el que debes conservar para poder restaurar también la configuración y los movimientos.
