@@ -743,16 +743,18 @@ export default function Home() {
         const totalMissing = shortages.reduce((sum, shortage) => sum + shortage.missing, 0);
         const initialEntryModes = Object.fromEntries(shortages
           .filter((shortage) => shortage.piece.laterality === 'simetrica' && shortage.missing > 0)
-          .map((shortage) => [shortage.piece.id, shortage.missingLeft === shortage.missingRight ? 'paridad' as SymmetricEntryMode : 'lados' as SymmetricEntryMode]));
+          .map((shortage) => [shortage.piece.id, (shortage.missingLeft ?? 0) === (shortage.missingRight ?? 0) ? 'paridad' as SymmetricEntryMode : 'lados' as SymmetricEntryMode]));
         const initialAmounts = Object.fromEntries(shortages.flatMap((shortage) => {
           if (shortage.missing <= 0) return [];
           if (shortage.piece.laterality === 'simetrica') {
-            if (shortage.missingLeft === shortage.missingRight) {
-              return shortage.missingLeft > 0 ? [[`${size.id}::${shortage.piece.id}::paridad`, String(shortage.missingLeft)] as [string, string]] : [];
+            const missingLeft = shortage.missingLeft ?? 0;
+            const missingRight = shortage.missingRight ?? 0;
+            if (missingLeft === missingRight) {
+              return missingLeft > 0 ? [[`${size.id}::${shortage.piece.id}::paridad`, String(missingLeft)] as [string, string]] : [];
             }
             return [
-              ...(shortage.missingLeft ? [[`${size.id}::${shortage.piece.id}::izquierda`, String(shortage.missingLeft)] as [string, string]] : []),
-              ...(shortage.missingRight ? [[`${size.id}::${shortage.piece.id}::derecha`, String(shortage.missingRight)] as [string, string]] : []),
+              ...(missingLeft > 0 ? [[`${size.id}::${shortage.piece.id}::izquierda`, String(missingLeft)] as [string, string]] : []),
+              ...(missingRight > 0 ? [[`${size.id}::${shortage.piece.id}::derecha`, String(missingRight)] as [string, string]] : []),
             ];
           }
           return [[`${size.id}::${shortage.piece.id}`, String(shortage.missing)] as [string, string]];
