@@ -20,8 +20,9 @@ import {
 } from '@/lib/inventory-domain';
 import { demoModels, demoMovements, demoPieces, demoSizes, demoSizeGroups } from '@/lib/demo-data';
 import { FabricModule, FABRIC_STORAGE_KEYS, emptyFabricBackupData, validateFabricBackupData, type FabricView, type ColorDefinition } from '@/app/fabric-module';
+import { ProductionModule, PRODUCTION_STORAGE_KEYS, emptyProductionBackupData, validateProductionBackupData, type ProductionView } from '@/app/production-module';
 
-type View = 'inventario' | 'modelos' | 'historial' | FabricView;
+type View = 'inventario' | 'modelos' | 'historial' | FabricView | ProductionView;
 type StockFilter = 'Con stock' | 'Vacío' | 'Todos';
 type SymmetricEntryMode = 'paridad' | 'lados';
 type StockSlot = 'paridad' | StockSide;
@@ -586,7 +587,13 @@ export default function Home() {
         backupType: 'full',
         schemaVersion: 3,
         exportedAt: new Date().toISOString(),
-        data: { sizeGroups, sizes, models, pieces, movements, fabricInventory },
+        data: {
+          sizeGroups, sizes, models, pieces, movements, fabricInventory,
+          production: Object.fromEntries((Object.keys(emptyProductionBackupData()) as (keyof ReturnType<typeof emptyProductionBackupData>)[]).map((key) => {
+            const raw = localStorage.getItem(PRODUCTION_STORAGE_KEYS[key]);
+            return [key, raw ? JSON.parse(raw) : []];
+          })),
+        },
       };
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
       const url = URL.createObjectURL(blob);
@@ -609,7 +616,7 @@ export default function Home() {
       const raw = JSON.parse(await file.text()) as unknown;
       const isRecord = (value: unknown): value is Record<string, unknown> =>
         Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-      if (!isRecord(raw) || raw.app !== 'TelaStock' || raw.backupType !== 'full' || ![1, 2, 3].includes(Number(raw.schemaVersion)) || !isRecord(raw.data)) {
+      if (!isRecord(raw) || raw.app !== 'TelaStock' || raw.backupType !== 'full' || ![1, 2, 3, 4].includes(Number(raw.schemaVersion)) || !isRecord(raw.data)) {
         throw new Error('Este no es un respaldo completo de TelaStock compatible.');
       }
       const data = raw.data;
@@ -633,7 +640,7 @@ export default function Home() {
       const importedModels = normalizeModelsWithSlots(importedModelsRaw, importedPieces);
       const importedMovements = getRows('movements') as unknown as PieceMovement[];
       let importedFabric = Number(raw.schemaVersion) >= 2 ? validateFabricBackupData(data.fabricInventory) : emptyFabricBackupData();
-      const hasText = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
+      const importedProduction = Number(raw.schemaVersion) >= 4 ? validateProductionBackupData(data.production) : emptyProductionBackupData();\n      const hasText = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
       const groupIds = new Set(importedGroups.map((item) => item.id));
       const sizeIds = new Set(importedSizes.map((item) => item.id));
       const modelIds = new Set(importedModels.map((item) => item.id));
@@ -674,7 +681,7 @@ export default function Home() {
 
       const legacyWarning = raw.schemaVersion === 1 ? '\\nEste respaldo antiguo no contiene datos de telas, rollos ni compras; al restaurarlo, esas colecciones quedarán vacías.' : '';
       const confirmed = window.confirm(
-        `Vas a restaurar ${importedModels.length} modelos, ${importedPieces.length} moldes y ${importedMovements.length} movimientos, además de ${importedFabric.rollos.length} rollos y ${importedFabric.compras.length} compras. Esto reemplazará los datos del navegador actual. Exporta un respaldo previo si necesitas conservarlos.${legacyWarning} ¿Continuar?`
+        `Vas a restaurar ${importedModels.length} modelos, ${importedPieces.length} moldes y ${importedMovements.length} movimientos, además de ${importedFabric.rollos.length} rollos, ${importedFabric.compras.length} compras y ${importedProduction.supplies.length} insumos. Esto reemplazará los datos del navegador actual. Exporta un respaldo previo si necesitas conservarlos.${legacyWarning} ¿Continuar?`
       );
       if (!confirmed) return;
 
@@ -702,6 +709,11 @@ export default function Home() {
       localStorage.setItem(FABRIC_STORAGE_KEYS.colores, JSON.stringify(importedFabric.colores));
       localStorage.setItem(FABRIC_STORAGE_KEYS.telaColores, JSON.stringify(importedFabric.telaColores));
       localStorage.setItem(FABRIC_STORAGE_KEYS.version, '2');
+      (Object.keys(emptyProductionBackupData()) as (keyof ReturnType<typeof emptyProductionBackupData>)[]).forEach((key) => {
+        localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(importedProduction[key]));
+      });
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '1');
+      window.dispatchEvent(new Event('telastock-production-data-restored'));
       window.dispatchEvent(new Event('telastock-fabric-data-updated'));
       window.dispatchEvent(new Event('telastock-fabric-data-restored'));
       setExpandedModels(importedModels.slice(0, 1).map((model) => model.id));
@@ -710,7 +722,7 @@ export default function Home() {
       setStockAmounts({});
       setStockEntryModes({});
       setShowBackupModal(false);
-      setNoticeMessage(`Respaldo restaurado: ${importedModels.length} modelos, ${importedMovements.length} movimientos, ${importedFabric.rollos.length} rollos y ${importedFabric.compras.length} compras.`);
+      setNoticeMessage(`Respaldo restaurado: ${importedModels.length} modelos, ${importedMovements.length} movimientos, ${importedFabric.rollos.length} rollos, ${importedFabric.compras.length} compras y ${importedProduction.supplies.length} insumos.`);
     } catch (error) {
       setNoticeMessage(`No se pudo restaurar el respaldo: ${error instanceof Error ? error.message : 'archivo no válido'}`, 'error');
     } finally {
@@ -923,6 +935,7 @@ export default function Home() {
           </section>}
 
           {(['telas', 'rollos', 'compras', 'proveedores'] as View[]).includes(view) && <FabricModule view={view as FabricView} />}
+          {(['insumos', 'componentes', 'modelos-producto', 'recetas', 'planificacion'] as View[]).includes(view) && <ProductionModule view={view as ProductionView} baseModels={models} sizes={sizes} onNavigate={(next) => setView(next)} />}
 
           <div className="prototype-note"><span>ⓘ</span><div><strong>Prototipo de validación · datos de demostración</strong><p>Los registros se guardan en este navegador y no se sincronizan entre dispositivos todavía. El proyecto incluye una migración SQL normalizada para Supabase; antes de producción se deben configurar autenticación, políticas de acceso y pruebas de concurrencia.</p></div></div>
         </div>
