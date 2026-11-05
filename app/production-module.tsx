@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { getCompleteUnits, getPieceStock, getSymmetricStock, type PieceMovement as DomainPieceMovement, type ManufacturingModel, type ModelPiece, type Size, type SizeGroup } from '@/lib/inventory-domain';
 import { FABRIC_STORAGE_KEYS } from '@/app/fabric-module';
 
-export type ProductionView = 'insumos' | 'compras-avios' | 'componentes' | 'modelos-producto' | 'recetas' | 'planificacion';
+export type ProductionView = 'insumos' | 'compras-avios' | 'componentes' | 'modelos-producto' | 'recetas' | 'planificacion' | 'ordenes';
 export type StockUnit = 'und' | 'm' | 'cm' | 'g' | 'kg' | 'l' | 'ml';
 export type SupplyCategory =
   | 'Hilos' | 'Botones y broches' | 'Cintas elásticas' | 'Cintas para vena'
@@ -45,6 +45,7 @@ export type SupplyMovement = {
   note: string;
   date: string;
   sourcePurchaseDetailId?: string | null;
+  sourceProductionOrderId?: string | null;
 };
 
 export type SupplyPurchase = {
@@ -90,6 +91,7 @@ export type ComponentPieceMovement = {
   side?: 'izquierda' | 'derecha';
   note: string;
   date: string;
+  sourceProductionOrderId?: string | null;
 };
 
 export type MaterialRequirement = {
@@ -145,6 +147,24 @@ export type ConfiguredProductModel = {
   updatedAt: string;
 };
 
+export type ProductionOrderStatus = 'borrador' | 'reservada' | 'en_proceso' | 'completada' | 'cancelada';
+export type ProductionOrderMaterial = {
+  id: string; variantId: string; sizeId: string | null; quantity: number; unit: StockUnit;
+  unitCost: number | null; lineCost: number | null;
+};
+export type ProductionOrderPieceRequirement = { id: string; pieceId: string; sizeId: string; side: 'izquierda' | 'derecha' | null; quantity: number };
+export type ProductionOrderComponentPieceRequirement = ProductionOrderPieceRequirement & { componentId: string };
+export type ProductionOrderRollAllocation = { id: string; variantId: string; rollId: string; unit: 'KG' | 'M'; quantity: number };
+export type ProductionOrder = {
+  id: string; number: string; productModelId: string; productName: string; baseModelId: string;
+  status: ProductionOrderStatus; quantities: Record<string, number>;
+  materials: ProductionOrderMaterial[]; basePieces: ProductionOrderPieceRequirement[];
+  componentPieces: ProductionOrderComponentPieceRequirement[]; rollAllocations: ProductionOrderRollAllocation[];
+  estimatedMaterialCost: number | null; missingCostLines: number; note: string;
+  createdAt: string; updatedAt: string; reservedAt?: string | null; startedAt?: string | null;
+  completedAt?: string | null; cancelledAt?: string | null;
+};
+
 export type ProductionBackupData = {
   supplies: Supply[];
   variants: SupplyVariant[];
@@ -152,6 +172,7 @@ export type ProductionBackupData = {
   supplyPurchases: SupplyPurchase[];
   supplyPurchaseDetails: SupplyPurchaseDetail[];
   componentPieceMovements: ComponentPieceMovement[];
+  productionOrders: ProductionOrder[];
   components: GarmentComponent[];
   familyRecipes: FamilyRecipe[];
   productModels: ConfiguredProductModel[];
@@ -165,13 +186,14 @@ export const PRODUCTION_STORAGE_KEYS = {
   supplyPurchases: 'telastock-supply-purchases-v1',
   supplyPurchaseDetails: 'telastock-supply-purchase-details-v1',
   componentPieceMovements: 'telastock-component-piece-movements-v1',
+  productionOrders: 'telastock-production-orders-v1',
   components: 'telastock-garment-components-v1',
   familyRecipes: 'telastock-family-recipes-v1',
   productModels: 'telastock-configured-product-models-v1',
 } as const;
 
 export function emptyProductionBackupData(): ProductionBackupData {
-  return { supplies: [], variants: [], supplyMovements: [], supplyPurchases: [], supplyPurchaseDetails: [], componentPieceMovements: [], components: [], familyRecipes: [], productModels: [] };
+  return { supplies: [], variants: [], supplyMovements: [], supplyPurchases: [], supplyPurchaseDetails: [], componentPieceMovements: [], productionOrders: [], components: [], familyRecipes: [], productModels: [] };
 }
 
 export function validateProductionBackupData(value: unknown): ProductionBackupData {
@@ -237,6 +259,24 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
     return Boolean(detail && movement.kind === 'entrada' && movement.variantId === detail.variantId &&
       movement.sizeId === detail.sizeId && Math.abs(movement.delta - detail.inventoryQuantity) < 0.00001);
   })) throw new Error('Hay movimientos de compra que no coinciden con su detalle.');
+  if (!output.productionOrders.every((order) => {
+    const statuses: ProductionOrderStatus[] = ['borrador', 'reservada', 'en_proceso', 'completada', 'cancelada'];
+    return typeof order.number === 'string' && order.number.trim().length > 0 &&
+      typeof order.productModelId === 'string' && typeof order.productName === 'string' &&
+      typeof order.baseModelId === 'string' && statuses.includes(order.status) &&
+      order.quantities && typeof order.quantities === 'object' &&
+      Array.isArray(order.materials) && order.materials.every((line) =>
+        variantIds.has(line.variantId) && (line.sizeId === null || typeof line.sizeId === 'string') &&
+        Number.isFinite(line.quantity) && line.quantity > 0 && ['und','m','cm','g','kg','l','ml'].includes(line.unit) &&
+        (line.unitCost === null || Number.isFinite(line.unitCost) && line.unitCost >= 0) &&
+        (line.lineCost === null || Number.isFinite(line.lineCost) && line.lineCost >= 0)
+      ) &&
+      Array.isArray(order.basePieces) && order.basePieces.every((line) => typeof line.pieceId === 'string' && typeof line.sizeId === 'string' && Number.isInteger(line.quantity) && line.quantity > 0 && (line.side === null || line.side === 'izquierda' || line.side === 'derecha')) &&
+      Array.isArray(order.componentPieces) && order.componentPieces.every((line) => componentPieceMap.has(line.pieceId) && componentPieceMap.get(line.pieceId)?.componentId === line.componentId && typeof line.sizeId === 'string' && Number.isInteger(line.quantity) && line.quantity > 0 && (line.side === null || line.side === 'izquierda' || line.side === 'derecha')) &&
+      Array.isArray(order.rollAllocations) && order.rollAllocations.every((allocation) => variantIds.has(allocation.variantId) && typeof allocation.rollId === 'string' && ['KG','M'].includes(allocation.unit) && Number.isFinite(allocation.quantity) && allocation.quantity > 0) &&
+      Number.isInteger(order.missingCostLines) && order.missingCostLines >= 0 &&
+      (order.estimatedMaterialCost === null || Number.isFinite(order.estimatedMaterialCost) && order.estimatedMaterialCost >= 0);
+  })) throw new Error('Hay órdenes de producción con datos o relaciones inválidas.');
   if (!output.components.every((x) => typeof x.name === 'string' && x.name.trim() && typeof x.type === 'string' && x.type.trim() && Array.isArray(x.pieces) && x.pieces.every((p) => p && typeof p.id === 'string' && p.id.trim() && typeof p.name === 'string' && p.name.trim() && Number.isInteger(p.unitsPerGarment) && p.unitsPerGarment > 0 && ['ninguna', 'simetrica', 'izquierda', 'derecha'].includes(p.laterality) && (p.laterality !== 'simetrica' || p.unitsPerGarment % 2 === 0)) && validMaterials(x.materials))) {
     throw new Error('Hay componentes con piezas o materiales inválidos.');
   }
@@ -473,7 +513,7 @@ export function ProductionModule({
     let safe = true;
     let warning = '';
     const version = Number(localStorage.getItem(PRODUCTION_STORAGE_KEYS.version) ?? '0');
-    if (version > 1) { safe = false; warning = 'Los datos de insumos fueron creados con una versión más reciente. Se evita sobrescribirlos.'; }
+    if (version > 2) { safe = false; warning = 'Los datos de insumos fueron creados con una versión más reciente. Se evita sobrescribirlos.'; }
     for (const key of Object.keys(empty) as (keyof ProductionBackupData)[]) {
       try {
         const raw = localStorage.getItem(PRODUCTION_STORAGE_KEYS[key]);
@@ -492,7 +532,7 @@ export function ProductionModule({
     const loaded = loadLocal();
     setData(loaded.data);
     setStorageSafe(loaded.safe);
-    if (loaded.safe) localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '1');
+    if (loaded.safe) localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '2');
     else setNotice({ text: loaded.warning, kind: 'error' });
     setReady(true);
     refreshTextiles();
