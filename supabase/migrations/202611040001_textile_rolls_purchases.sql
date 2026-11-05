@@ -137,3 +137,19 @@ before insert or update of id_rollo, unidad_precio on public.detalle_compra
 for each row execute function public.validar_unidad_detalle_compra();
 
 alter table public.rollo_movimientos enable row level security;
+
+-- Si el rollo ya tiene una línea de compra, la unidad de origen queda inmutable.
+create or replace function public.bloquear_cambio_unidad_rollo_comprado()
+returns trigger language plpgsql as $$
+begin
+  if new.unidad_ingreso <> old.unidad_ingreso
+     and exists (select 1 from public.detalle_compra where id_rollo = old.id_rollo) then
+    raise exception 'No se puede cambiar la unidad de ingreso de un rollo que ya tiene una compra asociada.';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists rollos_unidad_origen_immutable_trg on public.rollos;
+create trigger rollos_unidad_origen_immutable_trg
+before update of unidad_ingreso on public.rollos
+for each row execute function public.bloquear_cambio_unidad_rollo_comprado();
