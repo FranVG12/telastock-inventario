@@ -311,6 +311,7 @@ export function ProductionModule({
   const [variantName, setVariantName] = useState('');
   const [variantPackQuantity, setVariantPackQuantity] = useState('');
   const [variantPackLabel, setVariantPackLabel] = useState('');
+  const [variantAttributes, setVariantAttributes] = useState('');
   const [variantTextileId, setVariantTextileId] = useState('');
   const [variantTextileColorId, setVariantTextileColorId] = useState('');
   const [showVariantForm, setShowVariantForm] = useState(false);
@@ -426,7 +427,7 @@ export function ProductionModule({
     tell('Insumo registrado. Ahora agrega sus variantes comerciales.');
   }
   function openVariant(supplyId: string) {
-    setVariantSupplyId(supplyId); setVariantName(''); setVariantPackQuantity(''); setVariantPackLabel('');
+    setVariantSupplyId(supplyId); setVariantName(''); setVariantPackQuantity(''); setVariantPackLabel(''); setVariantAttributes('');
     setVariantTextileId(''); setVariantTextileColorId(''); setShowVariantForm(true);
   }
   function saveVariant(event: FormEvent) {
@@ -443,7 +444,7 @@ export function ProductionModule({
       if (!color) return tell('El color no pertenece a la tela seleccionada.', 'error');
     }
     if (data.variants.some((x) => x.supplyId === variantSupplyId && x.name.toLocaleLowerCase('es') === variantName.trim().toLocaleLowerCase('es'))) return tell('Esa variante ya existe para el insumo.', 'error');
-    const row: SupplyVariant = { id: id(), supplyId: variantSupplyId, name: variantName.trim(), attributes: {}, textileId: variantTextileId || null, textileColorId: variantTextileColorId || null, purchasePackQuantity: packQuantity, purchasePackLabel: variantPackLabel.trim(), active: true };
+    const row: SupplyVariant = { id: id(), supplyId: variantSupplyId, name: variantName.trim(), attributes: parseAttributes(variantAttributes), textileId: variantTextileId || null, textileColorId: variantTextileColorId || null, purchasePackQuantity: packQuantity, purchasePackLabel: variantPackLabel.trim(), active: true };
     setData((current) => ({ ...current, variants: [...current.variants, row] }));
     setShowVariantForm(false); tell('Variante registrada.');
   }
@@ -623,7 +624,7 @@ export function ProductionModule({
           {ownVariants.map((variant) => {
             const stock = supply.stockMode === 'total' ? stockForVariant(variant, null) : sizes.reduce((sum, size) => sum + stockForVariant(variant, size.id), 0);
             return <div className="production-variant" key={variant.id}>
-              <div><strong>{variant.name}</strong><small>{variant.textileId ? 'Vinculado a tela: ' + textileName(variant.textileId) : variant.purchasePackQuantity ? 'Paquete: ' + format(variant.purchasePackQuantity) + ' ' + unitLabel[supply.baseUnit] + (variant.purchasePackLabel ? ' · ' + variant.purchasePackLabel : '') : 'Variante de inventario'}</small></div>
+              <div><strong>{variant.name}</strong><small>{variant.textileId ? 'Vinculado a tela: ' + textileName(variant.textileId) : variant.purchasePackQuantity ? 'Paquete: ' + format(variant.purchasePackQuantity) + ' ' + unitLabel[supply.baseUnit] + (variant.purchasePackLabel ? ' · ' + variant.purchasePackLabel : '') : 'Variante de inventario'}</small>{Object.entries(variant.attributes).map(([key, value]) => <small key={key}>{key}: {value}</small>)}</div>
               <div className="production-variant-stock"><strong>{format(stock)}</strong><small>{unitLabel[supply.baseUnit]}</small></div>
               {!variant.textileId && <button className="text-action" onClick={() => { setStockVariantId(variant.id); setStockSizeId(''); setStockQuantity(''); setShowStockForm(true); }}>Registrar stock</button>}
             </div>;
@@ -748,6 +749,7 @@ export function ProductionModule({
       <form className="production-form" onSubmit={saveVariant}>
         <label className="field-label">Nombre de variante<input className="large-input" value={variantName} onChange={(e) => setVariantName(e.target.value)} placeholder="Ej. Negro · 3.5 cm" required /></label>
         <div className="production-form-grid"><label className="field-label">Cantidad por presentación<input className="large-input" type="number" min="0.001" step="0.001" value={variantPackQuantity} onChange={(e) => setVariantPackQuantity(e.target.value)} placeholder="Ej. 40" /></label><label className="field-label">Presentación<input className="large-input" value={variantPackLabel} onChange={(e) => setVariantPackLabel(e.target.value)} placeholder="Rollo, cono, docena…" /></label></div>
+        <label className="field-label">Características de esta variante<textarea className="large-input" rows={3} value={variantAttributes} onChange={(e) => setVariantAttributes(e.target.value)} placeholder={'Una por línea. Ejemplo:\nColor: Negro\nAncho: 3.5 cm\nMaterial: Poliéster\nRigidez: Media'} /></label>
         {textileContext.telas.length > 0 && <div className="production-link-textile"><strong>Vincular con una tela existente (opcional)</strong><label className="field-label">Tela<select className="large-input" value={variantTextileId} onChange={(e) => { setVariantTextileId(e.target.value); setVariantTextileColorId(''); }}><option value="">Sin vincular</option>{textileContext.telas.map((x) => <option key={x.id} value={x.id}>{x.nombreTela}</option>)}</select></label>
           {variantTextileId && <label className="field-label">Color de esa tela<select className="large-input" value={variantTextileColorId} onChange={(e) => setVariantTextileColorId(e.target.value)}><option value="">Seleccionar color</option>{textileColorOptions.map((x) => <option key={x.id} value={x.id}>{textileContext.colores.find((c) => c.id === x.idColor)?.nombre ?? 'Color'}</option>)}</select></label>}
         </div>}
