@@ -226,7 +226,7 @@ export function FabricModule({ view }: { view: FabricView }) {
   const [showPurchaseForm, setShowPurchaseForm] = useState(false);
   const [showRolloDetail, setShowRolloDetail] = useState(false);
   const [showRollMovement, setShowRollMovement] = useState(false);
-  const [rollMovementForm, setRollMovementForm] = useState<{ unidad: FabricUnit; cantidad: string; nota: string }>({ unidad: 'KG', cantidad: '', nota: 'Consumo para corte' });
+  const [rollMovementForm, setRollMovementForm] = useState<{ unidad: FabricUnit; cantidad: string; medidaComplementaria: string; nota: string }>({ unidad: 'KG', cantidad: '', medidaComplementaria: '', nota: 'Consumo para corte' });
   const [showMoreRollo, setShowMoreRollo] = useState(false);
   const [selectedRolloId, setSelectedRolloId] = useState<string | null>(null);
   const [telaForm, setTelaForm] = useState<TelaForm>(blankTela);
@@ -433,7 +433,7 @@ export function FabricModule({ view }: { view: FabricView }) {
   }
 
   function openRollMovement(roll: FabricRoll) {
-    setRollMovementForm({ unidad: roll.unidadIngreso, cantidad: '', nota: 'Consumo para corte' });
+    setRollMovementForm({ unidad: roll.unidadIngreso, cantidad: '', medidaComplementaria: '', nota: 'Consumo para corte' });
     setShowRollMovement(true);
   }
   function saveRollMovement(event: FormEvent) {
@@ -445,23 +445,39 @@ export function FabricModule({ view }: { view: FabricView }) {
     const current = rollMovementForm.unidad === 'KG' ? roll.pesoKg : roll.metros;
     if (current === null) return tell(`No hay una medición real en ${rollMovementForm.unidad} para este rollo. Registra primero esa medida; no se hará una conversión estimada.`, 'error');
     if (quantity > current) return tell(`No puedes retirar ${nfmt.format(quantity)} ${rollMovementForm.unidad}: solo hay ${nfmt.format(current)} disponible.`, 'error');
+    const otherUnit: FabricUnit = rollMovementForm.unidad === 'KG' ? 'M' : 'KG';
+    const otherCurrent = otherUnit === 'KG' ? roll.pesoKg : roll.metros;
+    const otherEntered = nullableNumber(rollMovementForm.medidaComplementaria);
+    if (otherEntered !== null && (!Number.isFinite(otherEntered) || otherEntered < 0)) return tell(`La nueva medición en ${otherUnit} debe ser un número igual o mayor que cero, o quedar vacía.`, 'error');
     const next = Number((current - quantity).toFixed(3));
     const now = new Date().toISOString();
+    // Al consumir por una dimensión, la otra medición previa deja de representar el sobrante.
+    // Se conserva solo si el operario registra expresamente una nueva medición real.
+    const nextOther = rollMovementForm.medidaComplementaria.trim() === '' ? null : otherEntered;
     const updated: FabricRoll = {
       ...roll,
-      pesoKg: rollMovementForm.unidad === 'KG' ? next : roll.pesoKg,
-      metros: rollMovementForm.unidad === 'M' ? next : roll.metros,
-      estado: (rollMovementForm.unidad === 'KG' ? next : roll.pesoKg ?? 0) === 0 && (rollMovementForm.unidad === 'M' ? next : roll.metros ?? 0) === 0 ? 'agotado' : roll.estado,
+      pesoKg: rollMovementForm.unidad === 'KG' ? next : nextOther,
+      metros: rollMovementForm.unidad === 'M' ? next : nextOther,
+      estado: next === 0 && (nextOther === null || nextOther === 0) ? 'agotado' : roll.estado,
       updatedAt: now,
     };
     const movement: RollMovement = {
       id: id(), idRollo: roll.id, fecha: now, tipo: 'consumo', unidad: rollMovementForm.unidad,
       delta: -quantity, cantidadAnterior: current, cantidadNueva: next, nota: rollMovementForm.nota.trim() || 'Consumo de tela',
     };
-    if (!persist({ ...data, rollos: data.rollos.map((x) => x.id === roll.id ? updated : x), rolloMovimientos: [...data.rolloMovimientos, movement] })) return;
+    const measurementMovement: RollMovement | null = otherCurrent === nextOther ? null : {
+      id: id(), idRollo: roll.id, fecha: now, tipo: 'medicion', unidad: otherUnit, delta: null,
+      cantidadAnterior: otherCurrent, cantidadNueva: nextOther,
+      nota: nextOther === null ? `Medición ${otherUnit} no disponible después del consumo; no se estimó el sobrante` : `Nueva medición real del sobrante en ${otherUnit}`,
+    };
+    if (!persist({
+      ...data,
+      rollos: data.rollos.map((x) => x.id === roll.id ? updated : x),
+      rolloMovimientos: [...data.rolloMovimientos, movement, ...(measurementMovement ? [measurementMovement] : [])],
+    })) return;
     setShowRollMovement(false);
-    setRollMovementForm({ unidad: updated.unidadIngreso, cantidad: '', nota: 'Consumo para corte' });
-    tell(`Consumo registrado. Saldo real: ${nfmt.format(next)} ${movement.unidad}.`);
+    setRollMovementForm({ unidad: updated.unidadIngreso, cantidad: '', medidaComplementaria: '', nota: 'Consumo para corte' });
+    tell(`Consumo registrado. Saldo real: ${nfmt.format(next)} ${movement.unidad}. La medición complementaria quedó ${nextOther === null ? 'sin determinar' : 'actualizada con el valor ingresado'}.`);
   }
 
   function openSupplier(supplier?: Supplier) {
