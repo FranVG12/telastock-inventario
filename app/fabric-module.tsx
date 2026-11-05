@@ -453,6 +453,68 @@ export function FabricModule({ view }: { view: FabricView }) {
     if (!persist({ ...data, telas: data.telas.map((x) => x.id === tela.id ? { ...x, activo: !x.activo, updatedAt: new Date().toISOString() } : x) })) return;
     tell(tela.activo ? 'Tela desactivada. Su inventario e historial permanecen.' : 'Tela activada.');
   }
+
+  function openInlineColor(target: InlineColorTarget, telaId: string, lineIndex: number | null = null, variantId?: string) {
+    const variant = variantId ? telaColorById.get(variantId) : undefined;
+    const color = variant ? colorById.get(variant.idColor) : undefined;
+    setInlineColorForm({
+      target, telaId, lineIndex, idTelaColor: variant?.id ?? null, nombre: color?.nombre ?? '',
+      hexadecimal: variant?.hexadecimal ?? '',
+      cmykC: inputNumber(variant?.cmykC ?? null), cmykM: inputNumber(variant?.cmykM ?? null),
+      cmykY: inputNumber(variant?.cmykY ?? null), cmykK: inputNumber(variant?.cmykK ?? null),
+    });
+  }
+  function saveInlineColor(event: FormEvent) {
+    event.preventDefault();
+    if (!inlineColorForm) return;
+    const name = inlineColorForm.nombre.trim();
+    if (!data.telas.some((x) => x.id === inlineColorForm.telaId)) return tell('Selecciona una tela válida para asociar este color.', 'error');
+    if (!name) return tell('Escribe el nombre del color.', 'error');
+    const rawHex = inlineColorForm.hexadecimal.trim();
+    const expandedHex = /^#[0-9A-Fa-f]{3}$/.test(rawHex) ? '#' + rawHex.slice(1).split('').map((x) => x + x).join('') : rawHex;
+    const hexadecimal = expandedHex ? expandedHex.toUpperCase() : null;
+    if (hexadecimal && !/^#[0-9A-F]{6}$/.test(hexadecimal)) return tell('El HEX debe tener formato #RRGGBB, por ejemplo #1E5AA8.', 'error');
+    const cmykRaw = [inlineColorForm.cmykC, inlineColorForm.cmykM, inlineColorForm.cmykY, inlineColorForm.cmykK];
+    const cmyk = cmykRaw.map((x) => nullableNumber(x));
+    if (cmyk.some((x) => x !== null && (!Number.isFinite(x) || x < 0 || x > 100))) return tell('Cada valor CMYK debe estar entre 0 y 100.', 'error');
+    if (cmyk.some((x) => x !== null) && cmyk.some((x) => x === null)) return tell('Completa los cuatro valores CMYK o déjalos todos vacíos.', 'error');
+    const now = new Date().toISOString();
+    const currentVariant = inlineColorForm.idTelaColor ? telaColorById.get(inlineColorForm.idTelaColor) : undefined;
+    const existingColor = currentVariant ? colorById.get(currentVariant.idColor) : data.colores.find((x) => x.nombre.toLocaleLowerCase('es') === name.toLocaleLowerCase('es'));
+    const color: ColorDefinition = existingColor ?? { id: id(), nombre: name, createdAt: now, updatedAt: now };
+    const duplicate = data.telaColores.find((x) => x.idTela === inlineColorForm.telaId && x.idColor === color.id && x.id !== currentVariant?.id);
+    if (duplicate && !currentVariant) {
+      const updatedVariant: TextileColor = { ...duplicate, hexadecimal, cmykC: cmyk[0], cmykM: cmyk[1], cmykY: cmyk[2], cmykK: cmyk[3], activo: true, updatedAt: now };
+      const next = { ...data, colores: existingColor ? data.colores : [...data.colores, color], telaColores: data.telaColores.map((x) => x.id === duplicate.id ? updatedVariant : x) };
+      if (!persist(next)) return;
+      if (inlineColorForm.target === 'rollo') setRolloForm((x) => ({ ...x, idTelaColor: updatedVariant.id, color: color.nombre }));
+      if (inlineColorForm.target === 'compra' && inlineColorForm.lineIndex !== null) updatePurchaseLine(inlineColorForm.lineIndex, { idTelaColor: updatedVariant.id, color: color.nombre });
+      setInlineColorForm(null);
+      tell('Se actualizaron los códigos del color para esta tela.');
+      return;
+    }
+    const variant: TextileColor = {
+      id: currentVariant?.id ?? id(), idTela: inlineColorForm.telaId, idColor: color.id,
+      hexadecimal, cmykC: cmyk[0], cmykM: cmyk[1], cmykY: cmyk[2], cmykK: cmyk[3],
+      activo: true, createdAt: currentVariant?.createdAt ?? now, updatedAt: now,
+    };
+    const next = {
+      ...data,
+      colores: existingColor ? data.colores : [...data.colores, color],
+      telaColores: currentVariant
+        ? data.telaColores.map((x) => x.id === currentVariant.id ? variant : x)
+        : [...data.telaColores, variant],
+    };
+    if (!persist(next)) return;
+    if (inlineColorForm.target === 'rollo') setRolloForm((x) => ({ ...x, idTelaColor: variant.id, color: color.nombre }));
+    if (inlineColorForm.target === 'compra' && inlineColorForm.lineIndex !== null) updatePurchaseLine(inlineColorForm.lineIndex, { idTelaColor: variant.id, color: color.nombre });
+    setInlineColorForm(null);
+    tell(currentVariant ? 'Códigos del color actualizados para esta tela.' : 'Color asociado a la tela y agregado al catálogo.');
+  }
+  function toggleTelaColor(variant: TextileColor) {
+    if (!persist({ ...data, telaColores: data.telaColores.map((x) => x.id === variant.id ? { ...x, activo: !x.activo, updatedAt: new Date().toISOString() } : x) })) return;
+    tell(variant.activo ? 'Color desactivado para esta tela. El historial de rollos se conserva.' : 'Color activado para esta tela.');
+  }
   function openRollo(roll?: FabricRoll) {
     setShowMoreRollo(false);
     const tela = roll ? telaById.get(roll.idTela) : data.telas.find((x) => x.activo);
