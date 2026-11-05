@@ -761,19 +761,10 @@ export function FabricModule({ view }: { view: FabricView }) {
       const quantity = Number(line.cantidad);
       const price = Number(line.precio);
       const colorVariant = line.idTelaColor ? telaColorById.get(line.idTelaColor) : undefined;
-      if (!tela || !validQty(quantity) || !line.precio.trim() || !Number.isFinite(price) || price < 0) return tell('Cada línea necesita una tela, cantidad mayor que cero y un precio unitario explícito (0 también es válido).', 'error');
+      if (!tela || !validQty(quantity) || !line.precio.trim() || !Number.isFinite(price) || price < 0) return tell('Cada tarjeta necesita tela, cantidad y precio unitario. El precio se propone desde la última compra al proveedor y puedes corregirlo.', 'error');
       if (line.idTelaColor && (!colorVariant || colorVariant.idTela !== tela.id || !colorVariant.activo)) return tell('El color seleccionado no pertenece a la tela indicada o está inactivo.', 'error');
       if ([nullableNumber(line.pesoKg), nullableNumber(line.metros)].some((n) => n !== null && (!Number.isFinite(n) || n < 0))) return tell('Una medición real es inválida. Deja el campo vacío cuando no conozcas la medida.', 'error');
-      if (line.idRollo && line.cantidadesAdicionales.trim()) return tell('Para agregar rollos adicionales a una compra existente, usa “Añadir rollo” y crea una nueva línea.', 'error');
       expandedLines.push({ ...line, quantity, price, tela });
-      if (!line.idRollo && line.cantidadesAdicionales.trim()) {
-        const extras = line.cantidadesAdicionales.split(/[;,\s]+/).map((x) => x.trim()).filter(Boolean).map(Number);
-        if (!extras.length || extras.some((x) => !validQty(x))) return tell('Las cantidades adicionales deben ser números mayores que cero, separados por coma.', 'error');
-        extras.forEach((extraQuantity) => expandedLines.push({
-          ...line, idRollo: null, idDetalle: null, quantity: extraQuantity, price, tela,
-          pesoKg: '', metros: '', cantidadesAdicionales: '',
-        }));
-      }
     }
     const now = new Date().toISOString();
     const purchaseId = purchaseForm.id ?? id();
