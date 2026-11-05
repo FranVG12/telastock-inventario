@@ -105,6 +105,8 @@ alter table public.model_pieces
   add column if not exists fabric_slot text not null default 'principal';
 alter table public.model_pieces
   add column if not exists color_id uuid null;
+alter table public.model_pieces
+  add column if not exists color_override boolean not null default true;
 
 alter table public.model_pieces
   drop constraint if exists model_pieces_fabric_slot_check;
