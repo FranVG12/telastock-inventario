@@ -137,7 +137,6 @@ export type ProductComponentSelection = {
 export type ConfiguredProductModel = {
   id: string;
   name: string;
-  family: string;
   baseModelId: string;
   description: string;
   components: ProductComponentSelection[];
@@ -533,7 +532,6 @@ export function ProductionModule({
   const [componentDraft, setComponentDraft] = useState<GarmentComponent | null>(null);
   const [recipeDraft, setRecipeDraft] = useState<FamilyRecipe | null>(null);
   const [productName, setProductName] = useState('');
-  const [productFamily, setProductFamily] = useState('polo');
   const [productBaseId, setProductBaseId] = useState('');
   const [productDescription, setProductDescription] = useState('');
   const [productComponentIds, setProductComponentIds] = useState<string[]>([]);
@@ -574,7 +572,12 @@ export function ProductionModule({
 
   useEffect(() => {
     const loaded = loadLocal();
-    setData(loaded.data);
+    const productModelsWithoutLegacyFamily = loaded.data.productModels.map((product) => {
+      const normalized = { ...product } as ConfiguredProductModel & { family?: string };
+      delete normalized.family;
+      return normalized;
+    });
+    setData({ ...loaded.data, productModels: productModelsWithoutLegacyFamily });
     setStorageSafe(loaded.safe);
     if (loaded.safe) localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '2');
     else setNotice({ text: loaded.warning, kind: 'error' });
@@ -864,10 +867,12 @@ export function ProductionModule({
   }
   function saveProduct(event: FormEvent) {
     event.preventDefault();
-    if (!productName.trim() || !productBaseId || !baseModels.some((x) => x.id === productBaseId)) return tell('Completa el nombre y selecciona un patrón base existente.', 'error');
+    const selectedBaseModel = baseModels.find((x) => x.id === productBaseId);
+    if (!productName.trim() || !selectedBaseModel) return tell('Completa el nombre y selecciona un patrón base existente.', 'error');
+    if (!selectedBaseModel.family) return tell('El patrón base no tiene familia asignada. Edítalo en Modelos antes de crear el modelo comercial.', 'error');
     if (data.productModels.some((x) => x.name.toLocaleLowerCase('es') === productName.trim().toLocaleLowerCase('es'))) return tell('Ya existe un modelo configurado con ese nombre.', 'error');
     const row: ConfiguredProductModel = {
-      id: id(), name: productName.trim(), family: productFamily, baseModelId: productBaseId, description: productDescription.trim(),
+      id: id(), name: productName.trim(), baseModelId: productBaseId, description: productDescription.trim(),
       components: productComponentIds.map((componentId) => ({ id: id(), componentId, quantity: 1, location: '', variantOverrides: {} })),
       additionalMaterials: [], active: true, createdAt: now(), updatedAt: now(),
     };
@@ -941,7 +946,8 @@ export function ProductionModule({
     if (!activeProduct) return { rows: [] as Array<{ variantId: string; total: number; bySize: Record<string, number>; missingSizes: string[]; available: number; shortage: number; packs: number | null }>, unresolved: [] as string[] };
     const requirements: MaterialRequirement[] = [];
     const multipliers = new Map<string, number>();
-    const recipes = data.familyRecipes.filter((x) => x.active && x.family === activeProduct.family);
+    const inheritedFamily = baseModels.find((model) => model.id === activeProduct.baseModelId)?.family ?? '';
+    const recipes = inheritedFamily ? data.familyRecipes.filter((x) => x.active && x.family === inheritedFamily) : [];
     recipes.forEach((recipe) => recipe.materials.forEach((material) => { requirements.push(material); multipliers.set(material.id, 1); }));
     activeProduct.components.forEach((selected) => {
       const component = data.components.find((x) => x.id === selected.componentId && x.active);
@@ -1679,8 +1685,8 @@ export function ProductionModule({
       <form className="production-form" onSubmit={saveProduct}>
         <div className="production-form-grid">
           <label className="field-label">Nombre comercial<input className="large-input" value={productName} onChange={(e) => setProductName(e.target.value)} placeholder="Ej. Polo escolar cuello camisero" required /></label>
-          <label className="field-label">Familia<select className="large-input" value={productFamily} onChange={(e) => setProductFamily(e.target.value)}>{families.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}</select></label>
           <label className="field-label">Patrón base<select className="large-input" value={productBaseId} onChange={(e) => setProductBaseId(e.target.value)} required><option value="">Seleccionar patrón existente</option>{baseModels.map((x) => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label>
+          <label className="field-label">Familia heredada del patrón base<input className="large-input" value={families.find((x) => x.value === baseModels.find((model) => model.id === productBaseId)?.family)?.label ?? ''} placeholder="Selecciona un patrón base" readOnly /><small>No se edita en el modelo comercial. Se toma del patrón base seleccionado.</small></label>
         </div>
         <label className="field-label">Descripción (opcional)<input className="large-input" value={productDescription} onChange={(e) => setProductDescription(e.target.value)} placeholder="Color, temporada, cliente…" /></label>
         <div className="production-subheading"><strong>Componentes y acabados</strong><span className="production-muted">Selecciona los que lleva esta prenda</span></div>
@@ -1694,8 +1700,9 @@ export function ProductionModule({
       <div className="production-subheading"><strong>Modelos configurados</strong><span className="count-badge">{data.productModels.filter((x) => x.active).length}</span></div>
       <div className="production-list">{data.productModels.filter((x) => x.active).map((product) => {
         const base = baseModels.find((x) => x.id === product.baseModelId);
+        const familyLabel = families.find((x) => x.value === base?.family)?.label ?? (base?.family || 'Familia sin definir');
         return <article className="production-card" key={product.id}>
-          <div className="production-card-heading"><div><strong>{product.name}</strong><span>{families.find((x) => x.value === product.family)?.label ?? product.family} · Patrón: {base?.name ?? 'No disponible'}</span></div><button className="text-action danger-action" onClick={() => deleteProduct(product)}>Archivar</button></div>
+          <div className="production-card-heading"><div><strong>{product.name}</strong><span>{familyLabel} · Patrón: {base?.name ?? 'No disponible'}</span></div><button className="text-action danger-action" onClick={() => deleteProduct(product)}>Archivar</button></div>
           <div className="production-attributes">{product.components.map((x) => <span key={x.id}>{data.components.find((c) => c.id === x.componentId)?.name ?? 'Componente archivado'} ×{x.quantity}</span>)}</div>
           <small className="production-muted">El patrón base y su inventario de piezas permanecen independientes.</small>
         </article>;
