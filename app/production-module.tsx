@@ -223,7 +223,6 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
     if (new Set(ids).size !== ids.length) throw new Error('Hay identificadores duplicados en "' + key + '".');
     (output as unknown as Record<string, unknown>)[key] = rows;
   }
-  const supplyIds = new Set(output.supplies.map((x) => x.id));
   const variantIds = new Set(output.variants.map((x) => x.id));
   const componentIds = new Set(output.components.map((x) => x.id));
   const allComponentPieces = output.components.flatMap((component) => Array.isArray(component.pieces) ? component.pieces.filter((piece) => piece && typeof piece === 'object').map((piece) => ({ componentId: component.id, piece })) : []);
@@ -1012,7 +1011,7 @@ export function ProductionModule({
       return { variantId, total, bySize: value.bySize, missingSizes: [...new Set(value.missingSizes)], available, shortage, packs };
     });
     return { rows, unresolved };
-  }, [activeProduct, data.familyRecipes, data.components, data.productionOrders, variantsBySupply, supplies, sizes, baseModels, basePieces, baseMovements, planCounts, textileContext, data.supplyMovements, stockForVariant]);
+  }, [activeProduct, data.familyRecipes, data.components, data.productionOrders, variantsBySupply, supplies, sizes, baseModels, basePieces, baseMovements, planCounts, textileContext, data.supplyMovements, stockForVariant, ordersHoldingStock, reservedSupplyQuantity]);
 
 
   function latestUnitCost(variant: SupplyVariant, unit: StockUnit): number | null {
