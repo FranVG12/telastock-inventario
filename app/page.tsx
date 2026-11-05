@@ -667,6 +667,8 @@ export default function Home() {
       const hasText = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
       const groupIds = new Set(importedGroups.map((item) => item.id));
       const sizeIds = new Set(importedSizes.map((item) => item.id));
+      const modelIds = new Set(importedModels.map((item) => item.id));
+      const pieceIds = new Set(importedPieces.map((item) => item.id));
       const productionSizeLinksValid =
         importedProduction.supplyMovements.every((movement) => movement.sizeId === null || sizeIds.has(movement.sizeId)) &&
         importedProduction.supplyPurchaseDetails.every((detail) => detail.sizeId === null || sizeIds.has(detail.sizeId)) &&
@@ -681,8 +683,6 @@ export default function Home() {
           order.rollAllocations.every((allocation) => importedFabric.rollos.some((roll) => roll.id === allocation.rollId))
         );
       if (!productionSizeLinksValid) throw new Error('Hay órdenes, movimientos o reservas vinculados a tallas, moldes o rollos que no existen en este respaldo.');
-      const modelIds = new Set(importedModels.map((item) => item.id));
-      const pieceIds = new Set(importedPieces.map((item) => item.id));
       const importedColorMap = new Map(importedFabric.colores.map((color) => [color.nombre.toLocaleLowerCase('es'), color]));
       importedPieces.forEach((piece) => {
         const legacyName = (piece.color ?? '').trim();
