@@ -171,3 +171,53 @@ comment on table public.supply_stock_movements is
   'Ledger de entradas, salidas y ajustes de variantes de insumos; no almacena saldos editables.';
 comment on table public.configured_product_models is
   'Configuración comercial de una prenda que referencia un patrón base sin apropiarse de su stock de piezas.';
+
+
+-- Prevent concurrent withdrawals from taking an inventory balance below zero.
+create or replace function public.validate_supply_stock_movement()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_mode text;
+  v_balance numeric(18,4);
+  v_lock_key bigint;
+begin
+  select s.stock_mode into v_mode
+  from public.supply_variants v
+  join public.supply_catalog s on s.id = v.supply_id
+  where v.id = new.variant_id;
+
+  if v_mode is null then
+    raise exception 'La variante de insumo no existe.';
+  end if;
+
+  if (v_mode = 'total' and new.size_id is not null)
+     or (v_mode = 'talla' and new.size_id is null) then
+    raise exception 'La talla indicada no coincide con la modalidad de stock del insumo.';
+  end if;
+
+  if (new.movement_type = 'entrada' and new.delta_quantity <= 0)
+     or (new.movement_type = 'salida' and new.delta_quantity >= 0) then
+    raise exception 'El signo de la cantidad no coincide con el tipo de movimiento.';
+  end if;
+
+  v_lock_key := hashtextextended(new.variant_id::text || ':' || coalesce(new.size_id::text, 'total'), 0);
+  perform pg_advisory_xact_lock(v_lock_key);
+
+  select coalesce(sum(delta_quantity), 0)
+    into v_balance
+  from public.supply_stock_movements
+  where variant_id = new.variant_id
+    and size_id is not distinct from new.size_id;
+
+  if v_balance + new.delta_quantity < 0 then
+    raise exception 'Stock insuficiente para registrar la salida.';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists supply_stock_movement_guard on public.supply_stock_movements;
+create trigger supply_stock_movement_guard
+before insert on public.supply_stock_movements
+for each row execute function public.validate_supply_stock_movement();
