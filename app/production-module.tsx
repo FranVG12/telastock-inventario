@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { getCompleteUnits, getPieceStock, getSymmetricStock, type PieceMovement as DomainPieceMovement, type ManufacturingModel, type ModelPiece, type Size } from '@/lib/inventory-domain';
+import { getCompleteUnits, getPieceStock, getSymmetricStock, type PieceMovement as DomainPieceMovement, type ManufacturingModel, type ModelPiece, type Size, type SizeGroup } from '@/lib/inventory-domain';
 import { FABRIC_STORAGE_KEYS } from '@/app/fabric-module';
 
 export type ProductionView = 'insumos' | 'compras-avios' | 'componentes' | 'modelos-producto' | 'recetas' | 'planificacion';
@@ -395,13 +395,14 @@ function variantLabel(variant: SupplyVariant, variants: SupplyVariant[], supplie
 }
 
 export function ProductionModule({
-  view, baseModels, basePieces, baseMovements, sizes, onNavigate,
+  view, baseModels, basePieces, baseMovements, sizes, sizeGroups, onNavigate,
 }: {
   view: ProductionView;
   baseModels: ManufacturingModel[];
   basePieces: ModelPiece[];
   baseMovements: DomainPieceMovement[];
   sizes: Size[];
+  sizeGroups: SizeGroup[];
   onNavigate: (view: ProductionView) => void;
 }) {
   const [data, setData] = useState<ProductionBackupData>(emptyProductionBackupData);
@@ -533,6 +534,8 @@ export function ProductionModule({
   supplies.forEach((supply) => allSuppliesCache.set(supply.id, supply));
   const variants = useMemo(() => data.variants.filter((x) => x.active), [data.variants]);
   const variantsBySupply = useMemo(() => new Map(data.variants.map((x) => [x.id, x])), [data.variants]);
+  const sizeDisplay = (size: Size) => size.label + ' · ' + (sizeGroups.find((group) => group.id === size.groupId)?.name ?? 'Grupo');
+
 
   function tell(text: string, kind: 'success' | 'error' | 'info' = 'success') { setNotice({ text, kind }); }
   function parseAttributes(value: string): Record<string, string> {
@@ -970,7 +973,7 @@ export function ProductionModule({
             {supply?.stockMode === 'talla' && <label className="field-label">Talla donde ingresará el stock
               <select className="large-input" value={line.sizeId} onChange={(event) => updatePurchaseLine(line.id, { sizeId: event.target.value })} required>
                 <option value="">Seleccionar talla</option>
-                {sizes.map((size) => <option value={size.id} key={size.id}>{size.label}</option>)}
+                {sizes.map((size) => <option value={size.id} key={size.id}>{sizeDisplay(size)}</option>)}
               </select>
             </label>}
             {variant && supply && <div className="production-purchase-meta">
@@ -1063,7 +1066,7 @@ export function ProductionModule({
             <button className="button secondary" onClick={() => openComponentPieceMovement(selectedStockComponent, piece)}>Registrar movimiento</button>
           </div>
           <div className="production-component-stock-sizes">
-            {sizes.map((size) => <div key={size.id}><span>{size.label}</span><strong>{componentPieceStockLabel(piece, size.id)}</strong></div>)}
+            {sizes.map((size) => <div key={size.id}><span>{size.label}</span><small>{sizeGroups.find((group) => group.id === size.groupId)?.name ?? 'Grupo'}</small><strong>{componentPieceStockLabel(piece, size.id)}</strong></div>)}
           </div>
         </article>)}
         {selectedStockComponent.pieces.length === 0 && <div className="empty">Este componente todavía no tiene piezas de patronaje.</div>}
@@ -1195,7 +1198,7 @@ export function ProductionModule({
     {showStockForm && <div className="modal-backdrop"><section className="modal production-modal" role="dialog" aria-modal="true"><div className="modal-heading"><div><h2>Movimiento de stock</h2><p>Registra una entrada o salida de la variante.</p></div><button className="icon-button" onClick={() => setShowStockForm(false)}>×</button></div>
       <form className="production-form" onSubmit={saveStock}>
         <label className="field-label">Operación<select className="large-input" value={stockDirection} onChange={(e) => setStockDirection(e.target.value as 'entrada' | 'salida')}><option value="entrada">Entrada</option><option value="salida">Salida</option></select></label>
-        {(() => { const variant = variantsBySupply.get(stockVariantId); const supply = variant ? supplies.find((x) => x.id === variant.supplyId) : undefined; return supply?.stockMode === 'talla' ? <label className="field-label">Talla<select className="large-input" value={stockSizeId} onChange={(e) => setStockSizeId(e.target.value)}><option value="">Seleccionar</option>{sizes.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}</select></label> : null; })()}
+        {(() => { const variant = variantsBySupply.get(stockVariantId); const supply = variant ? supplies.find((x) => x.id === variant.supplyId) : undefined; return supply?.stockMode === 'talla' ? <label className="field-label">Talla<select className="large-input" value={stockSizeId} onChange={(e) => setStockSizeId(e.target.value)}><option value="">Seleccionar</option>{sizes.map((x) => <option key={x.id} value={x.id}>{sizeDisplay(x)}</option>)}</select></label> : null; })()}
         <label className="field-label">Cantidad<input className="large-input" type="number" min="0.001" step="0.001" value={stockQuantity} onChange={(e) => setStockQuantity(e.target.value)} required /></label>
         <label className="field-label">Observación<input className="large-input" value={stockNote} onChange={(e) => setStockNote(e.target.value)} /></label>
         <div className="form-actions"><button type="button" className="button secondary" onClick={() => setShowStockForm(false)}>Cancelar</button><button className="button primary">Guardar movimiento</button></div>
