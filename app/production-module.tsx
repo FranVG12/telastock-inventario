@@ -1273,12 +1273,49 @@ export function ProductionModule({
     tell(order.number + ' cancelada. El stock reservado volvió a estar disponible.');
   }
 
-  function completeProductionOrder(orderId: string) {
+  function openProductionOrderCompletion(orderId: string) {
+    const order = data.productionOrders.find((item) => item.id === orderId);
+    if (!order || order.status !== 'en_proceso') return tell('La orden debe estar en proceso antes de registrar su consumo real.', 'error');
+    setCompletionDraft({
+      orderId,
+      materialQuantities: Object.fromEntries(order.materials.map((line) => [line.id, String(line.quantity)])),
+      rollQuantities: Object.fromEntries(order.rollAllocations.map((allocation) => [allocation.id, String(allocation.quantity)])),
+    });
+  }
+
+  function confirmProductionOrderCompletion(event: FormEvent) {
+    event.preventDefault();
+    if (!completionDraft) return;
+    completeProductionOrder(completionDraft);
+  }
+
+  function completeProductionOrder(draft: ProductionOrderCompletionDraft) {
+    const orderId = draft.orderId;
     const order = data.productionOrders.find((item) => item.id === orderId);
     if (!order || order.status !== 'en_proceso') return tell('La orden debe estar en proceso antes de completarla.', 'error');
     const issues: string[] = [];
     const otherOrders = data.productionOrders.filter((item) => item.id !== order.id && holdingStatuses.includes(item.status));
-    for (const line of order.materials) {
+    const actualMaterials: ProductionOrderMaterial[] = order.materials.map((line) => {
+      const raw = draft.materialQuantities[line.id] ?? String(line.quantity);
+      const quantity = Number(raw);
+      const supply = supplies.find((item) => item.id === variantsBySupply.get(line.variantId)?.supplyId);
+      if (raw.trim() === '' || !Number.isFinite(quantity) || quantity < 0 || quantity > line.quantity + 0.00001) {
+        issues.push((supply?.name ?? 'Material') + ': el consumo real debe estar entre cero y lo reservado.');
+      }
+      if (supply?.baseUnit === 'und' && !Number.isInteger(quantity)) {
+        issues.push((supply.name) + ': el consumo real debe ser entero.');
+      }
+      return { ...line, quantity: Number.isFinite(quantity) ? quantity : 0, lineCost: line.unitCost === null ? null : Number((quantity * line.unitCost).toFixed(2)) };
+    });
+    const actualRollAllocations: ProductionOrderRollAllocation[] = order.rollAllocations.map((allocation) => {
+      const raw = draft.rollQuantities[allocation.id] ?? String(allocation.quantity);
+      const quantity = Number(raw);
+      if (raw.trim() === '' || !Number.isFinite(quantity) || quantity < 0 || quantity > allocation.quantity + 0.00001) {
+        issues.push('El consumo real del rollo ' + allocation.rollId + ' debe estar entre cero y la cantidad reservada.');
+      }
+      return { ...allocation, quantity: Number.isFinite(quantity) ? Number(quantity.toFixed(5)) : 0 };
+    });
+    for (const line of actualMaterials) {
       const variant = variantsBySupply.get(line.variantId);
       const supply = variant ? supplies.find((item) => item.id === variant.supplyId) : undefined;
       if (!variant || !supply) { issues.push('Material ya no disponible: ' + line.variantId); continue; }
@@ -1299,12 +1336,12 @@ export function ProductionModule({
       if (currentComponentPieceBalance(line.pieceId, line.sizeId, line.side) - reserved + 0.00001 < line.quantity) issues.push((piece?.name ?? 'Pieza auxiliar') + ': el stock reservado ya no está disponible.');
     }
     const textileMaterials = new Map<string, number>();
-    order.materials.forEach((line) => {
+    actualMaterials.forEach((line) => {
       if (variantsBySupply.get(line.variantId)?.textileId) textileMaterials.set(line.variantId, (textileMaterials.get(line.variantId) ?? 0) + line.quantity);
     });
     for (const [variantId, required] of textileMaterials) {
-      const allocated = order.rollAllocations.filter((allocation) => allocation.variantId === variantId).reduce((sum, allocation) => sum + allocation.quantity, 0);
-      if (Math.abs(allocated - required) > 0.0001) issues.push('Las reservas físicas de tela no coinciden con el consumo de la orden.');
+      const allocated = actualRollAllocations.filter((allocation) => allocation.variantId === variantId).reduce((sum, allocation) => sum + allocation.quantity, 0);
+      if (Math.abs(allocated - required) > 0.0001) issues.push('El consumo real de tela debe coincidir con las cantidades reales asignadas a sus rollos.');
     }
     const fabricRaw = localStorage.getItem(FABRIC_STORAGE_KEYS.rollos);
     const movementRaw = localStorage.getItem(FABRIC_STORAGE_KEYS.rolloMovimientos);
@@ -1320,7 +1357,7 @@ export function ProductionModule({
       return tell('No se puede completar la orden: ' + (error instanceof Error ? error.message : 'respaldo de rollos inválido'), 'error');
     }
     const aggregateAllocations = new Map<string, { rollId: string; variantId: string; unit: 'KG' | 'M'; quantity: number }>();
-    order.rollAllocations.forEach((allocation) => {
+    actualRollAllocations.filter((allocation) => allocation.quantity > 0).forEach((allocation) => {
       const key = allocation.rollId + ':' + allocation.unit;
       const current = aggregateAllocations.get(key);
       aggregateAllocations.set(key, { rollId: allocation.rollId, variantId: allocation.variantId, unit: allocation.unit, quantity: (current?.quantity ?? 0) + allocation.quantity });
@@ -1367,9 +1404,9 @@ export function ProductionModule({
       };
     });
 
-    const supplyMovements: SupplyMovement[] = order.materials.filter((line) => !variantsBySupply.get(line.variantId)?.textileId).map((line) => ({
+    const supplyMovements: SupplyMovement[] = actualMaterials.filter((line) => line.quantity > 0 && !variantsBySupply.get(line.variantId)?.textileId).map((line) => ({
       id: id(), variantId: line.variantId, sizeId: line.sizeId, delta: -line.quantity, kind: 'salida',
-      note: 'Consumo de orden ' + order.number, date: timestamp, sourceProductionOrderId: order.id,
+      note: 'Consumo real de orden ' + order.number, date: timestamp, sourceProductionOrderId: order.id,
     }));
     const componentMovements: ComponentPieceMovement[] = order.componentPieces.map((line) => ({
       id: id(), componentId: line.componentId, pieceId: line.pieceId, sizeId: line.sizeId,
@@ -1388,6 +1425,15 @@ export function ProductionModule({
       componentPieceMovements: [...data.componentPieceMovements, ...componentMovements],
       productionOrders: data.productionOrders.map((item) => item.id === order.id ? {
         ...item, status: 'completada', completedAt: timestamp, updatedAt: timestamp,
+        actualConsumption: {
+          materials: actualMaterials,
+          rollAllocations: actualRollAllocations,
+          materialCost: actualMaterials.some((line) => line.quantity > 0 && line.unitCost === null)
+            ? null
+            : Number(actualMaterials.reduce((sum, line) => sum + (line.lineCost ?? 0), 0).toFixed(2)),
+          missingCostLines: actualMaterials.filter((line) => line.quantity > 0 && line.unitCost === null).length,
+          recordedAt: timestamp,
+        },
       } : item),
     };
 
@@ -1402,8 +1448,9 @@ export function ProductionModule({
       const nextBase = [...baseMovements, ...baseEntries];
       if (!onAddBaseMovements(nextBase)) throw new Error('No se pudo guardar el consumo de piezas del patrón base.');
       setData(nextData);
+      setCompletionDraft(null);
       window.dispatchEvent(new Event('telastock-fabric-data-restored'));
-      tell(order.number + ' completada. Los materiales, rollos y piezas fueron descontados y el historial quedó registrado.');
+      tell(order.number + ' completada. Se registró el consumo real confirmado, los materiales, rollos y piezas fueron descontados.');
     } catch (error) {
       previousProduction.forEach((value, key) => {
         try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch { /* best effort rollback */ }
