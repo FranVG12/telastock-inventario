@@ -407,7 +407,6 @@ export function ProductionModule({
   supplies.forEach((supply) => allSuppliesCache.set(supply.id, supply));
   const variants = useMemo(() => data.variants.filter((x) => x.active), [data.variants]);
   const variantsBySupply = useMemo(() => new Map(data.variants.map((x) => [x.id, x])), [data.variants]);
-  const sizesById = useMemo(() => new Map(sizes.map((x) => [x.id, x])), [sizes]);
 
   function tell(text: string, kind: 'success' | 'error' | 'info' = 'success') { setNotice({ text, kind }); }
   function parseAttributes(value: string): Record<string, string> {
@@ -472,10 +471,6 @@ export function ProductionModule({
     const movement: SupplyMovement = { id: id(), variantId: variant.id, sizeId, delta, kind: stockDirection, note: stockNote.trim(), date: now() };
     setData((current) => ({ ...current, supplyMovements: [...current.supplyMovements, movement] }));
     setShowStockForm(false); setStockQuantity(''); tell('Movimiento de insumo registrado.');
-  }
-  function blankMaterial(): MaterialRequirement {
-    const first = variants[0];
-    return { id: id(), variantId: first?.id ?? '', mode: 'fixed', unit: supplies.find((x) => x.id === first?.supplyId)?.baseUnit ?? 'und', fixedQuantity: 1, bySize: {}, wastePercent: 0 };
   }
   function saveComponent(event: FormEvent) {
     event.preventDefault();
