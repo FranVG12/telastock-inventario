@@ -670,8 +670,17 @@ export default function Home() {
       const productionSizeLinksValid =
         importedProduction.supplyMovements.every((movement) => movement.sizeId === null || sizeIds.has(movement.sizeId)) &&
         importedProduction.supplyPurchaseDetails.every((detail) => detail.sizeId === null || sizeIds.has(detail.sizeId)) &&
-        importedProduction.componentPieceMovements.every((movement) => sizeIds.has(movement.sizeId));
-      if (!productionSizeLinksValid) throw new Error('Hay movimientos o compras de insumos vinculados a tallas que no existen en este respaldo.');
+        importedProduction.componentPieceMovements.every((movement) => sizeIds.has(movement.sizeId)) &&
+        importedProduction.productionOrders.every((order) =>
+          importedModels.some((model) => model.id === order.baseModelId) &&
+          importedProduction.productModels.some((product) => product.id === order.productModelId) &&
+          Object.entries(order.quantities).every(([sizeId, quantity]) => sizeIds.has(sizeId) && Number.isInteger(quantity) && quantity > 0) &&
+          order.materials.every((line) => line.sizeId === null || sizeIds.has(line.sizeId)) &&
+          order.basePieces.every((line) => sizeIds.has(line.sizeId) && pieceIds.has(line.pieceId)) &&
+          order.componentPieces.every((line) => sizeIds.has(line.sizeId)) &&
+          order.rollAllocations.every((allocation) => importedFabric.rollos.some((roll) => roll.id === allocation.rollId))
+        );
+      if (!productionSizeLinksValid) throw new Error('Hay órdenes, movimientos o reservas vinculados a tallas, moldes o rollos que no existen en este respaldo.');
       const modelIds = new Set(importedModels.map((item) => item.id));
       const pieceIds = new Set(importedPieces.map((item) => item.id));
       const importedColorMap = new Map(importedFabric.colores.map((color) => [color.nombre.toLocaleLowerCase('es'), color]));
