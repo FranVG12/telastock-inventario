@@ -24,7 +24,7 @@ export type FabricRoll = {
   fechaIngreso: string; idProveedor: string | null; ubicacion: string;
   estado: RollStatus; nota: string; createdAt: string; updatedAt: string;
 };
-export type Supplier = { id: string; nombre: string; contacto: string; direccion: string; nota: string; createdAt: string; updatedAt: string };
+export type Supplier = { id: string; nombre: string; ruc?: string | null; contacto: string; direccion: string; nota: string; createdAt: string; updatedAt: string };
 export type SupplierPhone = { id: string; idProveedor: string; numero: string; etiqueta: string };
 export type SupplierCategory = { id: string; idProveedor: string; categoria: string };
 export type FabricPurchase = {
@@ -217,7 +217,7 @@ type RolloForm = {
   color: string; pesoKg: string; metros: string; idLote: string; idProveedor: string;
   ubicacion: string; estado: RollStatus; nota: string;
 };
-type SupplierForm = { id: string | null; nombre: string; contacto: string; direccion: string; nota: string; telefonos: { id: string; numero: string; etiqueta: string }[]; categorias: string[] };
+type SupplierForm = { id: string | null; nombre: string; ruc: string; contacto: string; direccion: string; nota: string; telefonos: { id: string; numero: string; etiqueta: string }[]; categorias: string[] };
 type PurchaseLineForm = { idRollo: string | null; idDetalle?: string | null; idTela: string; idTelaColor: string; unidad: FabricUnit; cantidad: string; precio: string; precioAutomatico: boolean; color: string; pesoKg: string; metros: string; idLote: string };
 type PurchaseForm = { id: string | null; idProveedor: string; fechaCompra: string; tipoComprobante: string; numeroComprobante: string; observacion: string; lines: PurchaseLineForm[] };
 type InlineColorTarget = 'tela' | 'rollo' | 'compra';
@@ -297,7 +297,7 @@ export function FabricModule({ view }: { view: FabricView }) {
   const [selectedRolloId, setSelectedRolloId] = useState<string | null>(null);
   const [telaForm, setTelaForm] = useState<TelaForm>(blankTela);
   const [rolloForm, setRolloForm] = useState<RolloForm>(() => blankRollo([]));
-  const [supplierForm, setSupplierForm] = useState<SupplierForm>({ id: null, nombre: '', contacto: '', direccion: '', nota: '', telefonos: [{ id: id(), numero: '', etiqueta: 'Principal' }], categorias: ['Telas'] });
+  const [supplierForm, setSupplierForm] = useState<SupplierForm>({ id: null, nombre: '', ruc: '', contacto: '', direccion: '', nota: '', telefonos: [{ id: id(), numero: '', etiqueta: 'Principal' }], categorias: ['Telas'] });
   const [purchaseForm, setPurchaseForm] = useState<PurchaseForm>(() => blankPurchase([]));
   const [showInlineSupplier, setShowInlineSupplier] = useState(false);
   const [inlineSupplierName, setInlineSupplierName] = useState('');
@@ -483,7 +483,7 @@ export function FabricModule({ view }: { view: FabricView }) {
   const supplierRows = useMemo(() => data.proveedores.filter((supplier) => {
     const phones = data.proveedorTelefonos.filter((x) => x.idProveedor === supplier.id).map((x) => x.numero).join(' ');
     const cats = data.proveedorCategorias.filter((x) => x.idProveedor === supplier.id).map((x) => x.categoria).join(' ');
-    return (!supplierSearch || `${supplier.nombre} ${supplier.contacto} ${supplier.direccion} ${phones} ${cats}`.toLocaleLowerCase('es').includes(supplierSearch.toLocaleLowerCase('es'))) &&
+    return (!supplierSearch || `${supplier.nombre} ${supplier.ruc ?? ''} ${supplier.contacto} ${supplier.direccion} ${phones} ${cats}`.toLocaleLowerCase('es').includes(supplierSearch.toLocaleLowerCase('es'))) &&
       (supplierCategoryFilter === 'all' || data.proveedorCategorias.some((x) => x.idProveedor === supplier.id && x.categoria === supplierCategoryFilter));
   }).sort((a,b) => a.nombre.localeCompare(b.nombre, 'es')), [data.proveedores, data.proveedorTelefonos, data.proveedorCategorias, supplierSearch, supplierCategoryFilter]);
 
@@ -688,17 +688,20 @@ export function FabricModule({ view }: { view: FabricView }) {
   function openSupplier(supplier?: Supplier) {
     const phones = supplier ? data.proveedorTelefonos.filter((x) => x.idProveedor === supplier.id) : [];
     const supplierCats = supplier ? data.proveedorCategorias.filter((x) => x.idProveedor === supplier.id).map((x) => x.categoria) : ['Telas'];
-    setSupplierForm(supplier ? { id: supplier.id, nombre: supplier.nombre, contacto: supplier.contacto, direccion: supplier.direccion, nota: supplier.nota, telefonos: phones.length ? phones.map((x) => ({ ...x })) : [{ id: id(), numero: '', etiqueta: 'Principal' }], categorias: supplierCats } : { id: null, nombre: '', contacto: '', direccion: '', nota: '', telefonos: [{ id: id(), numero: '', etiqueta: 'Principal' }], categorias: ['Telas'] });
+    setSupplierForm(supplier ? { id: supplier.id, nombre: supplier.nombre, ruc: supplier.ruc ?? '', contacto: supplier.contacto, direccion: supplier.direccion, nota: supplier.nota, telefonos: phones.length ? phones.map((x) => ({ ...x })) : [{ id: id(), numero: '', etiqueta: 'Principal' }], categorias: supplierCats } : { id: null, nombre: '', ruc: '', contacto: '', direccion: '', nota: '', telefonos: [{ id: id(), numero: '', etiqueta: 'Principal' }], categorias: ['Telas'] });
     setShowSupplierForm(true);
   }
   function saveSupplier(event: FormEvent) {
     event.preventDefault();
     const name = supplierForm.nombre.trim();
     const phones = supplierForm.telefonos.filter((x) => x.numero.trim());
+    const ruc = supplierForm.ruc.trim();
+    if (ruc && !/^\\d{11}$/.test(ruc)) return tell('El RUC debe contener exactamente 11 dígitos o quedar vacío.', 'error');
+    if (ruc && data.proveedores.some((x) => x.id !== supplierForm.id && (x.ruc ?? '') === ruc)) return tell('Ese RUC ya está registrado en otro proveedor.', 'error');
     if (!name) return tell('Escribe el nombre comercial del proveedor.', 'error');
     if (new Set(phones.map((x) => x.numero.replace(/\s+/g, '').toLowerCase())).size !== phones.length) return tell('Hay números telefónicos duplicados.', 'error');
     const now = new Date().toISOString();
-    const row: Supplier = { id: supplierForm.id ?? id(), nombre: name, contacto: supplierForm.contacto.trim(), direccion: supplierForm.direccion.trim(), nota: supplierForm.nota.trim(), createdAt: supplierForm.id ? (supplierById.get(supplierForm.id)?.createdAt ?? now) : now, updatedAt: now };
+    const row: Supplier = { id: supplierForm.id ?? id(), nombre: name, ruc: ruc || null, contacto: supplierForm.contacto.trim(), direccion: supplierForm.direccion.trim(), nota: supplierForm.nota.trim(), createdAt: supplierForm.id ? (supplierById.get(supplierForm.id)?.createdAt ?? now) : now, updatedAt: now };
     const phoneRows = phones.map((x) => ({ ...x, idProveedor: row.id, numero: x.numero.trim(), etiqueta: x.etiqueta.trim() || 'Teléfono' }));
     const categoryRows = supplierForm.categorias.map((categoria) => ({ id: id(), idProveedor: row.id, categoria }));
     if (!persist({
@@ -1055,7 +1058,7 @@ export function FabricModule({ view }: { view: FabricView }) {
         return [purchase.id,purchase.idProveedor ?? '',purchase.idProveedor ? supplierById.get(purchase.idProveedor)?.nombre ?? '' : '',purchase.fechaCompra,purchase.tipoComprobante,purchase.numeroComprobante,detail.id,detail.idRollo,roll?.idTela ?? '',roll ? telaById.get(roll.idTela)?.nombreTela ?? '' : '',roll?.idTelaColor ?? '',colorNameForVariant(roll?.idTelaColor,roll?.color ?? ''),detail.cantidadComprada,detail.unidadPrecio,detail.precioUnitario,detail.importeTotal];
       }))]);
     } else {
-      downloadCsv('proveedores.csv', [['id_proveedor','nombre','contacto','telefonos','categorias','direccion','nota'], ...supplierRows.map((x) => [x.id,x.nombre,x.contacto,data.proveedorTelefonos.filter((p) => p.idProveedor === x.id).map((p) => p.numero).join(' | '),data.proveedorCategorias.filter((p) => p.idProveedor === x.id).map((p) => p.categoria).join(' | '),x.direccion,x.nota])]);
+      downloadCsv('proveedores.csv', [['id_proveedor','nombre','ruc','contacto','telefonos','categorias','direccion','nota'], ...supplierRows.map((x) => [x.id,x.nombre,x.ruc ?? '',x.contacto,data.proveedorTelefonos.filter((p) => p.idProveedor === x.id).map((p) => p.numero).join(' | '),data.proveedorCategorias.filter((p) => p.idProveedor === x.id).map((p) => p.categoria).join(' | '),x.direccion,x.nota])]);
     }
   }
 
@@ -1122,7 +1125,7 @@ export function FabricModule({ view }: { view: FabricView }) {
       <div className="fabric-supplier-list">{supplierRows.map((supplier) => {
         const phones = data.proveedorTelefonos.filter((x) => x.idProveedor === supplier.id);
         const cats = data.proveedorCategorias.filter((x) => x.idProveedor === supplier.id).map((x) => x.categoria);
-        return <article className="fabric-supplier-row" key={supplier.id}><div><strong>{supplier.nombre}</strong><span>{supplier.contacto || 'Sin contacto'} · {supplier.direccion || 'Sin dirección'}</span><small>{phones.length ? phones.map((x) => `${x.etiqueta}: ${x.numero}`).join(' · ') : 'Sin teléfonos'} </small><div className="fabric-category-tags">{cats.map((x) => <span key={x}>{x}</span>)}</div></div><button className="button secondary edit-model" onClick={() => openSupplier(supplier)}>Editar</button></article>;
+        return <article className="fabric-supplier-row" key={supplier.id}><div><strong>{supplier.nombre}</strong><span>{supplier.ruc ? `RUC: ${supplier.ruc} · ` : ''}{supplier.contacto || 'Sin contacto'} · {supplier.direccion || 'Sin dirección'}</span><small>{phones.length ? phones.map((x) => `${x.etiqueta}: ${x.numero}`).join(' · ') : 'Sin teléfonos'} </small><div className="fabric-category-tags">{cats.map((x) => <span key={x}>{x}</span>)}</div></div><button className="button secondary edit-model" onClick={() => openSupplier(supplier)}>Editar</button></article>;
       })}{supplierRows.length === 0 && <div className="empty">No hay proveedores registrados o no coinciden con el filtro.</div>}</div>
     </section>}
 
@@ -1168,6 +1171,7 @@ export function FabricModule({ view }: { view: FabricView }) {
       <div className="modal-heading"><div><div className="eyebrow">DIRECTORIO COMERCIAL</div><h2 id="fabric-supplier-title">{supplierForm.id ? 'Editar proveedor' : 'Nuevo proveedor'}</h2><p>Los teléfonos y rubros se guardan como registros relacionados, no como listas dentro del proveedor.</p></div><button className="icon-button" onClick={() => setShowSupplierForm(false)}>×</button></div>
       <form onSubmit={saveSupplier} className="fabric-form-grid">
         <label className="field-label fabric-span-2">Nombre comercial *<input className="large-input" required value={supplierForm.nombre} onChange={(e) => setSupplierForm((x) => ({ ...x, nombre: e.target.value }))} /></label>
+        <label className="field-label">RUC (opcional)<input className="large-input" type="text" inputMode="numeric" autoComplete="off" maxLength={11} value={supplierForm.ruc} onChange={(e) => setSupplierForm((x) => ({ ...x, ruc: e.target.value.replace(/\\D/g, '').slice(0, 11) }))} placeholder="11 dígitos" /><small>Déjalo vacío si el proveedor no tiene RUC registrado.</small></label>
         <label className="field-label">Contacto<input className="large-input" value={supplierForm.contacto} onChange={(e) => setSupplierForm((x) => ({ ...x, contacto: e.target.value }))} /></label>
         <label className="field-label">Dirección / referencia<input className="large-input" value={supplierForm.direccion} onChange={(e) => setSupplierForm((x) => ({ ...x, direccion: e.target.value }))} /></label>
         <div className="fabric-span-2"><div className="fabric-subheading"><strong>Teléfonos</strong><button type="button" className="text-action" onClick={() => setSupplierForm((x) => ({ ...x, telefonos: [...x.telefonos, { id: id(), numero: '', etiqueta: 'Teléfono' }] }))}>＋ Añadir número</button></div>
