@@ -621,3 +621,10 @@
  .production-component-stock-title{align-items:flex-start;flex-direction:column}
  .production-component-stock-title .button{align-self:flex-start}
 }
+
+.production-component-movement-history{display:grid;gap:0;border-top:1px solid #e9edf4}
+.production-component-movement-row{display:grid;grid-template-columns:28px minmax(0,1fr) auto;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid #edf0f5}
+.production-component-movement-row>div{display:grid;gap:3px;min-width:0}
+.production-component-movement-row>div:last-child{text-align:right}
+.production-component-movement-row strong{font-size:11px;color:#43546f}
+.production-component-movement-row small{font-size:9px;color:#8994a5;line-height:1.4;overflow-wrap:anywhere}
