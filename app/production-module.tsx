@@ -794,7 +794,8 @@ export function ProductionModule({
     if (componentDraft.pieces.some((x) => !x.name.trim() || !Number.isInteger(x.unitsPerGarment) || x.unitsPerGarment <= 0 || (x.laterality === 'simetrica' && x.unitsPerGarment % 2 !== 0))) return tell('Revisa las piezas auxiliares. Una pieza simétrica requiere una cantidad par por prenda.', 'error');
     const previous = data.components.find((item) => item.id === componentDraft.id);
     const removedStockedPiece = previous?.pieces.find((oldPiece) =>
-      data.componentPieceMovements.some((movement) => movement.pieceId === oldPiece.id) &&
+      (data.componentPieceMovements.some((movement) => movement.pieceId === oldPiece.id) ||
+        data.productionOrders.some((order) => order.componentPieces.some((line) => line.pieceId === oldPiece.id))) &&
       (!componentDraft.pieces.some((nextPiece) => nextPiece.id === oldPiece.id) ||
         componentDraft.pieces.find((nextPiece) => nextPiece.id === oldPiece.id)?.laterality !== oldPiece.laterality)
     );
@@ -1049,6 +1050,7 @@ export function ProductionModule({
       const cost = latestUnitCost(variant, supply.baseUnit);
       const addLine = (sizeId: string | null, quantity: number) => {
         if (!(quantity > 0)) return;
+        if (supply.baseUnit === 'und' && !Number.isInteger(quantity)) throw new Error(supply.name + ': el consumo configurado debe ser entero porque se controla por unidades.');
         orderMaterials.push({
           id: id(), variantId: variant.id, sizeId, quantity: Number(quantity.toFixed(5)),
           unit: supply.baseUnit, unitCost: cost, lineCost: cost === null ? null : Number((quantity * cost).toFixed(2)),
@@ -1060,7 +1062,9 @@ export function ProductionModule({
         Object.entries(row.bySize).forEach(([sizeId, quantity]) => addLine(sizeId, quantity));
       }
     }
-    const pieceRequirements = makePieceRequirements(activeProduct, quantities);
+    let pieceRequirements: ReturnType<typeof makePieceRequirements>;
+    try { pieceRequirements = makePieceRequirements(activeProduct, quantities); }
+    catch (error) { return tell(error instanceof Error ? error.message : 'Revisa las piezas requeridas por el modelo.', 'error'); }
     const missingCostLines = orderMaterials.filter((line) => line.unitCost === null).length;
     const estimatedMaterialCost = missingCostLines > 0
       ? null
