@@ -700,8 +700,9 @@ declare
   v_status text;
   v_base_unit text;
 begin
+  if new.actual_consumed_quantity is null then return new; end if;
   select status into v_status from public.production_orders where id = new.production_order_id;
-  if v_status not in ('en_proceso','completada') then
+  if v_status <> 'en_proceso' then
     raise exception 'El consumo real solo se registra cuando la orden está en proceso.';
   end if;
   if new.actual_consumed_quantity is not null then
@@ -728,8 +729,9 @@ returns trigger language plpgsql security definer set search_path = public as $$
 declare
   v_status text;
 begin
+  if new.actual_consumed_quantity is null then return new; end if;
   select status into v_status from public.production_orders where id = new.production_order_id;
-  if v_status not in ('en_proceso','completada') then
+  if v_status <> 'en_proceso' then
     raise exception 'El consumo real de rollo solo se registra cuando la orden está en proceso.';
   end if;
   if new.actual_consumed_quantity is not null
