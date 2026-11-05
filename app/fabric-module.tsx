@@ -269,7 +269,7 @@ function blankLine(telas: Textile[], telaColores: TextileColor[] = [], colores: 
   const firstColor = telaColores.find((x) => x.idTela === tela?.id && x.activo);
   return { idRollo: null, idDetalle: null, idTela: tela?.id ?? '', idTelaColor: firstColor?.id ?? '', unidad: tela?.unidadVenta ?? 'KG', cantidad: '', cantidadesAdicionales: '', precio: '', color: colores.find((x) => x.id === firstColor?.idColor)?.nombre ?? '', pesoKg: '', metros: '', idLote: '' };
 }
-function blankPurchase(telas: Textile[]): PurchaseForm { return { id: null, idProveedor: '', fechaCompra: today(), tipoComprobante: 'Factura', numeroComprobante: '', observacion: '', lines: [blankLine(telas)] }; }
+function blankPurchase(telas: Textile[], telaColores: TextileColor[] = [], colores: ColorDefinition[] = []): PurchaseForm { return { id: null, idProveedor: '', fechaCompra: today(), tipoComprobante: 'Factura', numeroComprobante: '', observacion: '', lines: [blankLine(telas, telaColores, colores)] }; }
 
 export function FabricModule({ view }: { view: FabricView }) {
   const [data, setData] = useState<FabricBackupData>(emptyFabricBackupData);
@@ -392,6 +392,13 @@ export function FabricModule({ view }: { view: FabricView }) {
     const telaById = useMemo(() => new Map(data.telas.map((x) => [x.id, x])), [data.telas]);
   const supplierById = useMemo(() => new Map(data.proveedores.map((x) => [x.id, x])), [data.proveedores]);
   const rollById = useMemo(() => new Map(data.rollos.map((x) => [x.id, x])), [data.rollos]);
+  const colorById = useMemo(() => new Map(data.colores.map((x) => [x.id, x])), [data.colores]);
+  const telaColorById = useMemo(() => new Map(data.telaColores.map((x) => [x.id, x])), [data.telaColores]);
+  const colorNameForVariant = (variantId?: string | null, fallback = '') => {
+    const variant = variantId ? telaColorById.get(variantId) : undefined;
+    return variant ? colorById.get(variant.idColor)?.nombre ?? fallback : fallback;
+  };
+  const colorsForTela = (telaId: string) => data.telaColores.filter((x) => x.idTela === telaId && x.activo).map((variant) => ({ ...variant, color: colorById.get(variant.idColor) })).filter((x) => x.color).sort((a,b) => (a.color?.nombre ?? '').localeCompare(b.color?.nombre ?? '', 'es'));
   const detailByPurchase = useMemo(() => {
     const map = new Map<string, PurchaseDetail[]>();
     data.detalleCompra.forEach((detail) => map.set(detail.idCompra, [...(map.get(detail.idCompra) ?? []), detail]));
@@ -425,18 +432,20 @@ export function FabricModule({ view }: { view: FabricView }) {
   }).sort((a,b) => a.nombre.localeCompare(b.nombre, 'es')), [data.proveedores, data.proveedorTelefonos, data.proveedorCategorias, supplierSearch, supplierCategoryFilter]);
 
   function openTela(tela?: Textile) {
-    setTelaForm(tela ? { id: tela.id, nombreTela: tela.nombreTela, unidadVenta: tela.unidadVenta, anchoNominalM: inputNumber(tela.anchoNominalM), descripcion: tela.descripcion, activo: tela.activo } : blankTela());
+    setTelaForm(tela ? { id: tela.id, nombreTela: tela.nombreTela, unidadVenta: tela.unidadVenta, anchoNominalM: inputNumber(tela.anchoNominalM), rendimientoTeorico: inputNumber(tela.rendimientoTeorico ?? null), descripcion: tela.descripcion, activo: tela.activo } : blankTela());
     setShowTelaForm(true);
   }
   function saveTela(event: FormEvent) {
     event.preventDefault();
     const name = telaForm.nombreTela.trim();
     const width = nullableNumber(telaForm.anchoNominalM);
+    const yieldValue = nullableNumber(telaForm.rendimientoTeorico);
     if (!name) return tell('Escribe el nombre de la tela.', 'error');
     if (telaForm.anchoNominalM.trim() && (width === null || !Number.isFinite(width) || width <= 0)) return tell('El ancho debe ser un número mayor que cero o quedar vacío.', 'error');
+    if (telaForm.rendimientoTeorico.trim() && (yieldValue === null || !Number.isFinite(yieldValue) || yieldValue <= 0)) return tell('El rendimiento teórico debe ser un número mayor que cero o quedar vacío.', 'error');
     if (data.telas.some((x) => x.nombreTela.toLocaleLowerCase('es') === name.toLocaleLowerCase('es') && x.id !== telaForm.id)) return tell('Ya existe una tela con ese nombre.', 'error');
     const now = new Date().toISOString();
-    const row: Textile = { id: telaForm.id ?? id(), nombreTela: name, unidadVenta: telaForm.unidadVenta, anchoNominalM: width, descripcion: telaForm.descripcion.trim(), activo: telaForm.activo, createdAt: telaForm.id ? (telaById.get(telaForm.id)?.createdAt ?? now) : now, updatedAt: now };
+    const row: Textile = { id: telaForm.id ?? id(), nombreTela: name, unidadVenta: telaForm.unidadVenta, anchoNominalM: width, rendimientoTeorico: yieldValue, descripcion: telaForm.descripcion.trim(), activo: telaForm.activo, createdAt: telaForm.id ? (telaById.get(telaForm.id)?.createdAt ?? now) : now, updatedAt: now };
     if (!persist({ ...data, telas: telaForm.id ? data.telas.map((x) => x.id === row.id ? row : x) : [...data.telas, row] })) return;
     setShowTelaForm(false); tell(telaForm.id ? 'Tela actualizada. Los rollos y compras anteriores se conservaron.' : 'Tela creada y activada según el checklist.');
   }
@@ -447,11 +456,12 @@ export function FabricModule({ view }: { view: FabricView }) {
   function openRollo(roll?: FabricRoll) {
     setShowMoreRollo(false);
     const tela = roll ? telaById.get(roll.idTela) : data.telas.find((x) => x.activo);
+    const defaultRoll = blankRollo(data.telas, data.telaColores, data.colores);
     setRolloForm(roll ? {
-      id: roll.id, idTela: roll.idTela, unidadIngreso: roll.unidadIngreso, cantidadIngreso: String(roll.cantidadIngreso), fechaIngreso: roll.fechaIngreso,
-      color: roll.color, pesoKg: inputNumber(roll.pesoKg), metros: inputNumber(roll.metros), idLote: roll.idLote, idProveedor: roll.idProveedor ?? '',
+      id: roll.id, idTela: roll.idTela, idTelaColor: roll.idTelaColor ?? data.telaColores.find((x) => x.idTela === roll.idTela && colorById.get(x.idColor)?.nombre === roll.color)?.id ?? '', unidadIngreso: roll.unidadIngreso, cantidadIngreso: String(roll.cantidadIngreso), fechaIngreso: roll.fechaIngreso,
+      color: colorNameForVariant(roll.idTelaColor, roll.color), pesoKg: inputNumber(roll.pesoKg), metros: inputNumber(roll.metros), idLote: roll.idLote, idProveedor: roll.idProveedor ?? '',
       ubicacion: roll.ubicacion, estado: roll.estado, nota: roll.nota,
-    } : { ...blankRollo(data.telas), idTela: tela?.id ?? '', unidadIngreso: tela?.unidadVenta ?? 'KG' });
+    } : { ...defaultRoll, idTela: tela?.id ?? '', unidadIngreso: tela?.unidadVenta ?? 'KG' });
     setShowRolloForm(true);
   }
   function saveRollo(event: FormEvent) {
@@ -461,6 +471,9 @@ export function FabricModule({ view }: { view: FabricView }) {
     const weightExtra = nullableNumber(rolloForm.pesoKg);
     const metresExtra = nullableNumber(rolloForm.metros);
     if (!tela) return tell('Selecciona una tela existente.', 'error');
+    const selectedColor = rolloForm.idTelaColor ? telaColorById.get(rolloForm.idTelaColor) : undefined;
+    if (rolloForm.idTelaColor && (!selectedColor || selectedColor.idTela !== tela.id || !selectedColor.activo)) return tell('El color seleccionado no pertenece a esta tela o está inactivo.', 'error');
+    const colorName = selectedColor ? colorById.get(selectedColor.idColor)?.nombre ?? '' : '';
     const previousRoll = rolloForm.id ? rollById.get(rolloForm.id) : undefined;
     if (previousRoll && data.detalleCompra.some((detail) => detail.idRollo === previousRoll.id) && previousRoll.idTela !== tela.id) return tell('Este rollo ya pertenece a una compra histórica. No puedes cambiarle la tela; registra un rollo nuevo si hubo un error de origen.', 'error');
     if (previousRoll && previousRoll.unidadIngreso !== rolloForm.unidadIngreso) return tell('La unidad original de ingreso no se puede cambiar.', 'error');
@@ -473,7 +486,7 @@ export function FabricModule({ view }: { view: FabricView }) {
     const metros = rolloForm.id ? metresExtra : rolloForm.unidadIngreso === 'M' ? quantity : metresExtra;
     const row: FabricRoll = {
       id: rolloForm.id ?? id(), idTela: tela.id, unidadIngreso: rolloForm.unidadIngreso, cantidadIngreso: quantity,
-      pesoKg: weight, metros, color: rolloForm.color.trim(), idLote: rolloForm.idLote.trim(), fechaIngreso: rolloForm.fechaIngreso,
+      pesoKg: weight, metros, color: colorName, idTelaColor: selectedColor?.id ?? null, idLote: rolloForm.idLote.trim(), fechaIngreso: rolloForm.fechaIngreso,
       idProveedor: rolloForm.idProveedor || null, ubicacion: rolloForm.ubicacion.trim(), estado: rolloForm.estado, nota: rolloForm.nota.trim(),
       createdAt: rolloForm.id ? (rollById.get(rolloForm.id)?.createdAt ?? now) : now, updatedAt: now,
     };
