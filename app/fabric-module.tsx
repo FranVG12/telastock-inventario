@@ -665,6 +665,20 @@ export function FabricModule({ view }: { view: FabricView }) {
               movements.push({ id: id(), idRollo: item.id, fecha: now, tipo: 'ingreso', unidad: unit, delta: quantity, cantidadAnterior: null, cantidadNueva: quantity, nota: 'Ingreso importado desde CSV' });
               if (unit === 'KG' && metres !== null) movements.push({ id: id(), idRollo: item.id, fecha: now, tipo: 'medicion', unidad: 'M', delta: null, cantidadAnterior: null, cantidadNueva: metres, nota: 'Metros reales importados desde CSV' });
               if (unit === 'M' && kg !== null) movements.push({ id: id(), idRollo: item.id, fecha: now, tipo: 'medicion', unidad: 'KG', delta: null, cantidadAnterior: null, cantidadNueva: kg, nota: 'Peso real importado desde CSV' });
+            } else {
+              const changes: Array<{ unit: FabricUnit; before: number | null; after: number | null }> = [
+                { unit: 'KG', before: existing.pesoKg, after: item.pesoKg },
+                { unit: 'M', before: existing.metros, after: item.metros },
+              ];
+              changes.forEach(({ unit: measureUnit, before, after }) => {
+                if (before === after) return;
+                const bothKnown = before !== null && after !== null;
+                movements.push({
+                  id: id(), idRollo: item.id, fecha: now, tipo: bothKnown ? 'ajuste' : 'medicion',
+                  unidad: measureUnit, delta: bothKnown ? Number((after! - before!).toFixed(3)) : null,
+                  cantidadAnterior: before, cantidadNueva: after, nota: 'Medición real actualizada desde CSV',
+                });
+              });
             }
             imported++;
           } catch (error) { throw new Error('Fila ' + (index + 2) + ': ' + (error instanceof Error ? error.message : 'dato inválido')); }
