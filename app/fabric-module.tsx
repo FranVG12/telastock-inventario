@@ -508,7 +508,7 @@ export function FabricModule({ view }: { view: FabricView }) {
     const variant = variantId ? telaColorById.get(variantId) : undefined;
     const color = variant ? colorById.get(variant.idColor) : undefined;
     setInlineColorForm({
-      target, telaId, lineIndex, idTelaColor: variant?.id ?? null, nombre: color?.nombre ?? '',
+      target, telaId, lineIndex, idTelaColor: variant?.id ?? null, idColorGlobal: variant?.idColor ?? 'new', nombre: color?.nombre ?? '',
       hexadecimal: variant?.hexadecimal ?? '',
       cmykC: inputNumber(variant?.cmykC ?? null), cmykM: inputNumber(variant?.cmykM ?? null),
       cmykY: inputNumber(variant?.cmykY ?? null), cmykK: inputNumber(variant?.cmykK ?? null),
@@ -519,7 +519,7 @@ export function FabricModule({ view }: { view: FabricView }) {
     if (!inlineColorForm) return;
     const name = inlineColorForm.nombre.trim();
     if (!data.telas.some((x) => x.id === inlineColorForm.telaId)) return tell('Selecciona una tela válida para asociar este color.', 'error');
-    if (!name) return tell('Escribe el nombre del color.', 'error');
+    if (inlineColorForm.idColorGlobal === 'new' && !name) return tell('Escribe el nombre del nuevo color.', 'error');
     const rawHex = inlineColorForm.hexadecimal.trim();
     const expandedHex = /^#[0-9A-Fa-f]{3}$/.test(rawHex) ? '#' + rawHex.slice(1).split('').map((x) => x + x).join('') : rawHex;
     const hexadecimal = expandedHex ? expandedHex.toUpperCase() : null;
@@ -530,7 +530,11 @@ export function FabricModule({ view }: { view: FabricView }) {
     if (cmyk.some((x) => x !== null) && cmyk.some((x) => x === null)) return tell('Completa los cuatro valores CMYK o déjalos todos vacíos.', 'error');
     const now = new Date().toISOString();
     const currentVariant = inlineColorForm.idTelaColor ? telaColorById.get(inlineColorForm.idTelaColor) : undefined;
-    const existingColor = currentVariant ? colorById.get(currentVariant.idColor) : data.colores.find((x) => x.nombre.toLocaleLowerCase('es') === name.toLocaleLowerCase('es'));
+    const existingColor = currentVariant
+      ? colorById.get(currentVariant.idColor)
+      : inlineColorForm.idColorGlobal !== 'new'
+        ? colorById.get(inlineColorForm.idColorGlobal)
+        : data.colores.find((x) => x.nombre.toLocaleLowerCase('es') === name.toLocaleLowerCase('es'));
     const color: ColorDefinition = existingColor ?? { id: id(), nombre: name, createdAt: now, updatedAt: now };
     const duplicate = data.telaColores.find((x) => x.idTela === inlineColorForm.telaId && x.idColor === color.id && x.id !== currentVariant?.id);
     if (duplicate && !currentVariant) {
