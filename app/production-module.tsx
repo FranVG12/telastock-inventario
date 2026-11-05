@@ -1042,24 +1042,28 @@ export function ProductionModule({
     if (Object.keys(quantities).length === 0) return tell('Indica al menos una cantidad de prendas por talla.', 'error');
 
     const orderMaterials: ProductionOrderMaterial[] = [];
-    for (const row of plan.rows) {
-      const variant = variantsBySupply.get(row.variantId);
-      const supply = variant ? supplies.find((item) => item.id === variant.supplyId) : undefined;
-      if (!variant || !supply) return tell('Una variante de material dejó de estar disponible. Revisa la receta.', 'error');
-      const cost = latestUnitCost(variant, supply.baseUnit);
-      const addLine = (sizeId: string | null, quantity: number) => {
-        if (!(quantity > 0)) return;
-        if (supply.baseUnit === 'und' && !Number.isInteger(quantity)) throw new Error(supply.name + ': el consumo configurado debe ser entero porque se controla por unidades.');
-        orderMaterials.push({
-          id: id(), variantId: variant.id, sizeId, quantity: Number(quantity.toFixed(5)),
-          unit: supply.baseUnit, unitCost: cost, lineCost: cost === null ? null : Number((quantity * cost).toFixed(2)),
-        });
-      };
-      if (supply.stockMode === 'total') {
-        addLine(null, Object.values(row.bySize).reduce((sum, value) => sum + value, 0));
-      } else {
-        Object.entries(row.bySize).forEach(([sizeId, quantity]) => addLine(sizeId, quantity));
+    try {
+      for (const row of plan.rows) {
+        const variant = variantsBySupply.get(row.variantId);
+        const supply = variant ? supplies.find((item) => item.id === variant.supplyId) : undefined;
+        if (!variant || !supply) return tell('Una variante de material dejó de estar disponible. Revisa la receta.', 'error');
+        const cost = latestUnitCost(variant, supply.baseUnit);
+        const addLine = (sizeId: string | null, quantity: number) => {
+          if (!(quantity > 0)) return;
+          if (supply.baseUnit === 'und' && !Number.isInteger(quantity)) throw new Error(supply.name + ': el consumo configurado debe ser entero porque se controla por unidades.');
+          orderMaterials.push({
+            id: id(), variantId: variant.id, sizeId, quantity: Number(quantity.toFixed(5)),
+            unit: supply.baseUnit, unitCost: cost, lineCost: cost === null ? null : Number((quantity * cost).toFixed(2)),
+          });
+        };
+        if (supply.stockMode === 'total') {
+          addLine(null, Object.values(row.bySize).reduce((sum, value) => sum + value, 0));
+        } else {
+          Object.entries(row.bySize).forEach(([sizeId, quantity]) => addLine(sizeId, quantity));
+        }
       }
+    } catch (error) {
+      return tell(error instanceof Error ? error.message : 'Revisa las cantidades de materiales antes de crear la orden.', 'error');
     }
     let pieceRequirements: ReturnType<typeof makePieceRequirements>;
     try { pieceRequirements = makePieceRequirements(activeProduct, quantities); }
