@@ -809,6 +809,10 @@ export default function Home() {
     const candidate = movements.map((item) => item.id === movement.id ? { ...item, delta: nextDelta, kind: nextDelta > 0 ? 'entrada' as const : 'salida' as const, note: nextNote.trim() || 'Corrección administrativa' } : item);
     const affectedPiece = pieces.find((item) => item.id === movement.pieceId);
     if (!affectedPiece || !hasNonNegativeBalances(candidate, affectedPiece, movement.sizeId)) { setNoticeMessage('No se guardó: esta corrección dejaría el stock total o uno de los lados por debajo de cero.', 'error'); return; }
+    if (affectedPiece.laterality === 'simetrica') {
+      const balance = getSymmetricStock(candidate, affectedPiece.id, movement.sizeId);
+      if (balance.left < reservedBasePieceQuantity(affectedPiece.id, movement.sizeId, 'izquierda') || balance.right < reservedBasePieceQuantity(affectedPiece.id, movement.sizeId, 'derecha')) { setNoticeMessage('No se guardó: la corrección invadiría piezas reservadas para órdenes de producción.', 'error'); return; }
+    } else if (getPieceStock(candidate, affectedPiece.id, movement.sizeId) < reservedBasePieceQuantity(affectedPiece.id, movement.sizeId, null)) { setNoticeMessage('No se guardó: la corrección invadiría piezas reservadas para órdenes de producción.', 'error'); return; }
     setMovements(candidate);
     setNoticeMessage('Movimiento histórico corregido por administración.', 'success');
   }
@@ -820,6 +824,10 @@ export default function Home() {
     if (!window.confirm(`¿Eliminar definitivamente este movimiento creado por error?\n${piece?.name ?? 'Molde'} · talla ${size?.label ?? '—'} · ${movement.delta > 0 ? '+' : ''}${movement.delta} piezas\nEl saldo se recalculará y esta acción no se puede deshacer.`)) return;
     const candidate = movements.filter((item) => item.id !== movement.id);
     if (!piece || !hasNonNegativeBalances(candidate, piece, movement.sizeId)) { setNoticeMessage('No se puede eliminar: el stock total o uno de los lados quedaría negativo. Corrige primero los movimientos relacionados.', 'error'); return; }
+    if (piece.laterality === 'simetrica') {
+      const balance = getSymmetricStock(candidate, piece.id, movement.sizeId);
+      if (balance.left < reservedBasePieceQuantity(piece.id, movement.sizeId, 'izquierda') || balance.right < reservedBasePieceQuantity(piece.id, movement.sizeId, 'derecha')) { setNoticeMessage('No se puede eliminar: ese movimiento respalda piezas reservadas para órdenes de producción.', 'error'); return; }
+    } else if (getPieceStock(candidate, piece.id, movement.sizeId) < reservedBasePieceQuantity(piece.id, movement.sizeId, null)) { setNoticeMessage('No se puede eliminar: ese movimiento respalda piezas reservadas para órdenes de producción.', 'error'); return; }
     setMovements(candidate);
     setNoticeMessage('Movimiento erróneo eliminado. El inventario se recalculó.', 'success');
   }
