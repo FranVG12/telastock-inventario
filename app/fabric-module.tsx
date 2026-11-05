@@ -402,7 +402,7 @@ export function FabricModule({ view }: { view: FabricView }) {
     const now = new Date().toISOString();
     // En edición se conserva separado el ingreso original del saldo medido actual.
     const weight = rolloForm.id ? weightExtra : rolloForm.unidadIngreso === 'KG' ? quantity : weightExtra;
-    const metres = rolloForm.id ? metresExtra : rolloForm.unidadIngreso === 'M' ? quantity : metresExtra;
+    const metros = rolloForm.id ? metresExtra : rolloForm.unidadIngreso === 'M' ? quantity : metresExtra;
     const row: FabricRoll = {
       id: rolloForm.id ?? id(), idTela: tela.id, unidadIngreso: rolloForm.unidadIngreso, cantidadIngreso: quantity,
       pesoKg: weight, metros: metres, color: rolloForm.color.trim(), idLote: rolloForm.idLote.trim(), fechaIngreso: rolloForm.fechaIngreso,
