@@ -155,6 +155,18 @@ export type ProductionOrderMaterial = {
 export type ProductionOrderPieceRequirement = { id: string; pieceId: string; sizeId: string; side: 'izquierda' | 'derecha' | null; quantity: number };
 export type ProductionOrderComponentPieceRequirement = ProductionOrderPieceRequirement & { componentId: string };
 export type ProductionOrderRollAllocation = { id: string; variantId: string; rollId: string; unit: 'KG' | 'M'; quantity: number };
+export type ProductionOrderActualConsumption = {
+  materials: ProductionOrderMaterial[];
+  rollAllocations: ProductionOrderRollAllocation[];
+  materialCost: number | null;
+  missingCostLines: number;
+  recordedAt: string;
+};
+type ProductionOrderCompletionDraft = {
+  orderId: string;
+  materialQuantities: Record<string, string>;
+  rollQuantities: Record<string, string>;
+};
 export type ProductionOrder = {
   id: string; number: string; productModelId: string; productName: string; baseModelId: string;
   status: ProductionOrderStatus; quantities: Record<string, number>;
@@ -163,6 +175,7 @@ export type ProductionOrder = {
   estimatedMaterialCost: number | null; missingCostLines: number; note: string;
   createdAt: string; updatedAt: string; reservedAt?: string | null; startedAt?: string | null;
   completedAt?: string | null; cancelledAt?: string | null;
+  actualConsumption?: ProductionOrderActualConsumption | null;
 };
 
 export type ProductionBackupData = {
@@ -280,7 +293,16 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
       Array.isArray(order.componentPieces) && order.componentPieces.every((line) => componentPieceMap.has(line.pieceId) && componentPieceMap.get(line.pieceId)?.componentId === line.componentId && typeof line.sizeId === 'string' && Number.isInteger(line.quantity) && line.quantity > 0 && (line.side === null || line.side === 'izquierda' || line.side === 'derecha')) &&
       Array.isArray(order.rollAllocations) && order.rollAllocations.every((allocation) => variantIds.has(allocation.variantId) && typeof allocation.rollId === 'string' && ['KG','M'].includes(allocation.unit) && Number.isFinite(allocation.quantity) && allocation.quantity > 0) &&
       Number.isInteger(order.missingCostLines) && order.missingCostLines >= 0 &&
-      (order.estimatedMaterialCost === null || Number.isFinite(order.estimatedMaterialCost) && order.estimatedMaterialCost >= 0);
+      (order.estimatedMaterialCost === null || Number.isFinite(order.estimatedMaterialCost) && order.estimatedMaterialCost >= 0) &&
+      (order.actualConsumption == null || (
+        Array.isArray(order.actualConsumption.materials) &&
+        order.actualConsumption.materials.every((line) => variantIds.has(line.variantId) && Number.isFinite(line.quantity) && line.quantity >= 0 && ['und','m','cm','g','kg','l','ml'].includes(line.unit)) &&
+        Array.isArray(order.actualConsumption.rollAllocations) &&
+        order.actualConsumption.rollAllocations.every((allocation) => variantIds.has(allocation.variantId) && typeof allocation.rollId === 'string' && Number.isFinite(allocation.quantity) && allocation.quantity >= 0 && ['KG','M'].includes(allocation.unit)) &&
+        Number.isInteger(order.actualConsumption.missingCostLines) && order.actualConsumption.missingCostLines >= 0 &&
+        (order.actualConsumption.materialCost === null || Number.isFinite(order.actualConsumption.materialCost) && order.actualConsumption.materialCost >= 0) &&
+        typeof order.actualConsumption.recordedAt === 'string'
+      ));
   })) throw new Error('Hay órdenes de producción con datos o relaciones inválidas.');
   if (!output.components.every((x) => typeof x.name === 'string' && x.name.trim() && typeof x.type === 'string' && x.type.trim() && Array.isArray(x.pieces) && x.pieces.every((p) => p && typeof p.id === 'string' && p.id.trim() && typeof p.name === 'string' && p.name.trim() && Number.isInteger(p.unitsPerGarment) && p.unitsPerGarment > 0 && ['ninguna', 'simetrica', 'izquierda', 'derecha'].includes(p.laterality) && (p.laterality !== 'simetrica' || p.unitsPerGarment % 2 === 0)) && validMaterials(x.materials))) {
     throw new Error('Hay componentes con piezas o materiales inválidos.');
@@ -504,6 +526,7 @@ export function ProductionModule({
   const [selectedProductId, setSelectedProductId] = useState('');
   const [planCounts, setPlanCounts] = useState<Record<string, string>>({});
   const [orderNote, setOrderNote] = useState('');
+  const [completionDraft, setCompletionDraft] = useState<ProductionOrderCompletionDraft | null>(null);
 
   const refreshTextiles = () => {
     const telas = safeRead<TextileRow[]>(FABRIC_STORAGE_KEYS.telas, []);
