@@ -500,3 +500,74 @@
 .purchase-usability-note{margin:-4px 0 12px;padding:10px 12px;border:1px solid #e7e6f8;border-radius:9px;background:#fafaff;color:#767b98;font-size:10px;line-height:1.55}
 .fabric-purchase-input-line .field-label small{display:block;margin-top:4px;color:#8791a4;font-size:9px;line-height:1.45}
 @media(max-width:720px){.purchase-usability-note{font-size:9px;padding:9px 10px;margin-bottom:10px}}
+
+
+/* Production planning: supplies, reusable components and BOM */
+.production-module{display:grid;gap:16px}
+.production-tabs{display:flex;gap:6px;overflow-x:auto;padding:5px;background:#f3f5fa;border-radius:12px;scrollbar-width:thin}
+.production-tabs button{flex:0 0 auto;border:0;background:transparent;color:#69758b;padding:10px 14px;border-radius:9px;font-size:12px;font-weight:650;cursor:pointer}
+.production-tabs button.active{background:#fff;color:#293b61;box-shadow:0 1px 5px #1d31500d}
+.production-panel{padding:20px}
+.production-form{display:grid;gap:14px;padding:16px;margin:14px 0;background:#f8faff;border:1px solid #e5eaf4;border-radius:12px}
+.production-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.production-list{display:grid;gap:10px;margin-top:14px}
+.production-card{border:1px solid #e8edf4;border-radius:12px;padding:14px;background:#fff;min-width:0}
+.production-card-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.production-card-heading>div{display:grid;gap:4px;min-width:0}
+.production-card-heading strong{font-size:13px;color:#283752}
+.production-card-heading span,.production-muted{font-size:11px;color:#8792a4;line-height:1.5}
+.production-muted{margin:8px 0}
+.production-attributes{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.production-attributes span{font-size:10px;color:#596983;background:#f1f4f9;border-radius:20px;padding:5px 8px}
+.production-variant{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid #eff2f6}
+.production-variant>div:first-child{display:grid;gap:3px;flex:1;min-width:0}
+.production-variant strong{font-size:12px;color:#34435d}
+.production-variant small{font-size:10px;color:#8993a4}
+.production-variant-stock{text-align:right;display:grid;gap:2px}
+.production-variant-stock strong{font-size:16px;font-variant-numeric:tabular-nums}
+.production-subheading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:8px 0}
+.production-subheading strong{font-size:12px;color:#34435d}
+.production-material-editor{display:grid;gap:10px;padding-top:8px;border-top:1px solid #e7ecf4}
+.production-material-row{padding:12px;border:1px solid #e4eaf3;border-radius:10px;background:#fff}
+.production-material-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.production-material-foot{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-top:8px;font-size:10px;color:#8792a4}
+.production-size-consumption{margin-top:10px;padding:10px;background:#f7f9fc;border-radius:9px}
+.production-size-consumption>strong{font-size:11px;color:#596983}
+.production-size-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(74px,1fr));gap:8px;margin-top:8px}
+.production-size-grid label{display:grid;gap:4px;min-width:0}
+.production-size-grid label span{font-size:10px;color:#68758b}
+.production-size-grid input{width:100%;min-width:0;border:1px solid #dfe5ee;border-radius:7px;padding:8px;font-size:12px;background:#fff}
+.production-size-consumption>small{display:block;margin-top:8px;font-size:10px;color:#8993a4}
+.production-piece-row{display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:10px;align-items:end;padding:10px;background:#fff;border:1px solid #e6ebf3;border-radius:9px}
+.production-component-grid,.production-family-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px}
+.production-component-image{width:100%;max-height:150px;object-fit:cover;border-radius:8px;margin-bottom:10px}
+.production-check-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.production-check-list label{display:flex;align-items:center;gap:9px;padding:10px;border:1px solid #e4eaf2;border-radius:9px;background:#fff}
+.production-check-list input{accent-color:#4768a6}
+.production-check-list span{display:grid;gap:3px}
+.production-check-list strong{font-size:11px;color:#35445e}
+.production-check-list small{font-size:10px;color:#8a94a5}
+.production-table-wrap{overflow-x:auto;margin-top:10px}
+.production-table{width:100%;border-collapse:collapse;min-width:600px}
+.production-table th,.production-table td{text-align:left;padding:11px 9px;border-bottom:1px solid #edf0f5;font-size:11px;white-space:nowrap}
+.production-table th{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#8490a3;background:#f8f9fc}
+.production-table td:first-child{white-space:normal}
+.production-table td:first-child strong,.production-table td:first-child small,.production-table td:first-child em{display:block}
+.production-table td:first-child small,.production-table td:first-child em{font-size:10px;color:#8993a4;margin-top:3px}
+.production-table td:first-child em{color:#b56b3d;font-style:normal}
+.production-shortage{color:#bd5b50;font-weight:700}
+.production-ok{color:#39866a;font-weight:700}
+.production-link-textile{padding:12px;border:1px solid #e1e8f3;border-radius:9px;background:#fff;display:grid;gap:10px}
+.danger-action{color:#b85c55}
+.planning-counts{grid-template-columns:repeat(auto-fill,minmax(82px,1fr));margin:12px 0 20px}
+@media(max-width:720px){
+ .production-panel{padding:13px}
+ .production-form{padding:12px}
+ .production-form-grid,.production-material-fields,.production-component-grid,.production-family-grid,.production-check-list{grid-template-columns:1fr}
+ .production-piece-row{grid-template-columns:1fr 1fr}
+ .production-piece-row .field-label:first-child{grid-column:1/-1}
+ .production-card-heading{align-items:flex-start}
+ .production-variant{flex-wrap:wrap}
+ .production-variant .text-action{margin-left:auto}
+ .production-tabs button{padding:9px 11px;font-size:11px}
+}
