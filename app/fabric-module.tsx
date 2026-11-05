@@ -249,7 +249,7 @@ function migrateLegacyColorData(value: FabricBackupData): FabricBackupData {
   };
   const rollos = value.rollos.map((roll) => {
     const legacy = roll as FabricRoll & { idTelaColor?: string | null };
-    const variant = legacy.idTelaColor ? telaColores.find((x) => x.id === legacy.idTelaColor && x.idTela === roll.idTela) : ensureVariant(roll.idTela, roll.color ?? '');
+    const variant = (legacy.idTelaColor ? telaColores.find((x) => x.id === legacy.idTelaColor && x.idTela === roll.idTela) : undefined) ?? ensureVariant(roll.idTela, roll.color ?? '');
     const colorName = variant ? colorByName.get(variant.idColor)?.nombre ?? roll.color : roll.color;
     return { ...roll, idTelaColor: variant?.id ?? null, color: colorName ?? '' };
   });
@@ -1139,7 +1139,7 @@ export function FabricModule({ view }: { view: FabricView }) {
     {inlineColorForm && <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setInlineColorForm(null); }}><section className="modal fabric-form-modal" role="dialog" aria-modal="true" aria-labelledby="inline-color-title">
       <div className="modal-heading"><div><div className="eyebrow">CATÁLOGO NORMALIZADO</div><h2 id="inline-color-title">{inlineColorForm.idTelaColor ? 'Editar códigos del color' : 'Añadir color a la tela'}</h2><p>{telaById.get(inlineColorForm.telaId)?.nombreTela ?? 'Tela'} · El nombre se comparte; los códigos se guardan para esta tela.</p></div><button className="icon-button" type="button" onClick={() => setInlineColorForm(null)}>×</button></div>
       <form onSubmit={saveInlineColor} className="fabric-form-grid">
-        <label className="field-label fabric-span-2">Nombre del color *<input className="large-input" required value={inlineColorForm.nombre} onChange={(e) => setInlineColorForm((x) => x ? { ...x, nombre: e.target.value } : x)} placeholder="Ej. Azul noche" /></label>
+        <label className="field-label fabric-span-2">Nombre del color *<input className="large-input" required disabled={Boolean(inlineColorForm.idTelaColor)} value={inlineColorForm.nombre} onChange={(e) => setInlineColorForm((x) => x ? { ...x, nombre: e.target.value } : x)} placeholder="Ej. Azul noche" /></label>
         <label className="field-label fabric-span-2">HEX digital (opcional)<input className="large-input" value={inlineColorForm.hexadecimal} onChange={(e) => setInlineColorForm((x) => x ? { ...x, hexadecimal: e.target.value } : x)} placeholder="Ej. #173B68" /></label>
         <div className="fabric-span-2 fabric-subheading"><strong>CMYK para impresión (opcional)</strong><small>Completa C, M, Y y K; cada valor debe estar entre 0 y 100.</small></div>
         <label className="field-label">C<input className="large-input" type="number" min="0" max="100" step="0.01" value={inlineColorForm.cmykC} onChange={(e) => setInlineColorForm((x) => x ? { ...x, cmykC: e.target.value } : x)} placeholder="0–100" /></label>
