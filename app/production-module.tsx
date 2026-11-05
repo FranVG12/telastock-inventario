@@ -191,7 +191,7 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
   const supplyIds = new Set(output.supplies.map((x) => x.id));
   const variantIds = new Set(output.variants.map((x) => x.id));
   const componentIds = new Set(output.components.map((x) => x.id));
-  const allComponentPieces = output.components.flatMap((component) => Array.isArray(component.pieces) ? component.pieces.map((piece) => ({ componentId: component.id, piece })) : []);
+  const allComponentPieces = output.components.flatMap((component) => Array.isArray(component.pieces) ? component.pieces.filter((piece) => piece && typeof piece === 'object').map((piece) => ({ componentId: component.id, piece })) : []);
   const componentPieceMap = new Map(allComponentPieces.map(({ componentId, piece }) => [piece.id, { componentId, piece }] as const));
   if (componentPieceMap.size !== allComponentPieces.length) throw new Error('Hay identificadores repetidos entre piezas auxiliares.');
   const purchaseIds = new Set(output.supplyPurchases.map((x) => x.id));
@@ -236,7 +236,7 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
     return Boolean(detail && movement.kind === 'entrada' && movement.variantId === detail.variantId &&
       movement.sizeId === detail.sizeId && Math.abs(movement.delta - detail.inventoryQuantity) < 0.00001);
   })) throw new Error('Hay movimientos de compra que no coinciden con su detalle.');
-  if (!output.components.every((x) => x.name.trim() && x.type.trim() && Array.isArray(x.pieces) && x.pieces.every((p) => p.name.trim() && Number.isInteger(p.unitsPerGarment) && p.unitsPerGarment > 0 && ['ninguna', 'simetrica', 'izquierda', 'derecha'].includes(p.laterality) && (p.laterality !== 'simetrica' || p.unitsPerGarment % 2 === 0)) && validMaterials(x.materials))) {
+  if (!output.components.every((x) => typeof x.name === 'string' && x.name.trim() && typeof x.type === 'string' && x.type.trim() && Array.isArray(x.pieces) && x.pieces.every((p) => p && typeof p.id === 'string' && p.id.trim() && typeof p.name === 'string' && p.name.trim() && Number.isInteger(p.unitsPerGarment) && p.unitsPerGarment > 0 && ['ninguna', 'simetrica', 'izquierda', 'derecha'].includes(p.laterality) && (p.laterality !== 'simetrica' || p.unitsPerGarment % 2 === 0)) && validMaterials(x.materials))) {
     throw new Error('Hay componentes con piezas o materiales inválidos.');
   }
   if (!output.componentPieceMovements.every((movement) => {
@@ -755,6 +755,9 @@ export function ProductionModule({
     if (removedStockedPiece) return tell('No puedes quitar ni cambiar la lateralidad de "' + removedStockedPiece.name + '" porque ya tiene movimientos de inventario.', 'error');
     if (componentDraft.materials.some((x) => !variantsBySupply.has(x.variantId) || x.wastePercent < 0 || (x.mode === 'fixed' && (!Number.isFinite(x.fixedQuantity) || (x.fixedQuantity ?? -1) < 0)))) return tell('Revisa los materiales y sus consumos.', 'error');
     const row = { ...componentDraft, name: componentDraft.name.trim(), updatedAt: now() };
+    const otherPieceIds = new Set(data.components.filter((component) => component.id !== row.id).flatMap((component) => component.pieces.map((piece) => piece.id)));
+    const draftPieceIds = row.pieces.map((piece) => piece.id);
+    if (new Set(draftPieceIds).size !== draftPieceIds.length || row.pieces.some((piece) => otherPieceIds.has(piece.id))) return tell('Cada pieza necesita un identificador propio. Vuelve a agregar la pieza duplicada.', 'error');
     setData((current) => ({ ...current, components: current.components.some((x) => x.id === row.id) ? current.components.map((x) => x.id === row.id ? row : x) : [...current.components, row] }));
     setComponentDraft(null); tell('Componente guardado.');
   }
@@ -825,12 +828,11 @@ export function ProductionModule({
       }
     });
     const boundedComponentCapacity = Number.isFinite(componentCapacity) ? componentCapacity : null;
-    return {
-      baseCapacity,
-      componentCapacity: boundedComponentCapacity,
-      fabricable: boundedComponentCapacity === null ? baseCapacity : Math.min(baseCapacity, boundedComponentCapacity),
-      limitingComponent,
-    };
+    const fabricable = boundedComponentCapacity === null ? baseCapacity : Math.min(baseCapacity, boundedComponentCapacity);
+    const limitingResource = boundedComponentCapacity === null || baseCapacity < boundedComponentCapacity
+      ? 'Patrón base'
+      : baseCapacity === boundedComponentCapacity ? 'Patrón y auxiliar' : limitingComponent;
+    return { baseCapacity, componentCapacity: boundedComponentCapacity, fabricable, limitingComponent: limitingResource };
   }
   const plan = useMemo(() => {
     if (!activeProduct) return { rows: [] as Array<{ variantId: string; total: number; bySize: Record<string, number>; missingSizes: string[]; available: number; shortage: number; packs: number | null }>, unresolved: [] as string[] };
@@ -1133,7 +1135,7 @@ export function ProductionModule({
           <div className="production-table-wrap"><table className="production-table"><thead><tr><th>Talla</th><th>Patrón base</th><th>Auxiliares</th><th>Fabricables</th><th>Limitante</th></tr></thead><tbody>
             {productSizes.map((size) => {
               const capacity = getProductFabricableCapacity(activeProduct, size.id);
-              return <tr key={size.id}><td><strong>{size.label}</strong></td><td>{format(capacity.baseCapacity)}</td><td>{capacity.componentCapacity === null ? '—' : format(capacity.componentCapacity)}</td><td className={capacity.fabricable > 0 ? 'production-ok' : 'production-shortage'}>{format(capacity.fabricable)}</td><td>{capacity.limitingComponent || (capacity.componentCapacity === null ? 'Patrón base' : 'Patrón / auxiliar')}</td></tr>;
+              return <tr key={size.id}><td><strong>{size.label}</strong></td><td>{format(capacity.baseCapacity)}</td><td>{capacity.componentCapacity === null ? '—' : format(capacity.componentCapacity)}</td><td className={capacity.fabricable > 0 ? 'production-ok' : 'production-shortage'}>{format(capacity.fabricable)}</td><td>{capacity.limitingComponent}</td></tr>;
             })}
           </tbody></table></div>
           <div className="production-subheading"><strong>Materiales necesarios</strong><span>{format(plan.rows.length)} variantes</span></div>
