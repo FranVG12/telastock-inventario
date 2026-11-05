@@ -151,3 +151,29 @@ La equivalencia estimada KG↔M para una operación de corte todavía no está i
 
 
 La importación CSV de insumos acepta `AAAA-MM-DD` y formatos locales con barras o guiones solo cuando día y mes se distinguen sin ambigüedad; valores como `04/05/2025` se rechazan para evitar cambiar el día por el mes.
+
+## Módulos de insumos y configuración de confección
+
+La rama de trabajo feature/componentes-insumos incorpora un módulo local-first para organizar materiales y acabados:
+
+- **Insumos y avíos:** catálogo por categoría, unidad base, modalidad de stock total o por talla, características adicionales y variantes comerciales (color, ancho, material, calibre, presentación, etc.).
+- **Variantes y existencias:** el stock se registra mediante movimientos de entrada/salida. Las presentaciones comerciales guardan su equivalencia declarada; no se inventan conversiones entre unidades incompatibles.
+- **Vinculación textil:** una variante puede referenciar una tela y un color ya existentes. Si se vincula a un rollo, el stock se consulta desde el inventario de rollos; el nuevo módulo no crea un saldo paralelo ni consume rollos automáticamente.
+- **Componentes reutilizables:** biblioteca de cuellos, bolsillos, puños, pretinas, tapeteras y otros acabados, con piezas auxiliares, lateralidad y consumos de materiales.
+- **Modelos configurados:** una prenda comercial referencia un patrón base existente y selecciona componentes. No duplica ni mezcla el inventario de piezas cortadas del patrón.
+- **Recetas estándar:** consumos compartidos por familia (polo, buzo y casaca), con consumo fijo o diferenciado por talla y porcentaje de desperdicio.
+- **Planificación:** estima materiales requeridos, disponibilidad y faltantes por variante, talla y presentación de compra. Es una simulación: no descuenta stock ni genera órdenes de compra.
+
+### Separación de inventarios
+
+1. **Rollos de tela:** inventario físico existente, con mediciones reales en KG o metros.
+2. **Piezas cortadas:** inventario existente por molde, talla y lateralidad.
+3. **Insumos y avíos:** ledger independiente por variante y, cuando corresponda, talla.
+
+No se debe sumar KG con metros ni inferir metros a partir de KG sin un rendimiento/medición real autorizado. Los consumos sin equivalencia conocida deben configurarse con una unidad compatible.
+
+### Respaldo y migración
+
+El respaldo completo evoluciona a schemaVersion 4 e incluye insumos, variantes, movimientos, componentes, recetas y modelos configurados. Se mantienen importables los respaldos completos de versiones 1, 2 y 3; al restaurar uno antiguo, las nuevas colecciones se inicializan vacías.
+
+La migración 202611060001_supplies_components_product_models.sql define el esquema relacional futuro. **No se ejecuta automáticamente** y no conecta la aplicación con Supabase. Las tablas nuevas mantienen RLS habilitado sin políticas permisivas, igual que el resto del esquema pendiente de configuración de autenticación y acceso.
