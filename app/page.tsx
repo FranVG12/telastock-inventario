@@ -538,8 +538,7 @@ export default function Home() {
       localStorage.setItem(FABRIC_STORAGE_KEYS.colores, JSON.stringify(mergedColors));
       setSizeGroups((current) => merge(current, parsed.sizeGroups!));
       setSizes((current) => merge(current, parsed.sizes!));
-      setModels((current) => merge(current, parsed.models!));
-      setPieces((current) => merge(current, parsed.pieces!.map((piece) => ({
+      const incomingPieces = parsed.pieces!.map((piece) => ({
         ...piece,
         fabricSlot: piece.fabricSlot ?? 'principal',
         fabricType: fabricSlotLabel(piece.fabricSlot ?? 'principal'),
