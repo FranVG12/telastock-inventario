@@ -948,7 +948,6 @@ export function ProductionModule({
 
   const holdingStatuses: ProductionOrderStatus[] = ['reservada', 'en_proceso'];
   const ordersHoldingStock = data.productionOrders.filter((order) => holdingStatuses.includes(order.status));
-  const isUnitCostAvailable = (value: number | null): value is number => value !== null && Number.isFinite(value) && value >= 0;
 
   function latestUnitCost(variant: SupplyVariant, unit: StockUnit): number | null {
     if (variant.textileId) {
@@ -1254,8 +1253,8 @@ export function ProductionModule({
     }
     const fabricRaw = localStorage.getItem(FABRIC_STORAGE_KEYS.rollos);
     const movementRaw = localStorage.getItem(FABRIC_STORAGE_KEYS.rolloMovimientos);
-    let previousFabricRolls: string | null = fabricRaw;
-    let previousFabricMovements: string | null = movementRaw;
+    const previousFabricRolls: string | null = fabricRaw;
+    const previousFabricMovements: string | null = movementRaw;
     let nextRolls: RollRow[] = [];
     let nextRollMovements: FabricRollMovement[] = [];
     try {
