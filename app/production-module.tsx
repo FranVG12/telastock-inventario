@@ -525,6 +525,80 @@ export function ProductionModule({
     setData((current) => ({ ...current, supplyMovements: [...current.supplyMovements, movement] }));
     setShowStockForm(false); setStockQuantity(''); tell('Movimiento de insumo registrado.');
   }
+  const purchasableVariants = variants.filter((variant) => !variant.textileId && supplies.some((supply) => supply.id === variant.supplyId && supply.active));
+  const purchaseLineTotal = (line: PurchaseLineDraft) => {
+    const quantity = Number(line.quantity);
+    const unitPrice = Number(line.unitPrice);
+    return Number.isFinite(quantity) && quantity > 0 && Number.isFinite(unitPrice) && unitPrice >= 0 ? quantity * unitPrice : 0;
+  };
+  const purchaseTotalDraft = purchaseLines.reduce((sum, line) => sum + purchaseLineTotal(line), 0);
+  function addPurchaseLine() {
+    setPurchaseLines((current) => [...current, { id: id(), variantId: '', sizeId: '', quantity: '1', unitPrice: '' }]);
+  }
+  function updatePurchaseLine(lineId: string, patch: Partial<PurchaseLineDraft>) {
+    setPurchaseLines((current) => current.map((line) => line.id === lineId ? { ...line, ...patch } : line));
+  }
+  function saveSupplyPurchase(event: FormEvent) {
+    event.preventDefault();
+    if (!purchaseDate) return tell('Selecciona la fecha de compra.', 'error');
+    if (purchaseSupplierId && !textileContext.proveedores.some((supplier) => supplier.id === purchaseSupplierId)) return tell('El proveedor seleccionado ya no está disponible. Actualiza el módulo de proveedores.', 'error');
+    if (purchaseLines.length === 0) return tell('Agrega al menos un detalle de compra.', 'error');
+    const documentNumber = purchaseDocumentNumber.trim();
+    if (documentNumber && data.supplyPurchases.some((purchase) =>
+      purchase.supplierId === (purchaseSupplierId || null) &&
+      purchase.documentType === purchaseDocumentType &&
+      purchase.documentNumber.trim().toLocaleLowerCase('es') === documentNumber.toLocaleLowerCase('es')
+    )) return tell('Ya existe una compra con ese proveedor y número de comprobante.', 'error');
+
+    const purchaseId = id();
+    const createdAt = now();
+    const prepared: Array<{ detail: SupplyPurchaseDetail; movement: SupplyMovement }> = [];
+    for (const line of purchaseLines) {
+      const variant = variantsBySupply.get(line.variantId);
+      const supply = variant ? supplies.find((item) => item.id === variant.supplyId) : undefined;
+      const quantity = Number(line.quantity);
+      const unitPrice = Number(line.unitPrice);
+      if (!variant || !supply || variant.textileId) return tell('Cada línea debe seleccionar una variante de avío válida. Las telas se compran desde el módulo de rollos.', 'error');
+      if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0) return tell('Revisa las cantidades y precios de todos los detalles.', 'error');
+      if (supply.stockMode === 'talla' && (!line.sizeId || !sizes.some((size) => size.id === line.sizeId))) return tell('Selecciona una talla para cada insumo que controla stock por talla.', 'error');
+      const sizeId = supply.stockMode === 'talla' ? line.sizeId : null;
+      const baseQuantityPerPack = variant.purchasePackQuantity ?? 1;
+      const inventoryQuantity = Number((quantity * baseQuantityPerPack).toFixed(5));
+      const purchaseUnitLabel = variant.purchasePackQuantity
+        ? (variant.purchasePackLabel.trim() || 'paquete')
+        : unitLabel[supply.baseUnit];
+      const lineTotal = Number((quantity * unitPrice).toFixed(2));
+      const detailId = id();
+      const detail: SupplyPurchaseDetail = {
+        id: detailId, purchaseId, variantId: variant.id, sizeId, purchaseQuantity: quantity,
+        purchaseUnitLabel, baseQuantityPerPack, inventoryQuantity, unitPrice, lineTotal,
+      };
+      const movement: SupplyMovement = {
+        id: id(), variantId: variant.id, sizeId, delta: inventoryQuantity, kind: 'entrada',
+        note: 'Compra ' + purchaseDocumentType + (documentNumber ? ' ' + documentNumber : '') + (purchaseNote.trim() ? ' · ' + purchaseNote.trim() : ''),
+        date: createdAt, sourcePurchaseDetailId: detailId,
+      };
+      prepared.push({ detail, movement });
+    }
+    const purchase: SupplyPurchase = {
+      id: purchaseId, supplierId: purchaseSupplierId || null, date: purchaseDate,
+      documentType: purchaseDocumentType, documentNumber, note: purchaseNote.trim(),
+      total: Number(prepared.reduce((sum, item) => sum + item.detail.lineTotal, 0).toFixed(2)),
+      createdAt,
+    };
+    setData((current) => ({
+      ...current,
+      supplyPurchases: [...current.supplyPurchases, purchase],
+      supplyPurchaseDetails: [...current.supplyPurchaseDetails, ...prepared.map((item) => item.detail)],
+      supplyMovements: [...current.supplyMovements, ...prepared.map((item) => item.movement)],
+    }));
+    setShowPurchaseForm(false);
+    setPurchaseDate(localDate()); setPurchaseSupplierId(''); setPurchaseDocumentType('Boleta');
+    setPurchaseDocumentNumber(''); setPurchaseNote('');
+    setPurchaseLines([{ id: id(), variantId: '', sizeId: '', quantity: '1', unitPrice: '' }]);
+    tell('Compra registrada. Sus cantidades ya fueron ingresadas al inventario de avíos.');
+  }
+
   function saveComponent(event: FormEvent) {
     event.preventDefault();
     if (!componentDraft || !componentDraft.name.trim()) return tell('Escribe el nombre del componente.', 'error');
