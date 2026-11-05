@@ -385,6 +385,10 @@
 .fabric-supplier-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 3px;border-top:1px solid #edf0f5}
 .fabric-supplier-row>div{display:flex;flex-direction:column;gap:4px;min-width:0}
 .fabric-category-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:3px}
+.fabric-color-swatch{display:inline-block;width:12px;height:12px;border-radius:50%;border:1px solid #cbd2de;vertical-align:-2px;margin-right:5px;flex-shrink:0}
+.fabric-category-tags .text-action{font-size:8px;margin-left:4px}
+.fabric-category-tags .muted{opacity:.55}
+
 .fabric-category-tags span{padding:3px 6px;border-radius:5px;background:#f0efff;color:#655bbc;font-size:8px;font-weight:700}
 .fabric-form-modal{width:min(100%,650px)}
 .fabric-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
