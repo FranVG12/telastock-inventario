@@ -571,3 +571,32 @@
  .production-variant .text-action{margin-left:auto}
  .production-tabs button{padding:9px 11px;font-size:11px}
 }
+
+
+/* Avio purchase documents and historical line values */
+.production-purchase-line{display:grid;gap:10px;padding:13px;border:1px solid #e4eaf3;border-radius:11px;background:#fff}
+.production-purchase-line-heading{display:flex;align-items:center;justify-content:space-between}
+.production-purchase-line-heading strong{font-size:11px;color:#54647e}
+.production-purchase-meta{display:flex;flex-wrap:wrap;gap:8px}
+.production-purchase-meta span{font-size:10px;color:#7e899c;background:#f3f6fa;padding:6px 8px;border-radius:7px}
+.production-purchase-meta strong{color:#475b7c}
+.production-purchase-line-total{display:flex;justify-content:space-between;align-items:center;gap:10px;border-top:1px solid #eef1f5;padding-top:9px}
+.production-purchase-line-total span{font-size:10px;color:#7e899c}
+.production-purchase-line-total span strong{color:#52627c}
+.production-purchase-line-total>strong,.production-purchase-history-total{font-size:14px;color:#304566;font-variant-numeric:tabular-nums}
+.production-purchase-total{display:flex;justify-content:space-between;align-items:center;padding:13px 15px;border-radius:10px;background:#f1f5fb;color:#4c5e78}
+.production-purchase-total span{font-size:12px;font-weight:650}
+.production-purchase-total strong{font-size:18px;color:#30496e;font-variant-numeric:tabular-nums}
+.production-purchase-history-details{display:grid;gap:0;margin-top:10px;border-top:1px solid #eef1f5}
+.production-purchase-history-line{display:flex;justify-content:space-between;gap:14px;padding:10px 0;border-bottom:1px solid #f0f2f6}
+.production-purchase-history-line>div{display:grid;gap:4px;min-width:0}
+.production-purchase-history-line>div:last-child{text-align:right;flex:0 0 auto}
+.production-purchase-history-line strong{font-size:11px;color:#455772}
+.production-purchase-history-line small{font-size:10px;color:#8a95a6;line-height:1.4}
+@media(max-width:720px){
+ .production-purchase-line{padding:10px}
+ .production-purchase-history-line{gap:8px}
+ .production-purchase-history-line>div:first-child{flex:1}
+ .production-purchase-history-line strong{font-size:10px}
+ .production-purchase-history-line small{font-size:9px}
+}
