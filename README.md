@@ -116,10 +116,10 @@ El módulo está integrado en la navegación principal mediante `app/fabric-modu
 - `telaColores`: relación entre tela y color; cada asociación conserva sus propios HEX y CMYK, por lo que el mismo nombre puede tener códigos distintos para materiales diferentes.
 - `rollos`: una fila por rollo físico; las mediciones reales `pesoKg` y `metros` son independientes y pueden permanecer en `null`. El color se relaciona mediante `idTelaColor`.
 - `rolloMovimientos`: historial de ingresos, consumos, ajustes y registro de mediciones.
-- `proveedores`, `proveedorTelefonos`, `proveedorCategorias`: proveedor normalizado con múltiples teléfonos y rubros.
+- `proveedores`, `proveedorTelefonos`, `proveedorCategorias`: proveedor normalizado con RUC opcional de 11 dígitos, múltiples teléfonos y rubros.
 - `compras` y `detalleCompra`: cabecera y líneas de compra; cada rollo puede tener una sola línea de origen y conserva su precio unitario histórico. En una línea de compra se pueden ingresar varias cantidades adicionales; cada cantidad crea su propio rollo y detalle, compartiendo proveedor, tela, color, unidad y precio.
 
-La migración inicial es `supabase/migrations/202611040001_textile_rolls_purchases.sql`. La migración de rendimiento, colores y ranuras de moldes es `supabase/migrations/202611050001_textile_yield_and_normalized_colors.sql`. Son aditivas, pero deben ejecutarse en orden. No se ejecutan automáticamente: Supabase no está conectado a esta versión local-first. Las tablas mantienen RLS habilitado sin políticas permisivas; antes de una futura conexión remota deben configurarse autenticación y políticas de acceso.
+La migración inicial es `supabase/migrations/202611040001_textile_rolls_purchases.sql`. La migración de rendimiento, colores y ranuras de moldes es `supabase/migrations/202611050001_textile_yield_and_normalized_colors.sql`. La migración `supabase/migrations/202611050002_supplier_ruc.sql` añade el RUC opcional de proveedores. Son aditivas, pero deben ejecutarse en orden. No se ejecutan automáticamente: Supabase no está conectado a esta versión local-first. Las tablas mantienen RLS habilitado sin políticas permisivas; antes de una futura conexión remota deben configurarse autenticación y políticas de acceso.
 
 ### Cantidades y mediciones
 
