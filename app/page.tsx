@@ -585,7 +585,7 @@ export default function Home() {
       const payload = {
         app: 'TelaStock',
         backupType: 'full',
-        schemaVersion: 3,
+        schemaVersion: 4,
         exportedAt: new Date().toISOString(),
         data: {
           sizeGroups, sizes, models, pieces, movements, fabricInventory,
@@ -818,12 +818,18 @@ export default function Home() {
         <button className={`nav-item ${view === 'rollos' ? 'active' : ''}`} onClick={() => setView('rollos')}><span aria-hidden="true">▥</span> Inventario de rollos</button>
         <button className={`nav-item ${view === 'compras' ? 'active' : ''}`} onClick={() => setView('compras')}><span aria-hidden="true">＋</span> Compras</button>
         <button className={`nav-item ${view === 'proveedores' ? 'active' : ''}`} onClick={() => setView('proveedores')}><span aria-hidden="true">♙</span> Proveedores</button>
+        <div className="side-label fabric-nav-label">CONFECCIÓN</div>
+        <button className={`nav-item ${view === 'insumos' ? 'active' : ''}`} onClick={() => setView('insumos')}>▧ Insumos y avíos</button>
+        <button className={`nav-item ${view === 'componentes' ? 'active' : ''}`} onClick={() => setView('componentes')}>◇ Componentes</button>
+        <button className={`nav-item ${view === 'modelos-producto' ? 'active' : ''}`} onClick={() => setView('modelos-producto')}>▤ Modelos configurados</button>
+        <button className={`nav-item ${view === 'recetas' ? 'active' : ''}`} onClick={() => setView('recetas')}>≋ Recetas</button>
+        <button className={`nav-item ${view === 'planificacion' ? 'active' : ''}`} onClick={() => setView('planificacion')}>✓ Planificar</button>
         <div className="sidebar-bottom"><div className="avatar">P</div><div><strong>Usuario de prueba</strong><span>Administrador</span></div><span className="online-dot" /></div>
       </aside>
 
       <section className="main-area">
         <header className="topbar">
-          <div className="crumb">TelaStock / <strong>{view === 'inventario' ? 'Inventario de piezas' : view === 'modelos' ? 'Modelos y moldes' : view === 'historial' ? 'Historial' : view === 'telas' ? 'Catálogo de telas' : view === 'rollos' ? 'Inventario de rollos' : view === 'compras' ? 'Compras de telas' : 'Proveedores'}</strong></div>
+          <div className="crumb">TelaStock / <strong>{view === 'inventario' ? 'Inventario de piezas' : view === 'modelos' ? 'Modelos y moldes' : view === 'historial' ? 'Historial' : view === 'telas' ? 'Catálogo de telas' : view === 'rollos' ? 'Inventario de rollos' : view === 'compras' ? 'Compras de telas' : view === 'proveedores' ? 'Proveedores' : view === 'insumos' ? 'Insumos y avíos' : view === 'componentes' ? 'Componentes' : view === 'modelos-producto' ? 'Modelos configurados' : view === 'recetas' ? 'Recetas' : 'Planificación'}</strong></div>
           <div className="top-actions"><button className="backup-trigger" onClick={() => setShowBackupModal(true)} title="Importar o exportar todos los datos" aria-label="Importar o exportar todos los datos"><span aria-hidden="true">⇅</span><span className="backup-trigger-label">Respaldo</span></button><span className="local-pill"><i /> Prototipo local</span><button className="icon-button" title="Ayuda sobre cálculo" onClick={() => setNoticeMessage('Las unidades fabricables se calculan con el molde más limitante: todos los moldes requeridos deben alcanzar. Es una capacidad de fabricación con el stock actual, no una cantidad de prendas ya confeccionadas.', 'info')}>?</button></div>
         </header>
 
@@ -839,7 +845,7 @@ export default function Home() {
 
         <div className="content">
           <div className="page-heading">
-            <div><div className="eyebrow">{['telas','rollos','compras','proveedores'].includes(view) ? 'INVENTARIO DE INSUMOS' : 'INVENTARIO DE FABRICACIÓN'}</div><h1>{view === 'inventario' ? 'Piezas por talla' : view === 'modelos' ? 'Modelos de fabricación' : view === 'historial' ? 'Movimientos de piezas' : view === 'telas' ? 'Catálogo de telas' : view === 'rollos' ? 'Inventario de rollos' : view === 'compras' ? 'Compras de telas' : 'Proveedores'}</h1><p>{view === 'inventario' ? 'Consulta cuántas prendas puedes fabricar con el stock disponible de todos sus moldes.' : view === 'modelos' ? 'Define el patrón base, su grupo de tallas y cuántas piezas requiere cada prenda.' : view === 'historial' ? 'Revisa las entradas registradas y el detalle de cada molde y talla.' : view === 'telas' ? 'Administra los tipos de tela, unidades habituales y características.' : view === 'rollos' ? 'Controla cada rollo físico y sus mediciones reales en KG y metros.' : view === 'compras' ? 'Registra compras por proveedor y conserva sus precios históricos.' : 'Administra contactos, teléfonos y rubros de proveedores.'}</p></div>
+            <div><div className="eyebrow">{['telas','rollos','compras','proveedores','insumos'].includes(view) ? 'INVENTARIO DE INSUMOS' : ['componentes','modelos-producto','recetas','planificacion'].includes(view) ? 'CONFIGURACIÓN DE CONFECCIÓN' : 'INVENTARIO DE FABRICACIÓN'}</div><h1>{view === 'inventario' ? 'Piezas por talla' : view === 'modelos' ? 'Modelos de fabricación' : view === 'historial' ? 'Movimientos de piezas' : view === 'telas' ? 'Catálogo de telas' : view === 'rollos' ? 'Inventario de rollos' : view === 'compras' ? 'Compras de telas' : view === 'proveedores' ? 'Proveedores' : view === 'insumos' ? 'Insumos y avíos' : view === 'componentes' ? 'Biblioteca de componentes' : view === 'modelos-producto' ? 'Modelos configurados' : view === 'recetas' ? 'Recetas estándar' : 'Planificación de materiales'}</h1><p>{view === 'inventario' ? 'Consulta cuántas prendas puedes fabricar con el stock disponible de todos sus moldes.' : view === 'modelos' ? 'Define el patrón base, su grupo de tallas y cuántas piezas requiere cada prenda.' : view === 'historial' ? 'Revisa las entradas registradas y el detalle de cada molde y talla.' : view === 'telas' ? 'Administra los tipos de tela, unidades habituales y características.' : view === 'rollos' ? 'Controla cada rollo físico y sus mediciones reales en KG y metros.' : view === 'compras' ? 'Registra compras por proveedor y conserva sus precios históricos.' : view === 'proveedores' ? 'Administra contactos, teléfonos y rubros de proveedores.' : view === 'insumos' ? 'Administra avíos, consumibles, variantes y existencias.' : view === 'componentes' ? 'Crea cuellos, bolsillos, puños y acabados reutilizables.' : view === 'modelos-producto' ? 'Combina patrones base con los acabados que lleva cada prenda.' : view === 'recetas' ? 'Define consumos habituales por familia de prenda.' : 'Calcula materiales necesarios por talla y faltantes de compra.'}</p></div>
             <div className="heading-actions">
               {view === 'inventario' && <button className="button secondary" onClick={exportCsv}>↧ <span>Exportar</span></button>}
               {view === 'inventario' && <button className="button secondary" onClick={() => openStockForm('salida')}>− <span>Retirar / merma</span></button>}
