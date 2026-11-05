@@ -191,16 +191,34 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
   if (!output.supplyMovements.every((x) => variantIds.has(x.variantId) && (x.sizeId === null || typeof x.sizeId === 'string') && Number.isFinite(x.delta) && x.delta !== 0 && ['entrada', 'salida', 'ajuste'].includes(x.kind) && (x.sourcePurchaseDetailId == null || purchaseDetailIds.has(x.sourcePurchaseDetailId)))) {
     throw new Error('Hay movimientos de insumos inválidos.');
   }
-  if (!output.supplyPurchases.every((x) => typeof x.date === 'string' && x.date.length > 0 && (x.supplierId === null || typeof x.supplierId === 'string') && Number.isFinite(x.total) && x.total >= 0)) {
+  if (!output.supplyPurchases.every((x) => typeof x.date === 'string' && x.date.length > 0 && (x.supplierId === null || typeof x.supplierId === 'string') && typeof x.documentType === 'string' && typeof x.documentNumber === 'string' && Number.isFinite(x.total) && x.total >= 0)) {
     throw new Error('Hay encabezados de compra de avíos inválidos.');
   }
-  if (!output.supplyPurchaseDetails.every((x) => purchaseIds.has(x.purchaseId) && variantIds.has(x.variantId) &&
-    (x.sizeId === null || typeof x.sizeId === 'string') && Number.isFinite(x.purchaseQuantity) && x.purchaseQuantity > 0 &&
-    Number.isFinite(x.baseQuantityPerPack) && x.baseQuantityPerPack > 0 && Number.isFinite(x.inventoryQuantity) && x.inventoryQuantity > 0 &&
-    Number.isFinite(x.unitPrice) && x.unitPrice >= 0 && Number.isFinite(x.lineTotal) && x.lineTotal >= 0 &&
-    Math.abs(x.lineTotal - x.purchaseQuantity * x.unitPrice) < 0.02)) {
+  if (!output.supplyPurchaseDetails.every((x) => {
+    const variant = output.variants.find((item) => item.id === x.variantId);
+    const supply = variant ? output.supplies.find((item) => item.id === variant.supplyId) : undefined;
+    return purchaseIds.has(x.purchaseId) && Boolean(variant && supply) && !variant?.textileId &&
+      (supply?.stockMode === 'talla' ? typeof x.sizeId === 'string' && x.sizeId.length > 0 : x.sizeId === null) &&
+      Number.isFinite(x.purchaseQuantity) && x.purchaseQuantity > 0 &&
+      Number.isFinite(x.baseQuantityPerPack) && x.baseQuantityPerPack > 0 &&
+      Number.isFinite(x.inventoryQuantity) && x.inventoryQuantity > 0 &&
+      Math.abs(x.inventoryQuantity - x.purchaseQuantity * x.baseQuantityPerPack) < 0.00001 &&
+      typeof x.purchaseUnitLabel === 'string' && x.purchaseUnitLabel.trim().length > 0 &&
+      Number.isFinite(x.unitPrice) && x.unitPrice >= 0 && Number.isFinite(x.lineTotal) && x.lineTotal >= 0 &&
+      Math.abs(x.lineTotal - x.purchaseQuantity * x.unitPrice) < 0.02;
+  })) {
     throw new Error('Hay detalles de compra de avíos inválidos.');
   }
+  if (!output.supplyPurchases.every((purchase) => {
+    const total = output.supplyPurchaseDetails.filter((detail) => detail.purchaseId === purchase.id).reduce((sum, detail) => sum + detail.lineTotal, 0);
+    return Math.abs(total - purchase.total) < 0.02;
+  })) throw new Error('El total de algún comprobante no coincide con sus detalles.');
+  if (!output.supplyMovements.every((movement) => {
+    if (!movement.sourcePurchaseDetailId) return true;
+    const detail = output.supplyPurchaseDetails.find((item) => item.id === movement.sourcePurchaseDetailId);
+    return Boolean(detail && movement.kind === 'entrada' && movement.variantId === detail.variantId &&
+      movement.sizeId === detail.sizeId && Math.abs(movement.delta - detail.inventoryQuantity) < 0.00001);
+  })) throw new Error('Hay movimientos de compra que no coinciden con su detalle.');
   if (!output.components.every((x) => x.name.trim() && x.type.trim() && Array.isArray(x.pieces) && x.pieces.every((p) => p.name.trim() && Number.isInteger(p.unitsPerGarment) && p.unitsPerGarment > 0) && validMaterials(x.materials))) {
     throw new Error('Hay componentes con piezas o materiales inválidos.');
   }
@@ -559,7 +577,7 @@ export function ProductionModule({
       const quantity = Number(line.quantity);
       const unitPrice = Number(line.unitPrice);
       if (!variant || !supply || variant.textileId) return tell('Cada línea debe seleccionar una variante de avío válida. Las telas se compran desde el módulo de rollos.', 'error');
-      if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0) return tell('Revisa las cantidades y precios de todos los detalles.', 'error');
+      if (line.unitPrice.trim() === '' || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0) return tell('Revisa las cantidades y precios de todos los detalles.', 'error');
       if (supply.stockMode === 'talla' && (!line.sizeId || !sizes.some((size) => size.id === line.sizeId))) return tell('Selecciona una talla para cada insumo que controla stock por talla.', 'error');
       const sizeId = supply.stockMode === 'talla' ? line.sizeId : null;
       const baseQuantityPerPack = variant.purchasePackQuantity ?? 1;
