@@ -27,8 +27,12 @@ export type PurchaseDetail = {
   id: string; idCompra: string; idRollo: string; cantidadComprada: number;
   unidadPrecio: FabricUnit; precioUnitario: number; importeTotal: number;
 };
+export type RollMovement = {
+  id: string; idRollo: string; fecha: string; tipo: 'ingreso' | 'consumo' | 'ajuste' | 'medicion';
+  unidad: FabricUnit; delta: number | null; cantidadAnterior: number | null; cantidadNueva: number | null; nota: string;
+};
 export type FabricBackupData = {
-  telas: Textile[]; rollos: FabricRoll[]; proveedores: Supplier[];
+  telas: Textile[]; rollos: FabricRoll[]; rolloMovimientos: RollMovement[]; proveedores: Supplier[];
   proveedorTelefonos: SupplierPhone[]; proveedorCategorias: SupplierCategory[];
   compras: FabricPurchase[]; detalleCompra: PurchaseDetail[];
 };
@@ -36,6 +40,7 @@ export const FABRIC_STORAGE_KEYS = {
   version: 'telastock-fabric-schema-version',
   telas: 'telastock-fabric-telas-v1',
   rollos: 'telastock-fabric-rollos-v1',
+  rolloMovimientos: 'telastock-fabric-rollo-movimientos-v1',
   proveedores: 'telastock-fabric-proveedores-v1',
   proveedorTelefonos: 'telastock-fabric-proveedor-telefonos-v1',
   proveedorCategorias: 'telastock-fabric-proveedor-categorias-v1',
@@ -44,7 +49,7 @@ export const FABRIC_STORAGE_KEYS = {
 } as const;
 
 export function emptyFabricBackupData(): FabricBackupData {
-  return { telas: [], rollos: [], proveedores: [], proveedorTelefonos: [], proveedorCategorias: [], compras: [], detalleCompra: [] };
+  return { telas: [], rollos: [], rolloMovimientos: [], proveedores: [], proveedorTelefonos: [], proveedorCategorias: [], compras: [], detalleCompra: [] };
 }
 export function validateFabricBackupData(value: unknown): FabricBackupData {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('El respaldo de telas está incompleto.');
@@ -69,7 +74,12 @@ export function validateFabricBackupData(value: unknown): FabricBackupData {
   if (!output.proveedorCategorias.every((x) => proveedorIds.has(x.idProveedor) && x.categoria.trim())) throw new Error('Hay categorías relacionadas con proveedores inexistentes.');
   if (!output.rollos.every((x) => telaIds.has(x.idTela) && (x.idProveedor === null || proveedorIds.has(x.idProveedor)) && ['KG', 'M'].includes(x.unidadIngreso) && Number.isFinite(x.cantidadIngreso) && x.cantidadIngreso > 0 && ['disponible', 'reservado', 'agotado', 'defectuoso'].includes(x.estado) && (x.pesoKg === null || (Number.isFinite(x.pesoKg) && x.pesoKg >= 0)) && (x.metros === null || (Number.isFinite(x.metros) && x.metros >= 0)))) throw new Error('Hay rollos con tela, medición o proveedor inválido.');
   if (!output.compras.every((x) => x.idProveedor === null || proveedorIds.has(x.idProveedor))) throw new Error('Hay compras relacionadas con proveedores inexistentes.');
-  if (!output.detalleCompra.every((x) => compraIds.has(x.idCompra) && rolloIds.has(x.idRollo) && Number.isFinite(x.cantidadComprada) && x.cantidadComprada > 0 && ['KG', 'M'].includes(x.unidadPrecio) && Number.isFinite(x.precioUnitario) && x.precioUnitario >= 0 && Math.abs(x.importeTotal - x.cantidadComprada * x.precioUnitario) < 0.011)) throw new Error('Hay detalles de compra con relaciones o importes inválidos.');
+  if (!output.detalleCompra.every((x) => {
+    const roll = output.rollos.find((r) => r.id === x.idRollo);
+    return compraIds.has(x.idCompra) && rolloIds.has(x.idRollo) && Boolean(roll) && roll!.unidadIngreso === x.unidadPrecio && Number.isFinite(x.cantidadComprada) && x.cantidadComprada > 0 && ['KG', 'M'].includes(x.unidadPrecio) && Number.isFinite(x.precioUnitario) && x.precioUnitario >= 0 && Math.abs(x.importeTotal - x.cantidadComprada * x.precioUnitario) < 0.011;
+  })) throw new Error('Hay detalles de compra con relaciones, unidades o importes inválidos.');
+  const rollMovementIds = new Set(output.rollos.map((x) => x.id));
+  if (!output.rolloMovimientos.every((x) => rollMovementIds.has(x.idRollo) && ['KG', 'M'].includes(x.unidad) && ['ingreso', 'consumo', 'ajuste', 'medicion'].includes(x.tipo) && (x.delta === null || Number.isFinite(x.delta)) && (x.cantidadAnterior === null || (Number.isFinite(x.cantidadAnterior) && x.cantidadAnterior >= 0)) && (x.cantidadNueva === null || (Number.isFinite(x.cantidadNueva) && x.cantidadNueva >= 0)) && typeof x.fecha === 'string' && typeof x.nota === 'string')) throw new Error('Hay movimientos de rollo inválidos o sin rollo relacionado.');
   if (new Set(output.detalleCompra.map((x) => x.idRollo)).size !== output.detalleCompra.length) throw new Error('Un rollo aparece en más de una línea de compra.');
   return output;
 }
@@ -127,6 +137,8 @@ export function FabricModule({ view }: { view: FabricView }) {
   const [showSupplierForm, setShowSupplierForm] = useState(false);
   const [showPurchaseForm, setShowPurchaseForm] = useState(false);
   const [showRolloDetail, setShowRolloDetail] = useState(false);
+  const [showRollMovement, setShowRollMovement] = useState(false);
+  const [rollMovementForm, setRollMovementForm] = useState<{ unidad: FabricUnit; cantidad: string; nota: string }>({ unidad: 'KG', cantidad: '', nota: 'Consumo para corte' });
   const [showMoreRollo, setShowMoreRollo] = useState(false);
   const [selectedRolloId, setSelectedRolloId] = useState<string | null>(null);
   const [telaForm, setTelaForm] = useState<TelaForm>(blankTela);
@@ -266,8 +278,59 @@ export function FabricModule({ view }: { view: FabricView }) {
       idProveedor: rolloForm.idProveedor || null, ubicacion: rolloForm.ubicacion.trim(), estado: rolloForm.estado, nota: rolloForm.nota.trim(),
       createdAt: rolloForm.id ? (rollById.get(rolloForm.id)?.createdAt ?? now) : now, updatedAt: now,
     };
-    persist({ ...data, rollos: rolloForm.id ? data.rollos.map((x) => x.id === row.id ? row : x) : [...data.rollos, row] });
+    const movementRows: RollMovement[] = [];
+    const previous = rolloForm.id ? rollById.get(rolloForm.id) : undefined;
+    const addMeasurement = (unit: FabricUnit, before: number | null, after: number | null) => {
+      if (before === after) return;
+      const bothKnown = before !== null && after !== null;
+      movementRows.push({ id: id(), idRollo: row.id, fecha: now, tipo: bothKnown ? 'ajuste' : 'medicion', unidad: unit, delta: bothKnown ? Number((after! - before!).toFixed(3)) : null, cantidadAnterior: before, cantidadNueva: after, nota: bothKnown ? 'Corrección de medición real' : 'Registro o corrección de medición real' });
+    };
+    if (!previous) {
+      movementRows.push({ id: id(), idRollo: row.id, fecha: now, tipo: 'ingreso', unidad: row.unidadIngreso, delta: quantity, cantidadAnterior: null, cantidadNueva: quantity, nota: 'Ingreso inicial del rollo' });
+      if (row.unidadIngreso !== 'KG' && row.pesoKg !== null) addMeasurement('KG', null, row.pesoKg);
+      if (row.unidadIngreso !== 'M' && row.metros !== null) addMeasurement('M', null, row.metros);
+    } else {
+      addMeasurement('KG', previous.pesoKg, row.pesoKg);
+      addMeasurement('M', previous.metros, row.metros);
+    }
+    persist({
+      ...data,
+      rollos: previous ? data.rollos.map((x) => x.id === row.id ? row : x) : [...data.rollos, row],
+      rolloMovimientos: [...data.rolloMovimientos, ...movementRows],
+    });
     setShowRolloForm(false); tell(rolloForm.id ? 'Rollo actualizado. Las compras históricas no se modificaron.' : 'Rollo registrado en el inventario.');
+  }
+
+  function openRollMovement(roll: FabricRoll) {
+    setRollMovementForm({ unidad: roll.unidadIngreso, cantidad: '', nota: 'Consumo para corte' });
+    setShowRollMovement(true);
+  }
+  function saveRollMovement(event: FormEvent) {
+    event.preventDefault();
+    const roll = selectedRoll;
+    const quantity = Number(rollMovementForm.cantidad);
+    if (!roll) return tell('No se encontró el rollo seleccionado.', 'error');
+    if (!validQty(quantity)) return tell('La cantidad debe ser mayor que cero.', 'error');
+    const current = rollMovementForm.unidad === 'KG' ? roll.pesoKg : roll.metros;
+    if (current === null) return tell(`No hay una medición real en ${rollMovementForm.unidad} para este rollo. Registra primero esa medida; no se hará una conversión estimada.`, 'error');
+    if (quantity > current) return tell(`No puedes retirar ${nfmt.format(quantity)} ${rollMovementForm.unidad}: solo hay ${nfmt.format(current)} disponible.`, 'error');
+    const next = Number((current - quantity).toFixed(3));
+    const now = new Date().toISOString();
+    const updated: FabricRoll = {
+      ...roll,
+      pesoKg: rollMovementForm.unidad === 'KG' ? next : roll.pesoKg,
+      metros: rollMovementForm.unidad === 'M' ? next : roll.metros,
+      estado: next === 0 ? 'agotado' : roll.estado,
+      updatedAt: now,
+    };
+    const movement: RollMovement = {
+      id: id(), idRollo: roll.id, fecha: now, tipo: 'consumo', unidad: rollMovementForm.unidad,
+      delta: -quantity, cantidadAnterior: current, cantidadNueva: next, nota: rollMovementForm.nota.trim() || 'Consumo de tela',
+    };
+    persist({ ...data, rollos: data.rollos.map((x) => x.id === roll.id ? updated : x), rolloMovimientos: [...data.rolloMovimientos, movement] });
+    setShowRollMovement(false);
+    setRollMovementForm({ unidad: updated.unidadIngreso, cantidad: '', nota: 'Consumo para corte' });
+    tell(`Consumo registrado. Saldo real: ${nfmt.format(next)} ${movement.unidad}.`);
   }
 
   function openSupplier(supplier?: Supplier) {
@@ -328,6 +391,7 @@ export function FabricModule({ view }: { view: FabricView }) {
       observacion: purchaseForm.observacion.trim(), createdAt: oldPurchase?.createdAt ?? now, updatedAt: now,
     };
     const newRolls: FabricRoll[] = [];
+    const newRollMovements: RollMovement[] = [];
     let details = [...data.detalleCompra];
     for (const line of lines) {
       if (line.idRollo) {
@@ -338,30 +402,37 @@ export function FabricModule({ view }: { view: FabricView }) {
         details = details.map((x) => x.id === existing.id ? { ...x, cantidadComprada: line.quantity, precioUnitario: line.price, importeTotal: Number((line.quantity * line.price).toFixed(2)) } : x);
         // La cantidad comprada es histórica; la medición actual del rollo se conserva.
         // Solo se actualiza el dato de ingreso original del rollo.
-        const updatedRoll = { ...roll, cantidadIngreso: line.quantity, updatedAt: now };
-        if (roll.unidadIngreso === 'KG' && roll.pesoKg === existing.cantidadComprada) updatedRoll.pesoKg = line.quantity;
-        if (roll.unidadIngreso === 'M' && roll.metros === existing.cantidadComprada) updatedRoll.metros = line.quantity;
+        const updatedRoll = { ...roll, cantidadIngreso: line.quantity, idProveedor: purchaseForm.idProveedor || null, updatedAt: now };
+        const beforeMeasure = roll.unidadIngreso === 'KG' ? roll.pesoKg : roll.metros;
+        const afterMeasure = beforeMeasure === existing.cantidadComprada ? line.quantity : beforeMeasure;
+        if (roll.unidadIngreso === 'KG' && beforeMeasure !== afterMeasure) updatedRoll.pesoKg = afterMeasure;
+        if (roll.unidadIngreso === 'M' && beforeMeasure !== afterMeasure) updatedRoll.metros = afterMeasure;
         newRolls.push(updatedRoll);
+        if (beforeMeasure !== afterMeasure) newRollMovements.push({ id: id(), idRollo: roll.id, fecha: now, tipo: 'ajuste', unidad: roll.unidadIngreso, delta: Number((afterMeasure! - beforeMeasure!).toFixed(3)), cantidadAnterior: beforeMeasure, cantidadNueva: afterMeasure, nota: 'Corrección de cantidad de compra que ajusta la medición original' });
         continue;
       }
       const tela = line.tela!;
       const rollId = id();
       const kgExtra = nullableNumber(line.pesoKg);
       const mExtra = nullableNumber(line.metros);
-      newRolls.push({
+      const createdRoll: FabricRoll = {
         id: rollId, idTela: tela.id, unidadIngreso: line.unidad, cantidadIngreso: line.quantity,
         pesoKg: line.unidad === 'KG' ? line.quantity : kgExtra, metros: line.unidad === 'M' ? line.quantity : mExtra,
         color: line.color.trim(), idLote: line.idLote.trim(), fechaIngreso: purchaseForm.fechaCompra,
         idProveedor: purchaseForm.idProveedor || null, ubicacion: '', estado: 'disponible', nota: '',
         createdAt: now, updatedAt: now,
-      });
+      };
+      newRolls.push(createdRoll);
+      newRollMovements.push({ id: id(), idRollo: rollId, fecha: now, tipo: 'ingreso', unidad: line.unidad, delta: line.quantity, cantidadAnterior: null, cantidadNueva: line.quantity, nota: 'Ingreso de rollo por compra' });
+      if (line.unidad === 'KG' && createdRoll.metros !== null) newRollMovements.push({ id: id(), idRollo: rollId, fecha: now, tipo: 'medicion', unidad: 'M', delta: null, cantidadAnterior: null, cantidadNueva: createdRoll.metros, nota: 'Metros reales informados al registrar la compra' });
+      if (line.unidad === 'M' && createdRoll.pesoKg !== null) newRollMovements.push({ id: id(), idRollo: rollId, fecha: now, tipo: 'medicion', unidad: 'KG', delta: null, cantidadAnterior: null, cantidadNueva: createdRoll.pesoKg, nota: 'Peso real informado al registrar la compra' });
       details.push({ id: id(), idCompra: purchaseId, idRollo: rollId, cantidadComprada: line.quantity, unidadPrecio: line.unidad, precioUnitario: line.price, importeTotal: Number((line.quantity * line.price).toFixed(2)) });
     }
     const purchaseRows = oldPurchase
       ? data.compras.map((x) => x.id === purchaseId ? purchase : x)
       : [...data.compras, purchase];
     const rollRows = [...data.rollos.filter((roll) => !newRolls.some((x) => x.id === roll.id)), ...newRolls];
-    persist({ ...data, compras: purchaseRows, rollos: rollRows, detalleCompra: details });
+    persist({ ...data, compras: purchaseRows, rollos: rollRows, detalleCompra: details, rolloMovimientos: [...data.rolloMovimientos, ...newRollMovements] });
     setShowPurchaseForm(false);
     tell(`${oldPurchase ? 'Compra actualizada' : 'Compra registrada'}: ${lines.length} rollos por ${money.format(details.filter((x) => x.idCompra === purchaseId).reduce((sum, x) => sum + x.importeTotal, 0))}.`);
   }
@@ -370,6 +441,7 @@ export function FabricModule({ view }: { view: FabricView }) {
       downloadCsv('catalogo-telas.csv', [['id_tela','nombre_tela','unidad_venta','ancho_nominal_m','descripcion','activo'], ...data.telas.map((x) => [x.id,x.nombreTela,x.unidadVenta,x.anchoNominalM ?? '',x.descripcion,x.activo ? 'TRUE' : 'FALSE'])]);
     } else if (view === 'rollos') {
       downloadCsv('inventario-rollos.csv', [['id_rollo','id_tela','nombre_tela','unidad_ingreso','cantidad_ingresada','peso_kg_real','metros_reales','color','id_lote','fecha_ingreso','id_proveedor','estado','ubicacion','nota'], ...rollRows.map((x) => [x.id,x.idTela,telaById.get(x.idTela)?.nombreTela ?? '',x.unidadIngreso,x.cantidadIngreso,x.pesoKg ?? '',x.metros ?? '',x.color,x.idLote,x.fechaIngreso,x.idProveedor ?? '',x.estado,x.ubicacion,x.nota])]);
+      downloadCsv('movimientos-rollos.csv', [['id_movimiento','id_rollo','fecha','tipo','unidad','delta','cantidad_anterior','cantidad_nueva','nota'], ...data.rolloMovimientos.map((x) => [x.id,x.idRollo,x.fecha,x.tipo,x.unidad,x.delta ?? '',x.cantidadAnterior ?? '',x.cantidadNueva ?? '',x.nota])]);
     } else if (view === 'compras') {
       downloadCsv('historial-compras-telas.csv', [['id_compra','id_proveedor','proveedor','fecha_compra','tipo_comprobante','numero_comprobante','id_detalle','id_rollo','id_tela','nombre_tela','cantidad_comprada','unidad_precio','precio_unitario','importe_total'], ...data.compras.flatMap((purchase) => (detailByPurchase.get(purchase.id) ?? []).map((detail) => {
         const roll = rollById.get(detail.idRollo);
@@ -540,7 +612,9 @@ export function FabricModule({ view }: { view: FabricView }) {
       <div className="modal-heading"><div><div className="eyebrow">FICHA DEL ROLLO</div><h2 id="roll-detail-title">{telaById.get(selectedRoll.idTela)?.nombreTela ?? 'Tela'} · {selectedRoll.color || 'Sin color'}</h2><p>Identificador {selectedRoll.id}</p></div><button className="icon-button" onClick={() => setShowRolloDetail(false)}>×</button></div>
       <div className="roll-detail-grid"><div><small>Metros reales</small><strong>{selectedRoll.metros === null ? 'No medidos' : \`\${nfmt.format(selectedRoll.metros)} m\`}</strong></div><div><small>Peso real</small><strong>{selectedRoll.pesoKg === null ? 'No medido' : \`\${nfmt.format(selectedRoll.pesoKg)} kg\`}</strong></div><div><small>Estado</small><strong>{statusLabel[selectedRoll.estado]}</strong></div><div><small>Ingreso</small><strong>{selectedRoll.fechaIngreso}</strong></div><div><small>Partida</small><strong>{selectedRoll.idLote || '—'}</strong></div><div><small>Ubicación</small><strong>{selectedRoll.ubicacion || '—'}</strong></div></div>
       {(() => { const detail = rollPurchaseDetail(selectedRoll.id); const purchase = detail ? data.compras.find((x) => x.id === detail.idCompra) : undefined; return <div className="roll-origin-panel"><strong>Compra de origen</strong>{detail && purchase ? <><span>{purchase.fechaCompra} · {purchase.tipoComprobante} {purchase.numeroComprobante}</span><span>{nfmt.format(detail.cantidadComprada)} {detail.unidadPrecio} × {money.format(detail.precioUnitario)} = <strong>{money.format(detail.importeTotal)}</strong></span><span>{purchase.idProveedor ? supplierById.get(purchase.idProveedor)?.nombre ?? 'Proveedor' : 'Proveedor no indicado'}</span></> : <span>Este rollo no está vinculado a una compra registrada.</span>}</div>; })()}
-      <div className="form-actions"><button className="button secondary" onClick={() => { setShowRolloDetail(false); openRollo(selectedRoll); }}>Editar mediciones</button><button className="button primary" onClick={() => setShowRolloDetail(false)}>Cerrar</button></div>
+      <div className="roll-movement-history"><div className="fabric-subheading"><strong>Movimientos del rollo</strong><button className="text-action" onClick={() => openRollMovement(selectedRoll)}>Registrar consumo</button></div>{data.rolloMovimientos.filter((x) => x.idRollo === selectedRoll.id).sort((a,b) => b.fecha.localeCompare(a.fecha)).map((movement) => <div className="roll-movement-row" key={movement.id}><span>{movement.tipo.toLocaleUpperCase('es')} · {movement.unidad}</span><strong>{movement.delta === null ? (movement.cantidadNueva === null ? 'Medición retirada' : `Medición: ${nfmt.format(movement.cantidadNueva)}`) : `${movement.delta > 0 ? '+' : ''}${nfmt.format(movement.delta)}`}</strong><small>{movement.nota} · {new Date(movement.fecha).toLocaleString('es-PE')}</small></div>)}{data.rolloMovimientos.filter((x) => x.idRollo === selectedRoll.id).length === 0 && <small>Sin movimientos registrados.</small>}</div>
+      {showRollMovement && <form className="roll-consumption-form" onSubmit={saveRollMovement}><strong>Registrar consumo del rollo</strong><label className="field-label">Medida real<select className="large-input" value={rollMovementForm.unidad} onChange={(e) => setRollMovementForm((x) => ({ ...x, unidad: e.target.value as FabricUnit }))}><option value="KG">KG · {selectedRoll.pesoKg === null ? 'No medido' : `${nfmt.format(selectedRoll.pesoKg)} disponibles`}</option><option value="M">M · {selectedRoll.metros === null ? 'No medido' : `${nfmt.format(selectedRoll.metros)} disponibles`}</option></select></label><label className="field-label">Cantidad a consumir<input className="large-input" type="number" step="0.001" min="0.001" required value={rollMovementForm.cantidad} onChange={(e) => setRollMovementForm((x) => ({ ...x, cantidad: e.target.value }))} /></label><label className="field-label">Motivo<input className="large-input" value={rollMovementForm.nota} onChange={(e) => setRollMovementForm((x) => ({ ...x, nota: e.target.value }))} /></label><div className="form-actions"><button type="button" className="button secondary" onClick={() => setShowRollMovement(false)}>Cancelar</button><button className="button primary">Guardar consumo</button></div></form>}
+            <div className="form-actions"><button className="button secondary" onClick={() => { setShowRolloDetail(false); openRollo(selectedRoll); }}>Editar mediciones</button><button className="button primary" onClick={() => setShowRolloDetail(false)}>Cerrar</button></div>
     </section></div>}
   </div>;
 }
