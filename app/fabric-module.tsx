@@ -348,7 +348,7 @@ export function FabricModule({ view }: { view: FabricView }) {
     const details = detailByPurchase.get(x.id) ?? [];
     const haystack = `${supplier} ${x.numeroComprobante} ${x.tipoComprobante} ${details.map((d) => `${telaById.get(rollById.get(d.idRollo)?.idTela ?? '')?.nombreTela ?? ''} ${d.idRollo}`).join(' ')}`.toLocaleLowerCase('es');
     return !purchaseSearch || haystack.includes(purchaseSearch.toLocaleLowerCase('es'));
-  }).sort((a,b) => b.fechaCompra.localeCompare(a.fechaCompra)), [data.compras, data.detalleCompra, supplierById, detailByPurchase, telaById, rollById, purchaseSearch]);
+  }).sort((a,b) => b.fechaCompra.localeCompare(a.fechaCompra)), [data.compras, supplierById, detailByPurchase, telaById, rollById, purchaseSearch]);
   const supplierRows = useMemo(() => data.proveedores.filter((supplier) => {
     const phones = data.proveedorTelefonos.filter((x) => x.idProveedor === supplier.id).map((x) => x.numero).join(' ');
     const cats = data.proveedorCategorias.filter((x) => x.idProveedor === supplier.id).map((x) => x.categoria).join(' ');
@@ -757,7 +757,6 @@ export function FabricModule({ view }: { view: FabricView }) {
   const telaRollCount = (telaId: string) => data.rollos.filter((x) => x.idTela === telaId).length;
   const purchaseTotal = (purchaseId: string) => (detailByPurchase.get(purchaseId) ?? []).reduce((sum, x) => sum + x.importeTotal, 0);
   const rollPurchaseDetail = (rollId: string) => data.detalleCompra.find((x) => x.idRollo === rollId);
-  const rollPurchase = (rollId: string) => { const detail = rollPurchaseDetail(rollId); return detail ? data.compras.find((x) => x.id === detail.idCompra) : undefined; };
   const selectedRoll = selectedRolloId ? rollById.get(selectedRolloId) : undefined;
 
   return <div className="fabric-module">
