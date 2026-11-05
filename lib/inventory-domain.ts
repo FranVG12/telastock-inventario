@@ -5,7 +5,7 @@
  */
 export type SizeGroup = { id: string; name: string; description?: string };
 export type Size = { id: string; groupId: string; label: string; sortOrder: number };
-export type ManufacturingModel = { id: string; name: string; sizeGroupId: string; secondaryFabricSlots?: number; updatedAt?: string };
+export type ManufacturingModel = { id: string; name: string; sizeGroupId: string; family?: string; secondaryFabricSlots?: number; updatedAt?: string };
 export type Laterality = 'simetrica' | 'izquierda' | 'derecha' | 'ninguna';
 export type StockSide = 'izquierda' | 'derecha';
 export type ModelPiece = {
