@@ -28,7 +28,7 @@ type SymmetricEntryMode = 'paridad' | 'lados';
 type StockSlot = 'paridad' | StockSide;
 type FabricSlot = string;
 type ModelFormPiece = { id: string; name: string; unitsPerGarment: string; laterality: Laterality; fabricSlot: FabricSlot; colorId: string; colorOverride: boolean; fabricType: string; color: string };
-type ModelFormState = { editingId: string | null; name: string; sizeGroupId: string; secondaryFabricSlots: number; pieces: ModelFormPiece[] };
+type ModelFormState = { editingId: string | null; name: string; sizeGroupId: string; family: string; secondaryFabricSlots: number; pieces: ModelFormPiece[] };
 
 const STORAGE = {
   groups: 'telastock-size-groups-v1',
@@ -36,6 +36,27 @@ const STORAGE = {
   models: 'telastock-manufacturing-models-v1',
   pieces: 'telastock-model-pieces-v1',
   movements: 'telastock-piece-movements-v1',
+};
+const baseModelFamilies = [
+  { value: 'polo', label: 'Polo' },
+  { value: 'buzo', label: 'Buzo' },
+  { value: 'casaca', label: 'Casaca' },
+  { value: 'otro', label: 'Otro' },
+];
+const migrateBaseModelFamilies = (models: ManufacturingModel[], products: Array<{ baseModelId?: string; family?: string }>) => {
+  const byBaseModel = new Map<string, Set<string>>();
+  products.forEach((product) => {
+    const family = typeof product.family === 'string' ? product.family.trim() : '';
+    if (!product.baseModelId || !baseModelFamilies.some((item) => item.value === family)) return;
+    const values = byBaseModel.get(product.baseModelId) ?? new Set<string>();
+    values.add(family);
+    byBaseModel.set(product.baseModelId, values);
+  });
+  return models.map((model) => {
+    if (baseModelFamilies.some((item) => item.value === model.family)) return model;
+    const inferred = [...(byBaseModel.get(model.id) ?? [])];
+    return { ...model, family: inferred.length === 1 ? inferred[0] : '' };
+  });
 };
 const nf = new Intl.NumberFormat('es-PE', { maximumFractionDigits: 0 });
 const fmt = (value: number) => nf.format(value);
@@ -61,6 +82,7 @@ const blankModelForm = (sizeGroupId: string, colorId = ''): ModelFormState => ({
   editingId: null,
   name: '',
   sizeGroupId,
+  family: '',
   secondaryFabricSlots: 0,
   pieces: [{ id: '', name: 'Pecho', unitsPerGarment: '1', laterality: 'ninguna', fabricSlot: 'principal', colorId, colorOverride: false, fabricType: 'Tela principal', color: '' }],
 });
@@ -111,6 +133,7 @@ export default function Home() {
       setSizeGroups(load(STORAGE.groups, demoSizeGroups));
       setSizes(load(STORAGE.sizes, demoSizes));
       const storedModels = load<ManufacturingModel[]>(STORAGE.models, demoModels);
+      const legacyProductModels = load<Array<{ baseModelId?: string; family?: string }>>(PRODUCTION_STORAGE_KEYS.productModels, []);
       // The global color-name dictionary is shared with the textile module. Legacy mold color names
       // are promoted into it once; their fabric-specific HEX/CMYK variant is resolved later by tela.
       const storedColors = load<ColorDefinition[]>(FABRIC_STORAGE_KEYS.colores, []);
@@ -135,7 +158,9 @@ export default function Home() {
         colorOverride: piece.colorOverride ?? true,
       }));
       setPieces(migratedPieces);
-      setModels(normalizeModelsWithSlots(storedModels, migratedPieces));
+      const migratedModels = normalizeModelsWithSlots(migrateBaseModelFamilies(storedModels, legacyProductModels), migratedPieces);
+      setModels(migratedModels);
+      if (migratedModels.some((model) => !model.family)) setNotice({ message: 'Hay patrones base sin familia asignada. Edítalos en Modelos para que los modelos configurados hereden la familia correcta.', kind: 'info' });
       setMovements(load(STORAGE.movements, demoMovements));
     } catch {
       setNotice({ message: 'No se pudo leer el almacenamiento del navegador. Se muestran los datos de demostración.', kind: 'info' });
@@ -436,6 +461,7 @@ export default function Home() {
       editingId: model.id,
       name: model.name,
       sizeGroupId: model.sizeGroupId,
+      family: model.family ?? '',
       secondaryFabricSlots: secondarySlotCountForModel(model, pieces),
       pieces: modelPieces(model.id).map((piece) => ({ id: piece.id, name: piece.name, unitsPerGarment: String(piece.unitsPerGarment), laterality: piece.laterality, fabricSlot: piece.fabricSlot ?? 'principal', colorId: piece.colorId ?? colorIdForName(piece.color ?? ''), colorOverride: piece.colorOverride ?? true, fabricType: piece.fabricType ?? '', color: piece.color ?? '' })),
     });
@@ -450,6 +476,7 @@ export default function Home() {
     const cleanPieces = modelForm.pieces.map((piece) => ({ ...piece, name: piece.name.trim(), fabricType: fabricSlotLabel(piece.fabricSlot), color: fabricColorById.get(piece.colorId)?.nombre ?? 'Sin especificar', units: Number(piece.unitsPerGarment) }));
     if (!cleanName) { setNoticeMessage('Escribe el nombre del modelo.', 'error'); return; }
     if (!modelForm.sizeGroupId) { setNoticeMessage('Selecciona un grupo de tallas.', 'error'); return; }
+    if (!baseModelFamilies.some((family) => family.value === modelForm.family)) { setNoticeMessage('Selecciona la familia del patrón base.', 'error'); return; }
     if (cleanPieces.length === 0 || cleanPieces.some((piece) => !piece.name || !Number.isInteger(piece.units) || piece.units < 1 || !isValidFabricSlot(piece.fabricSlot, modelForm.secondaryFabricSlots))) {
       setNoticeMessage('Cada molde debe tener nombre y una cantidad requerida entera mayor que cero.', 'error'); return;
     }
@@ -484,7 +511,7 @@ export default function Home() {
     }
 
     const modelId = modelForm.editingId ?? newId();
-    const savedModel: ManufacturingModel = { id: modelId, name: cleanName, sizeGroupId: modelForm.sizeGroupId, secondaryFabricSlots: modelForm.secondaryFabricSlots, updatedAt: new Date().toISOString() };
+    const savedModel: ManufacturingModel = { id: modelId, name: cleanName, sizeGroupId: modelForm.sizeGroupId, family: modelForm.family, secondaryFabricSlots: modelForm.secondaryFabricSlots, updatedAt: new Date().toISOString() };
     const savedPieces: ModelPiece[] = cleanPieces.map((formPiece, index) => ({
       id: formPiece.id || newId(), modelId, name: formPiece.name, unitsPerGarment: formPiece.units,
       laterality: formPiece.laterality, fabricSlot: formPiece.fabricSlot, colorId: formPiece.colorId || null,
@@ -608,7 +635,11 @@ export default function Home() {
         colorOverride: piece.colorOverride ?? true,
         archived: false,
       }));
-      setModels((current) => merge(current, normalizeModelsWithSlots(parsed.models!, incomingPieces)));
+      const legacyProductModels = safeRead<Array<{ baseModelId?: string; family?: string }>>(PRODUCTION_STORAGE_KEYS.productModels, []);
+      setModels((current) => {
+        const merged = merge(current, normalizeModelsWithSlots(parsed.models!, incomingPieces)).map((model) => ({ ...model, family: model.family || current.find((item) => item.id === model.id)?.family || '' }));
+        return migrateBaseModelFamilies(merged, legacyProductModels);
+      });
       setPieces((current) => merge(current, incomingPieces));
       window.dispatchEvent(new Event('telastock-fabric-data-updated'));
       setNoticeMessage('Configuración importada. Se combinaron los modelos, moldes, colores y tallas por ID; el historial de movimientos existente se conservó.');
@@ -645,7 +676,7 @@ export default function Home() {
       const payload = {
         app: 'TelaStock',
         backupType: 'full',
-        schemaVersion: 5,
+        schemaVersion: 6,
         exportedAt: new Date().toISOString(),
         data: {
           sizeGroups, sizes, models, pieces, movements, fabricInventory,
@@ -676,7 +707,7 @@ export default function Home() {
       const raw = JSON.parse(await file.text()) as unknown;
       const isRecord = (value: unknown): value is Record<string, unknown> =>
         Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-      if (!isRecord(raw) || raw.app !== 'TelaStock' || raw.backupType !== 'full' || ![1, 2, 3, 4, 5].includes(Number(raw.schemaVersion)) || !isRecord(raw.data)) {
+      if (!isRecord(raw) || raw.app !== 'TelaStock' || raw.backupType !== 'full' || ![1, 2, 3, 4, 5, 6].includes(Number(raw.schemaVersion)) || !isRecord(raw.data)) {
         throw new Error('Este no es un respaldo completo de TelaStock compatible.');
       }
       const data = raw.data;
@@ -697,10 +728,10 @@ export default function Home() {
       const importedSizes = getRows('sizes') as unknown as Size[];
       const importedModelsRaw = getRows('models') as unknown as ManufacturingModel[];
       const importedPieces = getRows('pieces') as unknown as ModelPiece[];
-      const importedModels = normalizeModelsWithSlots(importedModelsRaw, importedPieces);
       const importedMovements = getRows('movements') as unknown as PieceMovement[];
       let importedFabric = Number(raw.schemaVersion) >= 2 ? validateFabricBackupData(data.fabricInventory) : emptyFabricBackupData();
       const importedProduction = Number(raw.schemaVersion) >= 4 ? validateProductionBackupData(data.production) : emptyProductionBackupData();
+      const importedModels = normalizeModelsWithSlots(migrateBaseModelFamilies(importedModelsRaw, importedProduction.productModels), importedPieces);
       const hasText = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
       const groupIds = new Set(importedGroups.map((item) => item.id));
       const sizeIds = new Set(importedSizes.map((item) => item.id));
@@ -1069,6 +1100,7 @@ export default function Home() {
           <div className="modal-heading"><div><div className="eyebrow">PATRÓN BASE</div><h2 id="model-modal-title">{modelForm.editingId ? 'Editar modelo' : 'Crear modelo de fabricación'}</h2><p>Define las piezas necesarias por prenda y si su stock requiere control de lateralidad.</p></div><button className="icon-button" onClick={() => setShowModelForm(false)} aria-label="Cerrar">×</button></div>
           <form onSubmit={saveModel} className="model-form">
             <label className="field-label">Nombre del modelo<input className="large-input" required value={modelForm.name} onChange={(event) => setModelForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="Ej. Polo básico sublimado" /></label>
+            <label className="field-label">Familia del patrón base<select className="large-input" required value={modelForm.family} onChange={(event) => setModelForm((prev) => ({ ...prev, family: event.target.value }))}><option value="">Seleccionar familia</option>{baseModelFamilies.map((family) => <option key={family.value} value={family.value}>{family.label}</option>)}</select><small>La familia se define aquí y la heredan los modelos comerciales que usan este patrón.</small></label>
             <label className="field-label">Grupo de tallas<select className="large-input" required value={modelForm.sizeGroupId} onChange={(event) => setModelForm((prev) => ({ ...prev, sizeGroupId: event.target.value }))} disabled={Boolean(modelForm.editingId && modelForm.pieces.some((piece) => movements.some((movement) => movement.pieceId === piece.id)))}>{sizeGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select><small>Las tallas pertenecen al grupo y se reutilizan en los modelos.</small></label>
             <div className="form-section-heading"><div><strong>Moldes que componen una prenda</strong><small>En una pieza simétrica, la cantidad incluye ambos lados: 2 piezas = 1 izquierda + 1 derecha.</small></div><div className="mold-heading-actions"><button type="button" className="text-action" onClick={() => setModelForm((prev) => ({ ...prev, secondaryFabricSlots: prev.secondaryFabricSlots + 1 }))}>＋ Añadir tela secundaria</button><button type="button" className="text-action" onClick={() => setModelForm((prev) => ({ ...prev, pieces: [...prev.pieces, { id: '', name: '', unitsPerGarment: '1', laterality: 'ninguna', fabricSlot: 'principal', colorId: prev.pieces[0]?.colorId ?? fabricColors[0]?.id ?? '', colorOverride: false, fabricType: 'Tela principal', color: prev.pieces[0]?.color ?? '' }] }))}>＋ Añadir molde</button></div></div>
             <div className="fabric-slot-summary"><strong>{modelForm.secondaryFabricSlots + 1} ranuras de tela</strong><span>Principal{modelForm.secondaryFabricSlots ? ' · ' + Array.from({ length: modelForm.secondaryFabricSlots }, (_, i) => `Secundaria ${i + 1}`).join(' · ') : ''}</span></div>
