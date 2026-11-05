@@ -292,20 +292,27 @@ before insert or update on public.supply_purchase_details
 for each row execute function public.validate_supply_purchase_detail();
 
 create or replace function public.refresh_supply_purchase_total()
-returns trigger language plpgsql security definer set search_path = public as $$
+returns trigger language plpgsql security definer set search_path = public as $
 declare
   v_purchase_id uuid;
 begin
-  v_purchase_id := coalesce(new.purchase_id, old.purchase_id);
+  if tg_op = 'DELETE' then
+    v_purchase_id := old.purchase_id;
+  else
+    v_purchase_id := new.purchase_id;
+  end if;
+
   update public.supply_purchases p
   set total = coalesce((
     select sum(d.line_total) from public.supply_purchase_details d
     where d.purchase_id = v_purchase_id
   ), 0)
   where p.id = v_purchase_id;
-  return coalesce(new, old);
+
+  if tg_op = 'DELETE' then return old; end if;
+  return new;
 end;
-$$;
+$;
 
 drop trigger if exists supply_purchase_total_after_detail on public.supply_purchase_details;
 create trigger supply_purchase_total_after_detail
