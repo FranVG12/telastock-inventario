@@ -476,10 +476,11 @@ function variantLabel(variant: SupplyVariant, variants: SupplyVariant[], supplie
 }
 
 export function ProductionModule({
-  view, baseModels, basePieces, baseMovements, sizes, sizeGroups, onAddBaseMovements, onNavigate,
+  view, baseModels, baseModelsReady, basePieces, baseMovements, sizes, sizeGroups, onAddBaseMovements, onNavigate,
 }: {
   view: ProductionView;
   baseModels: ManufacturingModel[];
+  baseModelsReady: boolean;
   basePieces: ModelPiece[];
   baseMovements: DomainPieceMovement[];
   sizes: Size[];
@@ -594,6 +595,21 @@ export function ProductionModule({
       window.removeEventListener('telastock-fabric-data-restored', refreshTextiles);
     };
   }, []);
+
+  useEffect(() => {
+    if (!ready || !storageSafe || !baseModelsReady) return;
+    setData((current) => {
+      let changed = false;
+      const productModels = current.productModels.map((product) => {
+        const legacy = product as ConfiguredProductModel & { family?: string };
+        if (!Object.prototype.hasOwnProperty.call(legacy, 'family')) return product;
+        const { family: _legacyFamily, ...normalized } = legacy;
+        changed = true;
+        return normalized;
+      });
+      return changed ? { ...current, productModels } : current;
+    });
+  }, [ready, storageSafe, baseModelsReady, baseModels]);
 
   useEffect(() => {
     if (!ready || !storageSafe) return;
