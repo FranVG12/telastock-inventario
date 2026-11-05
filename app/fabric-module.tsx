@@ -648,19 +648,19 @@ export function FabricModule({ view }: { view: FabricView }) {
     setShowSupplierForm(false); tell(supplierForm.id ? 'Proveedor actualizado.' : 'Proveedor registrado.');
   }
 
-  function addPurchaseLine() { setPurchaseForm((x) => ({ ...x, lines: [...x.lines, blankLine(data.telas)] })); }
+  function addPurchaseLine() { setPurchaseForm((x) => ({ ...x, lines: [...x.lines, blankLine(data.telas, data.telaColores, data.colores)] })); }
   function updatePurchaseLine(index: number, changes: Partial<PurchaseLineForm>) {
     setPurchaseForm((x) => ({ ...x, lines: x.lines.map((line, i) => i === index ? { ...line, ...changes } : line) }));
   }
   function openPurchase(purchase?: FabricPurchase) {
     if (!purchase) {
-      setPurchaseForm(blankPurchase(data.telas));
+      setPurchaseForm(blankPurchase(data.telas, data.telaColores, data.colores));
     } else {
       const lines = (detailByPurchase.get(purchase.id) ?? []).map((detail) => {
         const roll = rollById.get(detail.idRollo);
-        return { idRollo: detail.idRollo, idDetalle: detail.id, idTela: roll?.idTela ?? '', unidad: detail.unidadPrecio, cantidad: String(detail.cantidadComprada), precio: String(detail.precioUnitario), color: roll?.color ?? '', pesoKg: inputNumber(roll?.pesoKg ?? null), metros: inputNumber(roll?.metros ?? null), idLote: roll?.idLote ?? '' };
+        return { idRollo: detail.idRollo, idDetalle: detail.id, idTela: roll?.idTela ?? '', idTelaColor: roll?.idTelaColor ?? '', unidad: detail.unidadPrecio, cantidad: String(detail.cantidadComprada), cantidadesAdicionales: '', precio: String(detail.precioUnitario), color: colorNameForVariant(roll?.idTelaColor, roll?.color ?? ''), pesoKg: inputNumber(roll?.pesoKg ?? null), metros: inputNumber(roll?.metros ?? null), idLote: roll?.idLote ?? '' };
       });
-      setPurchaseForm({ id: purchase.id, idProveedor: purchase.idProveedor ?? '', fechaCompra: purchase.fechaCompra, tipoComprobante: purchase.tipoComprobante, numeroComprobante: purchase.numeroComprobante, observacion: purchase.observacion, lines: lines.length ? lines : [blankLine(data.telas)] });
+      setPurchaseForm({ id: purchase.id, idProveedor: purchase.idProveedor ?? '', fechaCompra: purchase.fechaCompra, tipoComprobante: purchase.tipoComprobante, numeroComprobante: purchase.numeroComprobante, observacion: purchase.observacion, lines: lines.length ? lines : [blankLine(data.telas, data.telaColores, data.colores)] });
     }
     setShowPurchaseForm(true);
   }
@@ -668,9 +668,26 @@ export function FabricModule({ view }: { view: FabricView }) {
     event.preventDefault();
     if (!purchaseForm.lines.length) return tell('Agrega al menos un rollo a la compra.', 'error');
     if (purchaseForm.idProveedor && !supplierById.has(purchaseForm.idProveedor)) return tell('Selecciona un proveedor válido.', 'error');
-    const lines = purchaseForm.lines.map((line) => ({ ...line, quantity: Number(line.cantidad), price: Number(line.precio), tela: telaById.get(line.idTela) }));
-    if (lines.some((x) => !x.tela || !validQty(x.quantity) || !Number.isFinite(x.price) || x.price < 0)) return tell('Cada línea necesita una tela, una cantidad mayor que cero y un precio unitario igual o mayor que cero.', 'error');
-    if (lines.some((x) => [nullableNumber(x.pesoKg), nullableNumber(x.metros)].some((n) => n !== null && (!Number.isFinite(n) || n < 0)))) return tell('Una medición real es inválida. Deja el campo vacío cuando no conozcas la medida.', 'error');
+    const expandedLines: Array<PurchaseLineForm & { quantity: number; price: number; tela: Textile }> = [];
+    for (const line of purchaseForm.lines) {
+      const tela = telaById.get(line.idTela);
+      const quantity = Number(line.cantidad);
+      const price = Number(line.precio);
+      const colorVariant = line.idTelaColor ? telaColorById.get(line.idTelaColor) : undefined;
+      if (!tela || !validQty(quantity) || !line.precio.trim() || !Number.isFinite(price) || price < 0) return tell('Cada línea necesita una tela, cantidad mayor que cero y un precio unitario explícito (0 también es válido).', 'error');
+      if (line.idTelaColor && (!colorVariant || colorVariant.idTela !== tela.id || !colorVariant.activo)) return tell('El color seleccionado no pertenece a la tela indicada o está inactivo.', 'error');
+      if ([nullableNumber(line.pesoKg), nullableNumber(line.metros)].some((n) => n !== null && (!Number.isFinite(n) || n < 0))) return tell('Una medición real es inválida. Deja el campo vacío cuando no conozcas la medida.', 'error');
+      if (line.idRollo && line.cantidadesAdicionales.trim()) return tell('Para agregar rollos adicionales a una compra existente, usa “Añadir rollo” y crea una nueva línea.', 'error');
+      expandedLines.push({ ...line, quantity, price, tela });
+      if (!line.idRollo && line.cantidadesAdicionales.trim()) {
+        const extras = line.cantidadesAdicionales.split(/[;,\s]+/).map((x) => x.trim()).filter(Boolean).map(Number);
+        if (!extras.length || extras.some((x) => !validQty(x))) return tell('Las cantidades adicionales deben ser números mayores que cero, separados por coma.', 'error');
+        extras.forEach((extraQuantity) => expandedLines.push({
+          ...line, idRollo: null, idDetalle: null, quantity: extraQuantity, price, tela,
+          pesoKg: '', metros: '', cantidadesAdicionales: '',
+        }));
+      }
+    }
     const now = new Date().toISOString();
     const purchaseId = purchaseForm.id ?? id();
     const oldPurchase = purchaseForm.id ? data.compras.find((x) => x.id === purchaseForm.id) : undefined;
@@ -683,28 +700,26 @@ export function FabricModule({ view }: { view: FabricView }) {
     const newRolls: FabricRoll[] = [];
     const newRollMovements: RollMovement[] = [];
     let details = [...data.detalleCompra];
-    for (const line of lines) {
+    for (const line of expandedLines) {
       if (line.idRollo) {
         const existing = details.find((x) => x.idRollo === line.idRollo);
         const roll = data.rollos.find((x) => x.id === line.idRollo);
         if (!existing || !roll || existing.idCompra !== purchaseId) return tell('La línea hace referencia a un rollo o detalle que no pertenece a esta compra.', 'error');
         if (existing.unidadPrecio !== line.unidad) return tell('La unidad de precio de una línea histórica no se puede cambiar; registra otra compra si fue adquirida en otra unidad.', 'error');
         details = details.map((x) => x.id === existing.id ? { ...x, cantidadComprada: line.quantity, precioUnitario: line.price, importeTotal: Number((line.quantity * line.price).toFixed(2)) } : x);
-        // Corregir la factura no modifica la cantidad original ingresada ni las mediciones reales.
-        // Solo se actualiza el proveedor vinculado si cambia la cabecera de la compra.
-        if (roll.idProveedor !== (purchaseForm.idProveedor || null)) {
-          newRolls.push({ ...roll, idProveedor: purchaseForm.idProveedor || null, updatedAt: now });
-        }
+        if (roll.idProveedor !== (purchaseForm.idProveedor || null)) newRolls.push({ ...roll, idProveedor: purchaseForm.idProveedor || null, updatedAt: now });
         continue;
       }
-      const tela = line.tela!;
+      const tela = line.tela;
       const rollId = id();
       const kgExtra = nullableNumber(line.pesoKg);
       const mExtra = nullableNumber(line.metros);
+      const selectedColor = line.idTelaColor ? telaColorById.get(line.idTelaColor) : undefined;
+      const colorName = selectedColor ? colorById.get(selectedColor.idColor)?.nombre ?? '' : '';
       const createdRoll: FabricRoll = {
         id: rollId, idTela: tela.id, unidadIngreso: line.unidad, cantidadIngreso: line.quantity,
         pesoKg: line.unidad === 'KG' ? line.quantity : kgExtra, metros: line.unidad === 'M' ? line.quantity : mExtra,
-        color: line.color.trim(), idLote: line.idLote.trim(), fechaIngreso: purchaseForm.fechaCompra,
+        color: colorName, idTelaColor: selectedColor?.id ?? null, idLote: line.idLote.trim(), fechaIngreso: purchaseForm.fechaCompra,
         idProveedor: purchaseForm.idProveedor || null, ubicacion: '', estado: 'disponible', nota: '',
         createdAt: now, updatedAt: now,
       };
@@ -720,7 +735,7 @@ export function FabricModule({ view }: { view: FabricView }) {
     const rollRows = [...data.rollos.filter((roll) => !newRolls.some((x) => x.id === roll.id)), ...newRolls];
     if (!persist({ ...data, compras: purchaseRows, rollos: rollRows, detalleCompra: details, rolloMovimientos: [...data.rolloMovimientos, ...newRollMovements] })) return;
     setShowPurchaseForm(false);
-    tell(`${oldPurchase ? 'Compra actualizada' : 'Compra registrada'}: ${lines.length} rollos por ${money.format(details.filter((x) => x.idCompra === purchaseId).reduce((sum, x) => sum + x.importeTotal, 0))}.`);
+    tell(`${oldPurchase ? 'Compra actualizada' : 'Compra registrada'}: ${expandedLines.length} rollos por ${money.format(details.filter((x) => x.idCompra === purchaseId).reduce((sum, x) => sum + x.importeTotal, 0))}.`);
   }
 
   async function importCsvFile(file?: File) {
