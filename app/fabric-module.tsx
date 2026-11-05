@@ -217,25 +217,35 @@ export function FabricModule({ view }: { view: FabricView }) {
   const [showInlineSupplier, setShowInlineSupplier] = useState(false);
   const [inlineSupplierName, setInlineSupplierName] = useState('');
 
-  const persist = (next: FabricBackupData) => {
+  const persist = (next: FabricBackupData): boolean => {
     if (!storageSafe) {
       setNotice({ text: 'No se guardaron cambios porque se detectó un respaldo local dañado. Restaura una copia JSON válida antes de continuar.', kind: 'error' });
-      return;
+      return false;
     }
+    const collectionKeys = (Object.keys(FABRIC_STORAGE_KEYS) as (keyof typeof FABRIC_STORAGE_KEYS)[]).filter((key) => key !== 'version');
+    const previous = new Map<string, string | null>();
     try {
-      (Object.keys(FABRIC_STORAGE_KEYS) as (keyof typeof FABRIC_STORAGE_KEYS)[]).forEach((key) => {
-        if (key === 'version') return;
+      collectionKeys.forEach((key) => previous.set(FABRIC_STORAGE_KEYS[key], localStorage.getItem(FABRIC_STORAGE_KEYS[key])));
+      collectionKeys.forEach((key) => {
         const field = key as keyof FabricBackupData;
         localStorage.setItem(FABRIC_STORAGE_KEYS[key], JSON.stringify(next[field]));
       });
       localStorage.setItem(FABRIC_STORAGE_KEYS.version, '1');
       setData(next);
+      return true;
     } catch {
+      previous.forEach((value, key) => {
+        try {
+          if (value === null) localStorage.removeItem(key);
+          else localStorage.setItem(key, value);
+        } catch { /* Best-effort rollback; do not replace the original error. */ }
+      });
       setStorageSafe(false);
-      setNotice({ text: 'No se pudo guardar. El almacenamiento del navegador podría estar lleno o bloqueado; exporta una copia y revisa el espacio disponible.', kind: 'error' });
+      setNotice({ text: 'No se pudo guardar. El almacenamiento del navegador podría estar lleno o bloqueado; no se completó el cambio. Exporta una copia y revisa el espacio disponible.', kind: 'error' });
+      return false;
     }
   };
-  const loadLocal = () => {
+    const loadLocal = () => {
     const next = emptyFabricBackupData();
     let safe = true;
     let warning = '';
@@ -663,6 +673,7 @@ export function FabricModule({ view }: { view: FabricView }) {
             const now = new Date().toISOString();
             purchaseMap.set(purchaseId, { id: purchaseId, idProveedor: supplierId, fechaCompra: date, tipoComprobante: field(row, 'tipo_comprobante'), numeroComprobante: field(row, 'numero_comprobante'), observacion: field(row, 'observacion'), createdAt: currentPurchase?.createdAt ?? now, updatedAt: now });
             const detailId = field(row, 'id_detalle') || currentDetail?.id || id();
+            if (currentDetail && currentDetail.id !== detailId) detailMap.delete(currentDetail.id);
             detailMap.set(detailId, { id: detailId, idCompra: purchaseId, idRollo: rollId, cantidadComprada: quantity, unidadPrecio: unit, precioUnitario: price, importeTotal: expectedTotal });
             imported++;
           } catch (error) { throw new Error('Fila ' + (index + 2) + ': ' + (error instanceof Error ? error.message : 'dato inválido')); }
@@ -671,7 +682,7 @@ export function FabricModule({ view }: { view: FabricView }) {
       }
       if (!imported) throw new Error('No se encontraron filas válidas para importar.');
       if (!window.confirm('Se van a importar ' + imported + ' filas en ' + view + '. Los registros con el mismo ID se actualizarán; los demás se añadirán. ¿Continuar?')) return;
-      persist(next);
+      if (!persist(next)) return;
       tell(imported + ' filas importadas correctamente. Las relaciones se conservaron y los importes de compra se recalcularon desde cantidad × precio.');
     } catch (error) {
       tell('No se pudo importar el CSV: ' + (error instanceof Error ? error.message : 'archivo no válido'), 'error');
