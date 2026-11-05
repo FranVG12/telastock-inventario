@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import type { ManufacturingModel, Size } from '@/lib/inventory-domain';
+import { getPieceStock, getSymmetricStock, type PieceMovement as DomainPieceMovement, type ManufacturingModel, type Size } from '@/lib/inventory-domain';
 import { FABRIC_STORAGE_KEYS } from '@/app/fabric-module';
 
 export type ProductionView = 'insumos' | 'compras-avios' | 'componentes' | 'modelos-producto' | 'recetas' | 'planificacion';
@@ -80,6 +80,18 @@ export type ComponentPiece = {
   colorId: string | null;
 };
 
+export type ComponentPieceMovement = {
+  id: string;
+  componentId: string;
+  pieceId: string;
+  sizeId: string;
+  delta: number;
+  kind: 'entrada' | 'salida' | 'ajuste';
+  side?: 'izquierda' | 'derecha';
+  note: string;
+  date: string;
+};
+
 export type MaterialRequirement = {
   id: string;
   variantId: string;
@@ -139,6 +151,7 @@ export type ProductionBackupData = {
   supplyMovements: SupplyMovement[];
   supplyPurchases: SupplyPurchase[];
   supplyPurchaseDetails: SupplyPurchaseDetail[];
+  componentPieceMovements: ComponentPieceMovement[];
   components: GarmentComponent[];
   familyRecipes: FamilyRecipe[];
   productModels: ConfiguredProductModel[];
@@ -151,13 +164,14 @@ export const PRODUCTION_STORAGE_KEYS = {
   supplyMovements: 'telastock-supply-movements-v1',
   supplyPurchases: 'telastock-supply-purchases-v1',
   supplyPurchaseDetails: 'telastock-supply-purchase-details-v1',
+  componentPieceMovements: 'telastock-component-piece-movements-v1',
   components: 'telastock-garment-components-v1',
   familyRecipes: 'telastock-family-recipes-v1',
   productModels: 'telastock-configured-product-models-v1',
 } as const;
 
 export function emptyProductionBackupData(): ProductionBackupData {
-  return { supplies: [], variants: [], supplyMovements: [], supplyPurchases: [], supplyPurchaseDetails: [], components: [], familyRecipes: [], productModels: [] };
+  return { supplies: [], variants: [], supplyMovements: [], supplyPurchases: [], supplyPurchaseDetails: [], componentPieceMovements: [], components: [], familyRecipes: [], productModels: [] };
 }
 
 export function validateProductionBackupData(value: unknown): ProductionBackupData {
@@ -177,6 +191,7 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
   const supplyIds = new Set(output.supplies.map((x) => x.id));
   const variantIds = new Set(output.variants.map((x) => x.id));
   const componentIds = new Set(output.components.map((x) => x.id));
+  const componentPieceMap = new Map(output.components.flatMap((component) => component.pieces.map((piece) => [piece.id, { componentId: component.id, piece }] as const)));
   const purchaseIds = new Set(output.supplyPurchases.map((x) => x.id));
   const purchaseDetailIds = new Set(output.supplyPurchaseDetails.map((x) => x.id));
   const validMaterials = (items: MaterialRequirement[]) => Array.isArray(items) && items.every((x) =>
@@ -219,8 +234,34 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
     return Boolean(detail && movement.kind === 'entrada' && movement.variantId === detail.variantId &&
       movement.sizeId === detail.sizeId && Math.abs(movement.delta - detail.inventoryQuantity) < 0.00001);
   })) throw new Error('Hay movimientos de compra que no coinciden con su detalle.');
-  if (!output.components.every((x) => x.name.trim() && x.type.trim() && Array.isArray(x.pieces) && x.pieces.every((p) => p.name.trim() && Number.isInteger(p.unitsPerGarment) && p.unitsPerGarment > 0) && validMaterials(x.materials))) {
+  if (!output.components.every((x) => x.name.trim() && x.type.trim() && Array.isArray(x.pieces) && x.pieces.every((p) => p.name.trim() && Number.isInteger(p.unitsPerGarment) && p.unitsPerGarment > 0 && (p.laterality !== 'simetrica' || p.unitsPerGarment % 2 === 0)) && validMaterials(x.materials))) {
     throw new Error('Hay componentes con piezas o materiales inválidos.');
+  }
+  if (!output.componentPieceMovements.every((movement) => {
+    const owner = componentPieceMap.get(movement.pieceId);
+    return owner?.componentId === movement.componentId &&
+      typeof movement.sizeId === 'string' && movement.sizeId.length > 0 &&
+      Number.isInteger(movement.delta) && movement.delta !== 0 &&
+      ['entrada', 'salida', 'ajuste'].includes(movement.kind) &&
+      (movement.side === undefined || movement.side === 'izquierda' || movement.side === 'derecha') &&
+      (owner.piece.laterality === 'simetrica' || movement.side === undefined) &&
+      typeof movement.note === 'string' && typeof movement.date === 'string';
+  })) throw new Error('Hay movimientos de piezas auxiliares inválidos o desvinculados de su componente.');
+  for (const [pieceId, owner] of componentPieceMap) {
+    const rows = output.componentPieceMovements.filter((movement) => movement.pieceId === pieceId);
+    const bySize = new Map<string, ComponentPieceMovement[]>();
+    rows.forEach((movement) => bySize.set(movement.sizeId, [...(bySize.get(movement.sizeId) ?? []), movement]));
+    for (const movements of bySize.values()) {
+      if (owner.piece.laterality === 'simetrica') {
+        const legacy = movements.filter((movement) => !movement.side).reduce((sum, movement) => sum + movement.delta, 0);
+        const pairs = Math.floor(Math.max(0, legacy) / 2);
+        const left = pairs + movements.filter((movement) => movement.side === 'izquierda').reduce((sum, movement) => sum + movement.delta, 0);
+        const right = pairs + movements.filter((movement) => movement.side === 'derecha').reduce((sum, movement) => sum + movement.delta, 0);
+        if (legacy < 0 || left < 0 || right < 0) throw new Error('El respaldo contiene stock negativo en una pieza auxiliar simétrica.');
+      } else if (movements.reduce((sum, movement) => sum + movement.delta, 0) < 0) {
+        throw new Error('El respaldo contiene stock negativo en una pieza auxiliar.');
+      }
+    }
   }
   if (!output.familyRecipes.every((x) => x.family.trim() && x.name.trim() && validMaterials(x.materials))) {
     throw new Error('Hay recetas generales con materiales inválidos.');
@@ -364,6 +405,15 @@ export function ProductionModule({
   const [notice, setNotice] = useState<{ text: string; kind: 'success' | 'error' | 'info' } | null>(null);
   const [textileContext, setTextileContext] = useState<TextileContext>({ telas: [], rollos: [], telaColores: [], colores: [], proveedores: [] });
   const [showPurchaseForm, setShowPurchaseForm] = useState(false);
+  const [selectedStockComponentId, setSelectedStockComponentId] = useState('');
+  const [showComponentPieceMovement, setShowComponentPieceMovement] = useState(false);
+  const [componentStockPieceId, setComponentStockPieceId] = useState('');
+  const [componentStockSizeId, setComponentStockSizeId] = useState('');
+  const [componentStockKind, setComponentStockKind] = useState<'entrada' | 'salida'>('entrada');
+  const [componentStockMode, setComponentStockMode] = useState<'paridad' | 'lado'>('paridad');
+  const [componentStockSide, setComponentStockSide] = useState<'izquierda' | 'derecha'>('izquierda');
+  const [componentStockQuantity, setComponentStockQuantity] = useState('');
+  const [componentStockNote, setComponentStockNote] = useState('Ingreso de piezas auxiliares');
   const [purchaseDate, setPurchaseDate] = useState(localDate);
   const [purchaseSupplierId, setPurchaseSupplierId] = useState('');
   const [purchaseDocumentType, setPurchaseDocumentType] = useState('Boleta');
