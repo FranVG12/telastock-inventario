@@ -854,7 +854,12 @@ export function ProductionModule({
   function getProductFabricableCapacity(product: ConfiguredProductModel, sizeId: string) {
     const baseModel = baseModels.find((item) => item.id === product.baseModelId);
     const baseModelPieces = basePieces.filter((piece) => piece.modelId === product.baseModelId && !piece.archived);
-    const baseCapacity = baseModel ? getCompleteUnits(baseModelPieces, baseMovements, sizeId) : 0;
+    const reservedBase = ordersHoldingStock.flatMap((order) => order.basePieces).filter((line) => line.sizeId === sizeId);
+    const effectiveBaseLedger: DomainPieceMovement[] = [
+      ...baseMovements,
+      ...reservedBase.map((line) => ({ id: line.id, pieceId: line.pieceId, sizeId: line.sizeId, delta: -line.quantity, kind: 'salida' as const, side: line.side ?? undefined, note: 'Reserva de orden de producción', date: '' })),
+    ];
+    const baseCapacity = baseModel ? getCompleteUnits(baseModelPieces, effectiveBaseLedger, sizeId) : 0;
     let componentCapacity = Number.POSITIVE_INFINITY;
     let limitingComponent = '';
     product.components.forEach((selection) => {
@@ -862,7 +867,12 @@ export function ProductionModule({
       if (!component || component.pieces.length === 0) return;
       let currentComponentCapacity = Number.POSITIVE_INFINITY;
       component.pieces.forEach((piece) => {
-        const ledger = componentPieceDomainLedger(piece.id, sizeId);
+        const reserved = ordersHoldingStock.flatMap((order) => order.componentPieces)
+          .filter((line) => line.pieceId === piece.id && line.sizeId === sizeId);
+        const ledger: DomainPieceMovement[] = [
+          ...componentPieceDomainLedger(piece.id, sizeId),
+          ...reserved.map((line) => ({ id: line.id, pieceId: line.pieceId, sizeId: line.sizeId, delta: -line.quantity, kind: 'salida' as const, side: line.side ?? undefined, note: 'Reserva de orden de producción', date: '' })),
+        ];
         const required = piece.unitsPerGarment * selection.quantity;
         const capacity = piece.laterality === 'simetrica'
           ? Math.floor(Math.min(getSymmetricStock(ledger, piece.id, sizeId).left, getSymmetricStock(ledger, piece.id, sizeId).right) / (required / 2))
@@ -881,6 +891,9 @@ export function ProductionModule({
       : baseCapacity === boundedComponentCapacity ? 'Patrón y auxiliar' : limitingComponent;
     return { baseCapacity, componentCapacity: boundedComponentCapacity, fabricable, limitingComponent: limitingResource };
   }
+  const holdingStatuses: ProductionOrderStatus[] = ['reservada', 'en_proceso'];
+  const ordersHoldingStock = data.productionOrders.filter((order) => holdingStatuses.includes(order.status));
+
   const plan = useMemo(() => {
     if (!activeProduct) return { rows: [] as Array<{ variantId: string; total: number; bySize: Record<string, number>; missingSizes: string[]; available: number; shortage: number; packs: number | null }>, unresolved: [] as string[] };
     const requirements: MaterialRequirement[] = [];
@@ -927,14 +940,26 @@ export function ProductionModule({
       let available = 0;
       let shortage = 0;
       if (variant.textileId) {
-        available = stockForVariant(variant, null);
+        const unit: 'M' | 'KG' = supply.baseUnit === 'm' ? 'M' : 'KG';
+        const matchingRolls = textileContext.rollos.filter((roll) =>
+          roll.idTela === variant.textileId && (!variant.textileColorId || roll.idTelaColor === variant.textileColorId) && roll.estado === 'disponible'
+        );
+        available = matchingRolls.reduce((sum, roll) => {
+          const physical = unit === 'M' ? roll.metros ?? 0 : roll.pesoKg ?? 0;
+          const reserved = ordersHoldingStock.reduce((totalReserved, order) =>
+            totalReserved + order.rollAllocations.filter((allocation) => allocation.rollId === roll.id && allocation.unit === unit)
+              .reduce((totalForRoll, allocation) => totalForRoll + allocation.quantity, 0), 0);
+          return sum + Math.max(0, physical - reserved);
+        }, 0);
         shortage = Math.max(0, total - available);
       } else if (supply.stockMode === 'total') {
-        available = stockForVariant(variant, null);
+        const reserved = reservedSupplyQuantity(variant.id, null);
+        available = Math.max(0, stockForVariant(variant, null) - reserved);
         shortage = Math.max(0, total - available);
       } else {
         for (const [sizeId, needed] of Object.entries(value.bySize)) {
-          const stock = stockForVariant(variant, sizeId);
+          const reserved = reservedSupplyQuantity(variant.id, sizeId);
+          const stock = Math.max(0, stockForVariant(variant, sizeId) - reserved);
           available += stock;
           shortage += Math.max(0, needed - stock);
         }
@@ -943,11 +968,8 @@ export function ProductionModule({
       return { variantId, total, bySize: value.bySize, missingSizes: [...new Set(value.missingSizes)], available, shortage, packs };
     });
     return { rows, unresolved };
-  }, [activeProduct, data.familyRecipes, data.components, variantsBySupply, supplies, sizes, baseModels, planCounts, textileContext, data.supplyMovements, stockForVariant]);
+  }, [activeProduct, data.familyRecipes, data.components, data.productionOrders, variantsBySupply, supplies, sizes, baseModels, basePieces, baseMovements, planCounts, textileContext, data.supplyMovements, stockForVariant]);
 
-
-  const holdingStatuses: ProductionOrderStatus[] = ['reservada', 'en_proceso'];
-  const ordersHoldingStock = data.productionOrders.filter((order) => holdingStatuses.includes(order.status));
 
   function latestUnitCost(variant: SupplyVariant, unit: StockUnit): number | null {
     if (variant.textileId) {
