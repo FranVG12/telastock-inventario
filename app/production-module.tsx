@@ -288,11 +288,12 @@ function variantLabel(variant: SupplyVariant, variants: SupplyVariant[], supplie
 }
 
 export function ProductionModule({
-  view, baseModels, sizes,
+  view, baseModels, sizes, onNavigate,
 }: {
   view: ProductionView;
   baseModels: ManufacturingModel[];
   sizes: Size[];
+  onNavigate: (view: ProductionView) => void;
 }) {
   const [data, setData] = useState<ProductionBackupData>(emptyProductionBackupData);
   const [ready, setReady] = useState(false);
@@ -735,11 +736,11 @@ export function ProductionModule({
 
   return <div className="production-module">
     <div className="production-tabs" role="tablist" aria-label="Gestión de producción">
-      <button className={view === 'insumos' ? 'active' : ''} onClick={() => setNotice(null)} role="tab" aria-selected={view === 'insumos'}>Insumos</button>
-      <button className={view === 'componentes' ? 'active' : ''} onClick={() => window.dispatchEvent(new CustomEvent('telastock-production-navigate', { detail: 'componentes' }))} role="tab" aria-selected={view === 'componentes'}>Componentes</button>
-      <button className={view === 'modelos-producto' ? 'active' : ''} onClick={() => window.dispatchEvent(new CustomEvent('telastock-production-navigate', { detail: 'modelos-producto' }))} role="tab" aria-selected={view === 'modelos-producto'}>Modelos</button>
-      <button className={view === 'recetas' ? 'active' : ''} onClick={() => window.dispatchEvent(new CustomEvent('telastock-production-navigate', { detail: 'recetas' }))} role="tab" aria-selected={view === 'recetas'}>Recetas</button>
-      <button className={view === 'planificacion' ? 'active' : ''} onClick={() => window.dispatchEvent(new CustomEvent('telastock-production-navigate', { detail: 'planificacion' }))} role="tab" aria-selected={view === 'planificacion'}>Planificar</button>
+      <button className={view === 'insumos' ? 'active' : ''} onClick={() => onNavigate('insumos')} role="tab" aria-selected={view === 'insumos'}>Insumos</button>
+      <button className={view === 'componentes' ? 'active' : ''} onClick={() => onNavigate('componentes')} role="tab" aria-selected={view === 'componentes'}>Componentes</button>
+      <button className={view === 'modelos-producto' ? 'active' : ''} onClick={() => onNavigate('modelos-producto')} role="tab" aria-selected={view === 'modelos-producto'}>Modelos</button>
+      <button className={view === 'recetas' ? 'active' : ''} onClick={() => onNavigate('recetas')} role="tab" aria-selected={view === 'recetas'}>Recetas</button>
+      <button className={view === 'planificacion' ? 'active' : ''} onClick={() => onNavigate('planificacion')} role="tab" aria-selected={view === 'planificacion'}>Planificar</button>
     </div>
     {notice && <div className={'notice ' + notice.kind}><span>{notice.text}</span><button onClick={() => setNotice(null)} aria-label="Cerrar">×</button></div>}
     {mainPanel}
