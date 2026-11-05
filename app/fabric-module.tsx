@@ -156,11 +156,26 @@ function csvDate(value: string) {
   }
   throw new Error('Fecha inválida. Usa AAAA-MM-DD o DD/MM/AAAA.');
 }
+function parseCsvNumber(value: string) {
+  let normalized = value.trim().replace(/\s/g, '');
+  if (normalized.includes(',') && normalized.includes('.')) {
+    normalized = normalized.lastIndexOf(',') > normalized.lastIndexOf('.') ? normalized.replace(/\./g, '').replace(',', '.') : normalized.replace(/,/g, '');
+  } else if (normalized.includes(',')) normalized = normalized.replace(',', '.');
+  return Number(normalized);
+}
 function parseCsvNullableNumber(value: string, field: string) {
   if (!value.trim()) return null;
-  const number = Number(value.replace(',', '.'));
+  const number = parseCsvNumber(value);
   if (!Number.isFinite(number) || number < 0) throw new Error(field + ' debe ser un número igual o mayor que cero, o estar vacío.');
   return number;
+}
+async function stableCsvId(seed: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(seed));
+  const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('').slice(0, 32).split('');
+  hex[12] = '5';
+  hex[16] = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16);
+  const value = hex.join('');
+  return value.slice(0,8) + '-' + value.slice(8,12) + '-' + value.slice(12,16) + '-' + value.slice(16,20) + '-' + value.slice(20);
 }
 
 function downloadCsv(filename: string, rows: unknown[][]) {
@@ -546,7 +561,9 @@ export function FabricModule({ view }: { view: FabricView }) {
     if (!file) return;
     try {
       if (!storageSafe) throw new Error('No se puede importar mientras el almacenamiento local esté dañado. Restaura primero un respaldo JSON válido.');
-      const rows = parseCsvTable(await file.text());
+      const csvText = await file.text();
+      const rows = parseCsvTable(csvText);
+      const csvFingerprint = await stableCsvId(csvText);
       const field = (row: Record<string, string>, ...names: string[]) => {
         for (const name of names) {
           const value = row[normalizeCsvHeader(name)];
@@ -625,8 +642,9 @@ export function FabricModule({ view }: { view: FabricView }) {
             if (!validQty(quantity)) throw new Error('cantidad_ingresada debe ser mayor que cero.');
             const date = csvDate(field(row, 'fecha_ingreso', 'fecha'));
             const supplierId = resolveSupplier(row);
-            const idRollo = field(row, 'id_rollo', 'id');
-            const existing = idRollo ? map.get(idRollo) : undefined;
+            const suppliedId = field(row, 'id_rollo', 'id');
+            const idRollo = suppliedId || await stableCsvId(csvFingerprint + ':' + (index + 2));
+            const existing = map.get(idRollo);
             const kg = unit === 'KG' ? quantity : parseCsvNullableNumber(field(row, 'peso_kg_real', 'peso_kg'), 'peso_kg_real');
             const metres = unit === 'M' ? quantity : parseCsvNullableNumber(field(row, 'metros_reales', 'metros'), 'metros_reales');
             const stateRaw = (field(row, 'estado') || 'disponible').toLocaleLowerCase('es');
@@ -659,12 +677,12 @@ export function FabricModule({ view }: { view: FabricView }) {
             const unit = field(row, 'unidad_precio').toUpperCase();
             if (unit !== 'KG' && unit !== 'M') throw new Error('unidad_precio debe ser KG o M.');
             if (unit !== roll.unidadIngreso) throw new Error('La unidad de precio debe coincidir con la unidad de ingreso del rollo.');
-            const quantity = Number(field(row, 'cantidad_comprada'));
-            const price = Number(field(row, 'precio_unitario'));
+            const quantity = parseCsvNumber(field(row, 'cantidad_comprada'));
+            const price = parseCsvNumber(field(row, 'precio_unitario'));
             if (!validQty(quantity) || !Number.isFinite(price) || price < 0) throw new Error('Cantidad o precio unitario inválido.');
             const expectedTotal = Number((quantity * price).toFixed(2));
             const providedTotal = field(row, 'importe_total');
-            if (providedTotal && Math.abs(Number(providedTotal.replace(',', '.')) - expectedTotal) > 0.011) throw new Error('importe_total no coincide con cantidad_comprada × precio_unitario.');
+            if (providedTotal && Math.abs(parseCsvNumber(providedTotal) - expectedTotal) > 0.011) throw new Error('importe_total no coincide con cantidad_comprada × precio_unitario.');
             if (seenRolls.has(rollId)) throw new Error('El rollo aparece más de una vez en este archivo.');
             seenRolls.add(rollId);
             const currentPurchase = purchaseMap.get(purchaseId);
