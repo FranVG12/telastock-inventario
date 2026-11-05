@@ -120,7 +120,192 @@ alter table public.model_pieces
   drop constraint if exists model_pieces_fabric_slot_check;
 alter table public.model_pieces
   add constraint model_pieces_fabric_slot_check
-  check (fabric_slot = 'principal' or fabric_slot ~ '^secundaria_[1-9][0-9]*
+  check (fabric_slot = 'principal' or fabric_slot ~ '^secundaria_[1-9][0-9]*do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'model_pieces_color_id_fkey'
+      and conrelid = 'public.model_pieces'::regclass
+  ) then
+    alter table public.model_pieces
+      add constraint model_pieces_color_id_fkey
+      foreign key (color_id) references public.colores(id_color)
+      on delete set null;
+  end if;
+end $$;
+
+update public.model_pieces p
+set color_id = c.id_color
+from public.colores c
+where lower(trim(c.nombre_color)) = lower(trim(p.color))
+  and nullif(trim(p.color), '') is not null
+  and p.color_id is null;
+
+-- The normalized references replace free-text source fields. All existing names were
+-- backfilled above; future mold slot labels are derived from fabric_slot in the app.
+alter table public.rollos drop column if exists color;
+alter table public.model_pieces drop column if exists color;
+alter table public.model_pieces drop column if exists fabric_type;
+
+create index if not exists rollos_tela_color_idx on public.rollos (id_tela, id_tela_color);
+create index if not exists model_pieces_fabric_slot_idx on public.model_pieces (model_id, fabric_slot);
+create index if not exists model_pieces_color_id_idx on public.model_pieces (color_id);
+
+-- Security remains closed by default like the other inventory tables. Define authenticated
+-- owner/organization policies before enabling a remote browser-connected database.
+alter table public.colores enable row level security;
+alter table public.tela_colores enable row level security;
+
+comment on table public.colores is
+  'Diccionario global de nombres de color reutilizables entre materiales.';
+comment on table public.tela_colores is
+  'Código digital HEX y fórmula CMYK de un nombre de color para una tela específica.';
+comment on column public.model_pieces.fabric_slot is
+  'Ranura de material de un molde: principal o secundaria_N, con N >= 1 y sin límite fijo.';
+);
+
+-- Backfill the model's configured count from any legacy mold using a secondary slot.
+update public.manufacturing_models m
+set secondary_fabric_slots = greatest(
+  m.secondary_fabric_slots,
+  coalesce((
+    select max((regexp_match(p.fabric_slot, '^secundaria_([0-9]+)
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'model_pieces_color_id_fkey'
+      and conrelid = 'public.model_pieces'::regclass
+  ) then
+    alter table public.model_pieces
+      add constraint model_pieces_color_id_fkey
+      foreign key (color_id) references public.colores(id_color)
+      on delete set null;
+  end if;
+end $$;
+
+update public.model_pieces p
+set color_id = c.id_color
+from public.colores c
+where lower(trim(c.nombre_color)) = lower(trim(p.color))
+  and nullif(trim(p.color), '') is not null
+  and p.color_id is null;
+
+-- The normalized references replace free-text source fields. All existing names were
+-- backfilled above; future mold slot labels are derived from fabric_slot in the app.
+alter table public.rollos drop column if exists color;
+alter table public.model_pieces drop column if exists color;
+alter table public.model_pieces drop column if exists fabric_type;
+
+create index if not exists rollos_tela_color_idx on public.rollos (id_tela, id_tela_color);
+create index if not exists model_pieces_fabric_slot_idx on public.model_pieces (model_id, fabric_slot);
+create index if not exists model_pieces_color_id_idx on public.model_pieces (color_id);
+
+-- Security remains closed by default like the other inventory tables. Define authenticated
+-- owner/organization policies before enabling a remote browser-connected database.
+alter table public.colores enable row level security;
+alter table public.tela_colores enable row level security;
+
+comment on table public.colores is
+  'Diccionario global de nombres de color reutilizables entre materiales.';
+comment on table public.tela_colores is
+  'Código digital HEX y fórmula CMYK de un nombre de color para una tela específica.';
+comment on column public.model_pieces.fabric_slot is
+  'Ranura de material de un molde: tela principal o tela secundaria 1, 2 o 3.';
+))[1]::integer)
+    from public.model_pieces p
+    where p.model_id = m.id and p.fabric_slot ~ '^secundaria_[1-9][0-9]*
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'model_pieces_color_id_fkey'
+      and conrelid = 'public.model_pieces'::regclass
+  ) then
+    alter table public.model_pieces
+      add constraint model_pieces_color_id_fkey
+      foreign key (color_id) references public.colores(id_color)
+      on delete set null;
+  end if;
+end $$;
+
+update public.model_pieces p
+set color_id = c.id_color
+from public.colores c
+where lower(trim(c.nombre_color)) = lower(trim(p.color))
+  and nullif(trim(p.color), '') is not null
+  and p.color_id is null;
+
+-- The normalized references replace free-text source fields. All existing names were
+-- backfilled above; future mold slot labels are derived from fabric_slot in the app.
+alter table public.rollos drop column if exists color;
+alter table public.model_pieces drop column if exists color;
+alter table public.model_pieces drop column if exists fabric_type;
+
+create index if not exists rollos_tela_color_idx on public.rollos (id_tela, id_tela_color);
+create index if not exists model_pieces_fabric_slot_idx on public.model_pieces (model_id, fabric_slot);
+create index if not exists model_pieces_color_id_idx on public.model_pieces (color_id);
+
+-- Security remains closed by default like the other inventory tables. Define authenticated
+-- owner/organization policies before enabling a remote browser-connected database.
+alter table public.colores enable row level security;
+alter table public.tela_colores enable row level security;
+
+comment on table public.colores is
+  'Diccionario global de nombres de color reutilizables entre materiales.';
+comment on table public.tela_colores is
+  'Código digital HEX y fórmula CMYK de un nombre de color para una tela específica.';
+comment on column public.model_pieces.fabric_slot is
+  'Ranura de material de un molde: tela principal o tela secundaria 1, 2 o 3.';
+
+  ), 0)
+);
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'model_pieces_color_id_fkey'
+      and conrelid = 'public.model_pieces'::regclass
+  ) then
+    alter table public.model_pieces
+      add constraint model_pieces_color_id_fkey
+      foreign key (color_id) references public.colores(id_color)
+      on delete set null;
+  end if;
+end $$;
+
+update public.model_pieces p
+set color_id = c.id_color
+from public.colores c
+where lower(trim(c.nombre_color)) = lower(trim(p.color))
+  and nullif(trim(p.color), '') is not null
+  and p.color_id is null;
+
+-- The normalized references replace free-text source fields. All existing names were
+-- backfilled above; future mold slot labels are derived from fabric_slot in the app.
+alter table public.rollos drop column if exists color;
+alter table public.model_pieces drop column if exists color;
+alter table public.model_pieces drop column if exists fabric_type;
+
+create index if not exists rollos_tela_color_idx on public.rollos (id_tela, id_tela_color);
+create index if not exists model_pieces_fabric_slot_idx on public.model_pieces (model_id, fabric_slot);
+create index if not exists model_pieces_color_id_idx on public.model_pieces (color_id);
+
+-- Security remains closed by default like the other inventory tables. Define authenticated
+-- owner/organization policies before enabling a remote browser-connected database.
+alter table public.colores enable row level security;
+alter table public.tela_colores enable row level security;
+
+comment on table public.colores is
+  'Diccionario global de nombres de color reutilizables entre materiales.';
+comment on table public.tela_colores is
+  'Código digital HEX y fórmula CMYK de un nombre de color para una tela específica.';
+comment on column public.model_pieces.fabric_slot is
+  'Ranura de material de un molde: tela principal o tela secundaria 1, 2 o 3.';
+);
 
 do $$
 begin
