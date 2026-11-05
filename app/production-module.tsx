@@ -1267,15 +1267,18 @@ export function ProductionModule({
     if (issues.length > 0) return tell('No se reservó ' + order.number + '. ' + issues.join(' · '), 'error');
     const timestamp = now();
     const updated: ProductionOrder = { ...order, status: 'reservada', rollAllocations, reservedAt: timestamp, updatedAt: timestamp };
-    persistProductionSnapshot({ ...data, productionOrders: data.productionOrders.map((item) => item.id === order.id ? updated : item) });
-    tell(order.number + ': materiales y piezas reservados correctamente.');
+    if (persistProductionSnapshot({ ...data, productionOrders: data.productionOrders.map((item) => item.id === order.id ? updated : item) })) {
+      tell(order.number + ': materiales y piezas reservados correctamente.');
+    }
   }
 
   function startProductionOrder(orderId: string) {
     const order = data.productionOrders.find((item) => item.id === orderId);
     if (!order || order.status !== 'reservada') return tell('La orden debe estar reservada antes de iniciar.', 'error');
     const timestamp = now();
-    persistProductionSnapshot({ ...data, productionOrders: data.productionOrders.map((item) => item.id === order.id ? { ...item, status: 'en_proceso', startedAt: timestamp, updatedAt: timestamp } : item) });
+    if (persistProductionSnapshot({ ...data, productionOrders: data.productionOrders.map((item) => item.id === order.id ? { ...item, status: 'en_proceso', startedAt: timestamp, updatedAt: timestamp } : item) })) {
+      tell(order.number + ' inició producción.');
+    }
   }
 
   function cancelProductionOrder(orderId: string) {
@@ -1283,8 +1286,9 @@ export function ProductionModule({
     if (!order || !holdingStatuses.includes(order.status)) return tell('Solo puedes cancelar una orden reservada o en proceso.', 'error');
     if (!window.confirm('¿Cancelar ' + order.number + '? Se liberarán sus reservas y no se descontará inventario.')) return;
     const timestamp = now();
-    persistProductionSnapshot({ ...data, productionOrders: data.productionOrders.map((item) => item.id === order.id ? { ...item, status: 'cancelada', cancelledAt: timestamp, updatedAt: timestamp } : item) });
-    tell(order.number + ' cancelada. El stock reservado volvió a estar disponible.');
+    if (persistProductionSnapshot({ ...data, productionOrders: data.productionOrders.map((item) => item.id === order.id ? { ...item, status: 'cancelada', cancelledAt: timestamp, updatedAt: timestamp } : item) })) {
+      tell(order.number + ' cancelada. El stock reservado volvió a estar disponible.');
+    }
   }
 
   function openProductionOrderCompletion(orderId: string) {
