@@ -8,11 +8,19 @@ export type RollStatus = 'disponible' | 'reservado' | 'agotado' | 'defectuoso';
 
 export type Textile = {
   id: string; nombreTela: string; unidadVenta: FabricUnit; anchoNominalM: number | null;
+  /** KG: metros por kilogramo. M: kilogramos por metro. Es un rendimiento teórico, nunca una medición real. */
+  rendimientoTeorico: number | null;
   descripcion: string; activo: boolean; createdAt: string; updatedAt: string;
+};
+export type ColorDefinition = { id: string; nombre: string; createdAt?: string; updatedAt?: string };
+export type TextileColor = {
+  id: string; idTela: string; idColor: string;
+  hexadecimal: string | null; cmykC: number | null; cmykM: number | null; cmykY: number | null; cmykK: number | null;
+  activo: boolean; createdAt: string; updatedAt: string;
 };
 export type FabricRoll = {
   id: string; idTela: string; unidadIngreso: FabricUnit; cantidadIngreso: number;
-  pesoKg: number | null; metros: number | null; color: string; idLote: string;
+  pesoKg: number | null; metros: number | null; color: string; idTelaColor?: string | null; idLote: string;
   fechaIngreso: string; idProveedor: string | null; ubicacion: string;
   estado: RollStatus; nota: string; createdAt: string; updatedAt: string;
 };
@@ -35,6 +43,7 @@ export type FabricBackupData = {
   telas: Textile[]; rollos: FabricRoll[]; rolloMovimientos: RollMovement[]; proveedores: Supplier[];
   proveedorTelefonos: SupplierPhone[]; proveedorCategorias: SupplierCategory[];
   compras: FabricPurchase[]; detalleCompra: PurchaseDetail[];
+  colores: ColorDefinition[]; telaColores: TextileColor[];
 };
 export const FABRIC_STORAGE_KEYS = {
   version: 'telastock-fabric-schema-version',
@@ -46,10 +55,12 @@ export const FABRIC_STORAGE_KEYS = {
   proveedorCategorias: 'telastock-fabric-proveedor-categorias-v1',
   compras: 'telastock-fabric-compras-v1',
   detalleCompra: 'telastock-fabric-detalle-compra-v1',
+  colores: 'telastock-fabric-colores-v2',
+  telaColores: 'telastock-fabric-tela-colores-v2',
 } as const;
 
 export function emptyFabricBackupData(): FabricBackupData {
-  return { telas: [], rollos: [], rolloMovimientos: [], proveedores: [], proveedorTelefonos: [], proveedorCategorias: [], compras: [], detalleCompra: [] };
+  return { telas: [], rollos: [], rolloMovimientos: [], proveedores: [], proveedorTelefonos: [], proveedorCategorias: [], compras: [], detalleCompra: [], colores: [], telaColores: [] };
 }
 export function validateFabricBackupData(value: unknown): FabricBackupData {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('El respaldo de telas está incompleto.');
@@ -58,8 +69,8 @@ export function validateFabricBackupData(value: unknown): FabricBackupData {
   const output = {} as FabricBackupData;
   for (const key of keys) {
     const rows = record[key];
-    if (key === 'rolloMovimientos' && rows === undefined) {
-      output.rolloMovimientos = [];
+    if ((key === 'rolloMovimientos' || key === 'colores' || key === 'telaColores') && rows === undefined) {
+      (output as unknown as Record<string, unknown>)[key] = [];
       continue;
     }
     if (!Array.isArray(rows) || !rows.every((row) => row && typeof row === 'object' && !Array.isArray(row) && typeof (row as { id?: unknown }).id === 'string')) {
@@ -73,10 +84,15 @@ export function validateFabricBackupData(value: unknown): FabricBackupData {
   const proveedorIds = new Set(output.proveedores.map((x) => x.id));
   const rolloIds = new Set(output.rollos.map((x) => x.id));
   const compraIds = new Set(output.compras.map((x) => x.id));
-  if (!output.telas.every((x) => x.nombreTela.trim() && ['KG', 'M'].includes(x.unidadVenta) && (x.anchoNominalM === null || (Number.isFinite(x.anchoNominalM) && x.anchoNominalM > 0)))) throw new Error('Hay telas con información inválida.');
+  const colorIds = new Set(output.colores.map((x) => x.id));
+  const telaColorIds = new Set(output.telaColores.map((x) => x.id));
+  if (!output.telas.every((x) => x.nombreTela.trim() && ['KG', 'M'].includes(x.unidadVenta) && (x.anchoNominalM === null || (Number.isFinite(x.anchoNominalM) && x.anchoNominalM > 0)) && ((x.rendimientoTeorico ?? null) === null || (Number.isFinite(x.rendimientoTeorico) && x.rendimientoTeorico! > 0)))) throw new Error('Hay telas con información inválida.');
+  if (new Set(output.colores.map((x) => x.nombre.trim().toLocaleLowerCase('es'))).size !== output.colores.length || !output.colores.every((x) => x.nombre.trim())) throw new Error('El catálogo central de colores tiene nombres vacíos o duplicados.');
+  if (!output.telaColores.every((x) => telaIds.has(x.idTela) && colorIds.has(x.idColor) && (x.hexadecimal === null || /^#[0-9A-Fa-f]{6}$/.test(x.hexadecimal)) && [x.cmykC,x.cmykM,x.cmykY,x.cmykK].every((v) => v === null || (Number.isInteger(v) && v >= 0 && v <= 100)) && ((x.cmykC === null && x.cmykM === null && x.cmykY === null && x.cmykK === null) || [x.cmykC,x.cmykM,x.cmykY,x.cmykK].every((v) => v !== null)))) throw new Error('Hay colores por tela con tela, nombre, HEX o CMYK inválido.');
+  if (new Set(output.telaColores.map((x) => x.idTela + ':' + x.idColor)).size !== output.telaColores.length) throw new Error('Una tela tiene el mismo color asociado más de una vez.');
   if (!output.proveedorTelefonos.every((x) => proveedorIds.has(x.idProveedor) && x.numero.trim())) throw new Error('Hay teléfonos relacionados con proveedores inexistentes.');
   if (!output.proveedorCategorias.every((x) => proveedorIds.has(x.idProveedor) && x.categoria.trim())) throw new Error('Hay categorías relacionadas con proveedores inexistentes.');
-  if (!output.rollos.every((x) => telaIds.has(x.idTela) && (x.idProveedor === null || proveedorIds.has(x.idProveedor)) && ['KG', 'M'].includes(x.unidadIngreso) && Number.isFinite(x.cantidadIngreso) && x.cantidadIngreso > 0 && ['disponible', 'reservado', 'agotado', 'defectuoso'].includes(x.estado) && (x.pesoKg === null || (Number.isFinite(x.pesoKg) && x.pesoKg >= 0)) && (x.metros === null || (Number.isFinite(x.metros) && x.metros >= 0)))) throw new Error('Hay rollos con tela, medición o proveedor inválido.');
+  if (!output.rollos.every((x) => telaIds.has(x.idTela) && (x.idProveedor === null || proveedorIds.has(x.idProveedor)) && (x.idTelaColor == null || (telaColorIds.has(x.idTelaColor) && output.telaColores.some((tc) => tc.id === x.idTelaColor && tc.idTela === x.idTela))) && ['KG', 'M'].includes(x.unidadIngreso) && Number.isFinite(x.cantidadIngreso) && x.cantidadIngreso > 0 && ['disponible', 'reservado', 'agotado', 'defectuoso'].includes(x.estado) && (x.pesoKg === null || (Number.isFinite(x.pesoKg) && x.pesoKg >= 0)) && (x.metros === null || (Number.isFinite(x.metros) && x.metros >= 0)))) throw new Error('Hay rollos con tela, medición, color o proveedor inválido.');
   if (!output.compras.every((x) => x.idProveedor === null || proveedorIds.has(x.idProveedor))) throw new Error('Hay compras relacionadas con proveedores inexistentes.');
   if (!output.detalleCompra.every((x) => {
     const roll = output.rollos.find((r) => r.id === x.idRollo);
@@ -195,19 +211,28 @@ function downloadCsv(filename: string, rows: unknown[][]) {
 }
 function inputNumber(value: number | null) { return value === null ? '' : String(value); }
 
-type TelaForm = { id: string | null; nombreTela: string; unidadVenta: FabricUnit; anchoNominalM: string; descripcion: string; activo: boolean };
+type TelaForm = { id: string | null; nombreTela: string; unidadVenta: FabricUnit; anchoNominalM: string; rendimientoTeorico: string; descripcion: string; activo: boolean };
 type RolloForm = {
-  id: string | null; idTela: string; unidadIngreso: FabricUnit; cantidadIngreso: string; fechaIngreso: string;
+  id: string | null; idTela: string; idTelaColor: string; unidadIngreso: FabricUnit; cantidadIngreso: string; fechaIngreso: string;
   color: string; pesoKg: string; metros: string; idLote: string; idProveedor: string;
   ubicacion: string; estado: RollStatus; nota: string;
 };
 type SupplierForm = { id: string | null; nombre: string; contacto: string; direccion: string; nota: string; telefonos: { id: string; numero: string; etiqueta: string }[]; categorias: string[] };
-type PurchaseLineForm = { idRollo: string | null; idDetalle?: string | null; idTela: string; unidad: FabricUnit; cantidad: string; precio: string; color: string; pesoKg: string; metros: string; idLote: string };
+type PurchaseLineForm = { idRollo: string | null; idDetalle?: string | null; idTela: string; idTelaColor: string; unidad: FabricUnit; cantidad: string; cantidadesAdicionales: string; precio: string; color: string; pesoKg: string; metros: string; idLote: string };
 type PurchaseForm = { id: string | null; idProveedor: string; fechaCompra: string; tipoComprobante: string; numeroComprobante: string; observacion: string; lines: PurchaseLineForm[] };
 
-function blankTela(): TelaForm { return { id: null, nombreTela: '', unidadVenta: 'KG', anchoNominalM: '', descripcion: '', activo: true }; }
-function blankRollo(telas: Textile[]): RolloForm { return { id: null, idTela: telas.find((x) => x.activo)?.id ?? '', unidadIngreso: telas.find((x) => x.activo)?.unidadVenta ?? 'KG', cantidadIngreso: '', fechaIngreso: today(), color: '', pesoKg: '', metros: '', idLote: '', idProveedor: '', ubicacion: '', estado: 'disponible', nota: '' }; }
-function blankLine(telas: Textile[]): PurchaseLineForm { return { idRollo: null, idDetalle: null, idTela: telas.find((x) => x.activo)?.id ?? '', unidad: telas.find((x) => x.activo)?.unidadVenta ?? 'KG', cantidad: '', precio: '', color: '', pesoKg: '', metros: '', idLote: '' }; }
+function blankTela(): TelaForm { return { id: null, nombreTela: '', unidadVenta: 'KG', anchoNominalM: '', rendimientoTeorico: '', descripcion: '', activo: true }; }
+function blankRollo(telas: Textile[], telaColores: TextileColor[] = [], colores: ColorDefinition[] = []): RolloForm {
+  const tela = telas.find((x) => x.activo);
+  const firstColor = telaColores.find((x) => x.idTela === tela?.id && x.activo);
+  const colorName = colores.find((x) => x.id === firstColor?.idColor)?.nombre ?? '';
+  return { id: null, idTela: tela?.id ?? '', idTelaColor: firstColor?.id ?? '', unidadIngreso: tela?.unidadVenta ?? 'KG', cantidadIngreso: '', fechaIngreso: today(), color: colorName, pesoKg: '', metros: '', idLote: '', idProveedor: '', ubicacion: '', estado: 'disponible', nota: '' };
+}
+function blankLine(telas: Textile[], telaColores: TextileColor[] = [], colores: ColorDefinition[] = []): PurchaseLineForm {
+  const tela = telas.find((x) => x.activo);
+  const firstColor = telaColores.find((x) => x.idTela === tela?.id && x.activo);
+  return { idRollo: null, idDetalle: null, idTela: tela?.id ?? '', idTelaColor: firstColor?.id ?? '', unidad: tela?.unidadVenta ?? 'KG', cantidad: '', cantidadesAdicionales: '', precio: '', color: colores.find((x) => x.id === firstColor?.idColor)?.nombre ?? '', pesoKg: '', metros: '', idLote: '' };
+}
 function blankPurchase(telas: Textile[]): PurchaseForm { return { id: null, idProveedor: '', fechaCompra: today(), tipoComprobante: 'Factura', numeroComprobante: '', observacion: '', lines: [blankLine(telas)] }; }
 
 export function FabricModule({ view }: { view: FabricView }) {
