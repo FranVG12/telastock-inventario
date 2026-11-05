@@ -552,11 +552,11 @@ export function FabricModule({ view }: { view: FabricView }) {
         if (!existing || !roll || existing.idCompra !== purchaseId) return tell('La línea hace referencia a un rollo o detalle que no pertenece a esta compra.', 'error');
         if (existing.unidadPrecio !== line.unidad) return tell('La unidad de precio de una línea histórica no se puede cambiar; registra otra compra si fue adquirida en otra unidad.', 'error');
         details = details.map((x) => x.id === existing.id ? { ...x, cantidadComprada: line.quantity, precioUnitario: line.price, importeTotal: Number((line.quantity * line.price).toFixed(2)) } : x);
-        // La cantidad comprada pertenece al historial comercial. Corregirla no modifica
-        // el saldo físico actual ni las mediciones reales, que solo cambian mediante
-        // consumos, ajustes o el registro explícito de una medición.
-        const updatedRoll = { ...roll, cantidadIngreso: line.quantity, idProveedor: purchaseForm.idProveedor || null, updatedAt: now };
-        newRolls.push(updatedRoll);
+        // Corregir la factura no modifica la cantidad original ingresada ni las mediciones reales.
+        // Solo se actualiza el proveedor vinculado si cambia la cabecera de la compra.
+        if (roll.idProveedor !== (purchaseForm.idProveedor || null)) {
+          newRolls.push({ ...roll, idProveedor: purchaseForm.idProveedor || null, updatedAt: now });
+        }
         continue;
       }
       const tela = line.tela!;
