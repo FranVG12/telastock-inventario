@@ -444,7 +444,7 @@ export function ProductionModule({
   baseMovements: DomainPieceMovement[];
   sizes: Size[];
   sizeGroups: SizeGroup[];
-  onAddBaseMovements: (movements: DomainPieceMovement[]) => void;
+  onAddBaseMovements: (movements: DomainPieceMovement[]) => boolean;
   onNavigate: (view: ProductionView) => void;
 }) {
   const [data, setData] = useState<ProductionBackupData>(emptyProductionBackupData);
@@ -1125,10 +1125,9 @@ export function ProductionModule({
       sum + order.materials.filter((line) => line.variantId === variantId && line.sizeId === sizeId && !variantsBySupply.get(line.variantId)?.textileId)
         .reduce((total, line) => total + line.quantity, 0), 0);
   }
-  function reservedPieceQuantity(lines: Array<ProductionOrderPieceRequirement | ProductionOrderComponentPieceRequirement>, pieceId: string, sizeId: string, side: 'izquierda' | 'derecha' | null, excludingOrderId?: string): number {
-    return ordersHoldingStock.filter((order) => order.id !== excludingOrderId).reduce((sum, order) =>
-      sum + lines.filter((line) => line.pieceId === pieceId && line.sizeId === sizeId && line.side === side)
-        .reduce((total, line) => total + line.quantity, 0), 0);
+  function reservedPieceQuantity(lines: Array<ProductionOrderPieceRequirement | ProductionOrderComponentPieceRequirement>, pieceId: string, sizeId: string, side: 'izquierda' | 'derecha' | null): number {
+    return lines.filter((line) => line.pieceId === pieceId && line.sizeId === sizeId && line.side === side)
+      .reduce((total, line) => total + line.quantity, 0);
   }
 
   function reserveProductionOrder(orderId: string) {
@@ -1181,7 +1180,7 @@ export function ProductionModule({
     for (const line of order.basePieces) {
       const piece = basePieces.find((item) => item.id === line.pieceId);
       const balance = currentBasePieceBalance(line.pieceId, line.sizeId, line.side);
-      const reserved = reservedPieceQuantity(otherOrders.flatMap((activeOrder) => activeOrder.basePieces), line.pieceId, line.sizeId, line.side, order.id);
+      const reserved = reservedPieceQuantity(otherOrders.flatMap((activeOrder) => activeOrder.basePieces), line.pieceId, line.sizeId, line.side);
       if (balance - reserved + 0.00001 < line.quantity) issues.push((piece?.name ?? 'Molde base') + ' · ' + (sizes.find((size) => size.id === line.sizeId)?.label ?? 'Talla') + ': faltan ' + format(line.quantity - Math.max(0, balance - reserved)) + ' piezas' + (line.side ? ' ' + line.side : ''));
     }
     for (const line of order.componentPieces) {
