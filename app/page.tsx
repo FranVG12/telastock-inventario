@@ -387,7 +387,7 @@ export default function Home() {
   function saveModel(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const cleanName = modelForm.name.trim();
-    const cleanPieces = modelForm.pieces.map((piece) => ({ ...piece, name: piece.name.trim(), fabricType: piece.fabricType.trim(), color: fabricColorById.get(piece.colorId)?.nombre ?? piece.color.trim(), units: Number(piece.unitsPerGarment) }));
+    const cleanPieces = modelForm.pieces.map((piece) => ({ ...piece, name: piece.name.trim(), fabricType: fabricSlotLabels[piece.fabricSlot], color: fabricColorById.get(piece.colorId)?.nombre ?? 'Sin especificar', units: Number(piece.unitsPerGarment) }));
     if (!cleanName) { setNoticeMessage('Escribe el nombre del modelo.', 'error'); return; }
     if (!modelForm.sizeGroupId) { setNoticeMessage('Selecciona un grupo de tallas.', 'error'); return; }
     if (cleanPieces.length === 0 || cleanPieces.some((piece) => !piece.name || !Number.isInteger(piece.units) || piece.units < 1 || !validFabricSlots.includes(piece.fabricSlot))) {
@@ -499,7 +499,7 @@ export default function Home() {
   }
 
   function exportConfiguration() {
-    const payload = { schemaVersion: 2, exportedAt: new Date().toISOString(), sizeGroups, sizes, models, pieces: pieces.filter((piece) => !piece.archived) };
+    const payload = { schemaVersion: 3, exportedAt: new Date().toISOString(), sizeGroups, sizes, models, pieces: pieces.filter((piece) => !piece.archived), colors: fabricColors };
     const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' }));
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'telastock-moldes-y-tallas.json'; anchor.click(); URL.revokeObjectURL(url);
   }
@@ -508,7 +508,7 @@ export default function Home() {
   async function importConfiguration(file?: File) {
     if (!file) return;
     try {
-      const parsed = JSON.parse(await file.text()) as { sizeGroups?: SizeGroup[]; sizes?: Size[]; models?: ManufacturingModel[]; pieces?: ModelPiece[] };
+      const parsed = JSON.parse(await file.text()) as { sizeGroups?: SizeGroup[]; sizes?: Size[]; models?: ManufacturingModel[]; pieces?: ModelPiece[]; colors?: ColorDefinition[] };
       if (!Array.isArray(parsed.sizeGroups) || !Array.isArray(parsed.sizes) || !Array.isArray(parsed.models) || !Array.isArray(parsed.pieces)) {
         throw new Error('El archivo debe contener sizeGroups, sizes, models y pieces.');
       }
@@ -518,11 +518,22 @@ export default function Home() {
         incoming.forEach((item) => map.set(item.id, item));
         return [...map.values()];
       };
+      const mergedColors = merge(fabricColors, parsed.colors ?? []);
+      setFabricColors(mergedColors);
+      localStorage.setItem(FABRIC_STORAGE_KEYS.colores, JSON.stringify(mergedColors));
       setSizeGroups((current) => merge(current, parsed.sizeGroups!));
       setSizes((current) => merge(current, parsed.sizes!));
       setModels((current) => merge(current, parsed.models!));
-      setPieces((current) => merge(current, parsed.pieces!.map((piece) => ({ ...piece, fabricType: piece.fabricType ?? 'Sin especificar', color: piece.color ?? 'Sin especificar', archived: false }))));
-      setNoticeMessage('Configuración importada. Se combinaron los modelos, moldes y tallas por ID; el historial de movimientos existente se conservó.');
+      setPieces((current) => merge(current, parsed.pieces!.map((piece) => ({
+        ...piece,
+        fabricSlot: piece.fabricSlot ?? 'principal',
+        fabricType: fabricSlotLabels[piece.fabricSlot ?? 'principal'],
+        color: piece.colorId ? mergedColors.find((color) => color.id === piece.colorId)?.nombre ?? 'Sin especificar' : piece.color ?? 'Sin especificar',
+        colorId: piece.colorId ?? mergedColors.find((color) => color.nombre.toLocaleLowerCase('es') === (piece.color ?? '').toLocaleLowerCase('es'))?.id ?? null,
+        archived: false,
+      }))));
+      window.dispatchEvent(new Event('telastock-fabric-data-updated'));
+      setNoticeMessage('Configuración importada. Se combinaron los modelos, moldes, colores y tallas por ID; el historial de movimientos existente se conservó.');
     } catch (error) {
       setNoticeMessage(`No se pudo importar el archivo: ${error instanceof Error ? error.message : 'formato no válido'}`, 'error');
     } finally {
@@ -546,6 +557,8 @@ export default function Home() {
         [FABRIC_STORAGE_KEYS.proveedorCategorias, 'proveedorCategorias'],
         [FABRIC_STORAGE_KEYS.compras, 'compras'],
         [FABRIC_STORAGE_KEYS.detalleCompra, 'detalleCompra'],
+        [FABRIC_STORAGE_KEYS.colores, 'colores'],
+        [FABRIC_STORAGE_KEYS.telaColores, 'telaColores'],
       ];
       localCollections.forEach(([storageKey, field]) => {
         const raw = localStorage.getItem(storageKey);
@@ -554,7 +567,7 @@ export default function Home() {
       const payload = {
         app: 'TelaStock',
         backupType: 'full',
-        schemaVersion: 2,
+        schemaVersion: 3,
         exportedAt: new Date().toISOString(),
         data: { sizeGroups, sizes, models, pieces, movements, fabricInventory },
       };
@@ -579,7 +592,7 @@ export default function Home() {
       const raw = JSON.parse(await file.text()) as unknown;
       const isRecord = (value: unknown): value is Record<string, unknown> =>
         Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-      if (!isRecord(raw) || raw.app !== 'TelaStock' || raw.backupType !== 'full' || ![1, 2].includes(Number(raw.schemaVersion)) || !isRecord(raw.data)) {
+      if (!isRecord(raw) || raw.app !== 'TelaStock' || raw.backupType !== 'full' || ![1, 2, 3].includes(Number(raw.schemaVersion)) || !isRecord(raw.data)) {
         throw new Error('Este no es un respaldo completo de TelaStock compatible.');
       }
       const data = raw.data;
@@ -601,12 +614,21 @@ export default function Home() {
       const importedModels = getRows('models') as unknown as ManufacturingModel[];
       const importedPieces = getRows('pieces') as unknown as ModelPiece[];
       const importedMovements = getRows('movements') as unknown as PieceMovement[];
-      const importedFabric = raw.schemaVersion === 2 ? validateFabricBackupData(data.fabricInventory) : emptyFabricBackupData();
+      let importedFabric = Number(raw.schemaVersion) >= 2 ? validateFabricBackupData(data.fabricInventory) : emptyFabricBackupData();
       const hasText = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
       const groupIds = new Set(importedGroups.map((item) => item.id));
       const sizeIds = new Set(importedSizes.map((item) => item.id));
       const modelIds = new Set(importedModels.map((item) => item.id));
       const pieceIds = new Set(importedPieces.map((item) => item.id));
+      const importedColorMap = new Map(importedFabric.colores.map((color) => [color.nombre.toLocaleLowerCase('es'), color]));
+      importedPieces.forEach((piece) => {
+        const legacyName = (piece.color ?? '').trim();
+        if (legacyName && legacyName !== 'Sin especificar' && !importedColorMap.has(legacyName.toLocaleLowerCase('es'))) {
+          const color = { id: newId(), nombre: legacyName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+          importedColorMap.set(legacyName.toLocaleLowerCase('es'), color);
+        }
+      });
+      importedFabric = { ...importedFabric, colores: [...importedColorMap.values()] };
 
       if (!importedGroups.every((item) => hasText(item.name))) throw new Error('Hay grupos de tallas sin nombre.');
       if (!importedSizes.every((item) => hasText(item.label) && groupIds.has(item.groupId) && Number.isInteger(item.sortOrder))) throw new Error('Hay tallas incompletas o vinculadas a un grupo inexistente.');
@@ -617,6 +639,8 @@ export default function Home() {
         Number.isInteger(item.unitsPerGarment) &&
         item.unitsPerGarment > 0 &&
         ['simetrica', 'izquierda', 'derecha', 'ninguna'].includes(item.laterality) &&
+        (item.fabricSlot === undefined || validFabricSlots.includes(item.fabricSlot)) &&
+        (item.colorId == null || importedFabric.colores.some((color) => color.id === item.colorId)) &&
         Number.isInteger(item.sortOrder)
       )) throw new Error('Hay moldes incompletos o con datos de fabricación inválidos.');
       if (!importedMovements.every((item) =>
@@ -640,9 +664,12 @@ export default function Home() {
       setModels(importedModels);
       setPieces(importedPieces.map((piece) => ({
         ...piece,
-        fabricType: piece.fabricType ?? 'Sin especificar',
-        color: piece.color ?? 'Sin especificar',
+        fabricSlot: piece.fabricSlot ?? 'principal',
+        fabricType: fabricSlotLabels[piece.fabricSlot ?? 'principal'],
+        color: piece.colorId ? importedFabric.colores.find((color) => color.id === piece.colorId)?.nombre ?? 'Sin especificar' : piece.color ?? 'Sin especificar',
+        colorId: piece.colorId ?? importedFabric.colores.find((color) => color.nombre.toLocaleLowerCase('es') === (piece.color ?? '').toLocaleLowerCase('es'))?.id ?? null,
       })));
+      setFabricColors(importedFabric.colores);
       setMovements(importedMovements);
       localStorage.setItem(FABRIC_STORAGE_KEYS.telas, JSON.stringify(importedFabric.telas));
       localStorage.setItem(FABRIC_STORAGE_KEYS.rollos, JSON.stringify(importedFabric.rollos));
