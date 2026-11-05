@@ -600,3 +600,24 @@
  .production-purchase-history-line strong{font-size:10px}
  .production-purchase-history-line small{font-size:9px}
 }
+
+
+/* Independent stock ledger for auxiliary pattern pieces */
+.production-card-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.production-component-stock{margin-top:18px;padding:15px;border:1px solid #e5eaf2;border-radius:12px;background:#fbfcff}
+.production-component-stock .panel-heading{margin-bottom:12px}
+.production-component-stock-piece{padding:12px 0;border-top:1px solid #e9edf4}
+.production-component-stock-title{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.production-component-stock-title>div{display:grid;gap:4px}
+.production-component-stock-title strong{font-size:12px;color:#34445f}
+.production-component-stock-title small{font-size:10px;color:#8792a4}
+.production-component-stock-sizes{display:grid;grid-template-columns:repeat(auto-fill,minmax(66px,1fr));gap:7px;margin-top:10px}
+.production-component-stock-sizes>div{display:grid;gap:4px;padding:8px;border:1px solid #e7ebf2;border-radius:8px;background:#fff}
+.production-component-stock-sizes span{font-size:10px;color:#8792a4}
+.production-component-stock-sizes strong{font-size:12px;color:#3f5578;font-variant-numeric:tabular-nums}
+@media(max-width:720px){
+ .production-card-actions{width:100%;justify-content:flex-start}
+ .production-component-stock{padding:11px}
+ .production-component-stock-title{align-items:flex-start;flex-direction:column}
+ .production-component-stock-title .button{align-self:flex-start}
+}
