@@ -224,7 +224,12 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
     (x.mode === 'fixed' ? Number.isFinite(x.fixedQuantity) && (x.fixedQuantity ?? 0) >= 0 : x.bySize && typeof x.bySize === 'object') &&
     Number.isFinite(x.wastePercent) && x.wastePercent >= 0
   );
-  if (!output.variants.every((x) => supplyIds.has(x.supplyId) && x.name.trim() && (x.textileId === null || typeof x.textileId === 'string') && (x.purchasePackQuantity === null || (Number.isFinite(x.purchasePackQuantity) && x.purchasePackQuantity > 0)))) {
+  if (!output.variants.every((x) => {
+    const supply = output.supplies.find((item) => item.id === x.supplyId);
+    return Boolean(supply && x.name.trim() && (x.textileId === null || typeof x.textileId === 'string') &&
+      (!x.textileId || supply.stockMode === 'total') &&
+      (x.purchasePackQuantity === null || (Number.isFinite(x.purchasePackQuantity) && x.purchasePackQuantity > 0)));
+  })) {
     throw new Error('Hay variantes asociadas a insumos inexistentes o con datos inválidos.');
   }
   if (!output.supplyMovements.every((x) => variantIds.has(x.variantId) && (x.sizeId === null || typeof x.sizeId === 'string') && Number.isFinite(x.delta) && x.delta !== 0 && ['entrada', 'salida', 'ajuste'].includes(x.kind) && (x.sourcePurchaseDetailId == null || purchaseDetailIds.has(x.sourcePurchaseDetailId)))) {
@@ -607,6 +612,7 @@ export function ProductionModule({
     if (!supply || !variantName.trim()) return tell('Selecciona el insumo y escribe el nombre de la variante.', 'error');
     const packQuantity = numberOrNull(variantPackQuantity);
     if (variantPackQuantity.trim() && (packQuantity === null || !Number.isFinite(packQuantity) || packQuantity <= 0 || (supply.baseUnit === 'und' && !Number.isInteger(packQuantity)))) return tell(supply.baseUnit === 'und' ? 'La equivalencia para unidades debe ser un entero.' : 'La equivalencia del paquete debe ser mayor que cero.', 'error');
+    if (variantTextileId && supply.stockMode === 'talla') return tell('Las telas vinculadas a rollos se controlan por rollo, no por talla. Selecciona control de existencias total.', 'error');
     if (variantTextileId && !variantTextileColorId) return tell('Selecciona también el color asociado a esa tela.', 'error');
     if (variantTextileId) {
       const textile = textileContext.telas.find((x) => x.id === variantTextileId);
