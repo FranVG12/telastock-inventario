@@ -186,9 +186,11 @@ begin
   from public.production_order_roll_allocations a
   join public.production_orders o on o.id = a.production_order_id
   where a.roll_id = new.roll_id and a.unit = new.unit
-    and o.status in ('reservada','en_proceso')
-    and not (a.production_order_id = new.production_order_id
-             and a.variant_id = new.variant_id);
+    and (
+      o.status in ('reservada','en_proceso')
+      or a.production_order_id = new.production_order_id
+    )
+    and a.id is distinct from new.id;
   if v_physical - v_reserved + 0.00001 < new.reserved_quantity then
     raise exception 'La asignación supera la medición real disponible del rollo después de reservas.';
   end if;
@@ -552,10 +554,10 @@ begin
   end loop;
 
   for r in
-    select variant_id, roll_id, unit, sum(reserved_quantity) as required_quantity
+    select roll_id, unit, sum(reserved_quantity) as required_quantity
     from public.production_order_roll_allocations
     where production_order_id = new.id
-    group by variant_id, roll_id, unit
+    group by roll_id, unit
   loop
     select case when r.unit = 'KG' then peso_kg else metros end
       into v_roll_quantity from public.rollos where id_rollo = r.roll_id;
@@ -583,3 +585,92 @@ create unique index if not exists production_order_base_piece_requirement_uidx
   on public.production_order_base_piece_requirements(production_order_id, model_piece_id, size_id, coalesce(side,''));
 create unique index if not exists production_order_component_piece_requirement_uidx
   on public.production_order_component_piece_requirements(production_order_id, component_piece_id, size_id, coalesce(side,''));
+
+
+-- Ensure the order snapshot and each requirement use the same master-data identity.
+create or replace function public.validate_production_order_identity()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_base_model_id uuid;
+begin
+  select base_model_id into v_base_model_id
+  from public.configured_product_models
+  where id = new.product_model_id;
+  if v_base_model_id is null or v_base_model_id is distinct from new.base_model_id then
+    raise exception 'El patrón base de la orden no coincide con el modelo configurado.';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists production_order_identity_guard on public.production_orders;
+create trigger production_order_identity_guard
+before insert or update of product_model_id, base_model_id on public.production_orders
+for each row execute function public.validate_production_order_identity();
+
+create or replace function public.validate_production_order_material_line()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_base_unit text;
+  v_stock_mode text;
+  v_textile_id uuid;
+  v_group_id uuid;
+  v_size_group_id uuid;
+begin
+  select s.base_unit, s.stock_mode, v.textile_id
+    into v_base_unit, v_stock_mode, v_textile_id
+  from public.supply_variants v
+  join public.supply_catalog s on s.id = v.supply_id
+  where v.id = new.variant_id;
+  if v_base_unit is null then raise exception 'La variante de material no existe.'; end if;
+  if new.consumption_unit <> v_base_unit then
+    raise exception 'El snapshot de consumo debe estar expresado en la unidad base del insumo.';
+  end if;
+  if (v_stock_mode = 'total' and new.size_id is not null)
+     or (v_stock_mode = 'talla' and new.size_id is null) then
+    raise exception 'La talla del material no coincide con la modalidad de stock.';
+  end if;
+  if v_textile_id is not null and v_stock_mode <> 'total' then
+    raise exception 'Las variantes textiles vinculadas a rollos deben controlar stock total.';
+  end if;
+  if new.size_id is not null then
+    select size_group_id into v_group_id
+    from public.manufacturing_models
+    where id = (select base_model_id from public.production_orders where id = new.production_order_id);
+    select size_group_id into v_size_group_id from public.sizes where id = new.size_id;
+    if v_group_id is distinct from v_size_group_id then
+      raise exception 'La talla del material no pertenece al grupo de tallas de la orden.';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists production_order_material_guard on public.production_order_materials;
+create trigger production_order_material_guard
+before insert or update on public.production_order_materials
+for each row execute function public.validate_production_order_material_line();
+
+create or replace function public.validate_production_order_size()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_group_id uuid;
+  v_size_group_id uuid;
+begin
+  select m.size_group_id into v_group_id
+  from public.production_orders o
+  join public.manufacturing_models m on m.id = o.base_model_id
+  where o.id = new.production_order_id;
+  select size_group_id into v_size_group_id from public.sizes where id = new.size_id;
+  if v_group_id is distinct from v_size_group_id then
+    raise exception 'La talla de la orden no pertenece al grupo de tallas del patrón base.';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists production_order_size_guard on public.production_order_sizes;
+create trigger production_order_size_guard
+before insert or update on public.production_order_sizes
+for each row execute function public.validate_production_order_size();
+
+create unique index if not exists production_order_material_movement_once_uidx
+  on public.supply_stock_movements(source_production_order_id, variant_id, coalesce(size_id, '00000000-0000-0000-0000-000000000000'::uuid))
+  where source_production_order_id is not null;
