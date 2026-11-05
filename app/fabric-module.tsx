@@ -393,6 +393,9 @@ export function FabricModule({ view }: { view: FabricView }) {
     const weightExtra = nullableNumber(rolloForm.pesoKg);
     const metresExtra = nullableNumber(rolloForm.metros);
     if (!tela) return tell('Selecciona una tela existente.', 'error');
+    const previousRoll = rolloForm.id ? rollById.get(rolloForm.id) : undefined;
+    if (previousRoll && data.detalleCompra.some((detail) => detail.idRollo === previousRoll.id) && previousRoll.idTela !== tela.id) return tell('Este rollo ya pertenece a una compra histórica. No puedes cambiarle la tela; registra un rollo nuevo si hubo un error de origen.', 'error');
+    if (previousRoll && previousRoll.unidadIngreso !== rolloForm.unidadIngreso) return tell('La unidad original de ingreso no se puede cambiar.', 'error');
     if (!validQty(quantity)) return tell('La cantidad ingresada debe ser mayor que cero.', 'error');
     if ([weightExtra, metresExtra].some((x) => x !== null && (!Number.isFinite(x) || x < 0))) return tell('Las mediciones reales deben ser positivas o quedar vacías; no uses cero para representar un dato desconocido.', 'error');
     if (rolloForm.idProveedor && !supplierById.has(rolloForm.idProveedor)) return tell('El proveedor seleccionado ya no existe.', 'error');
@@ -650,6 +653,7 @@ export function FabricModule({ view }: { view: FabricView }) {
             const suppliedId = field(row, 'id_rollo', 'id');
             const idRollo = suppliedId || generatedRollIds[index];
             const existing = map.get(idRollo);
+            if (existing && data.detalleCompra.some((detail) => detail.idRollo === existing.id) && (existing.idTela !== tela.id || existing.unidadIngreso !== unit)) throw new Error('No se puede cambiar la tela ni la unidad original de un rollo que ya tiene una compra asociada.');
             const kg = unit === 'KG' ? quantity : parseCsvNullableNumber(field(row, 'peso_kg_real', 'peso_kg'), 'peso_kg_real');
             const metres = unit === 'M' ? quantity : parseCsvNullableNumber(field(row, 'metros_reales', 'metros'), 'metros_reales');
             const stateRaw = (field(row, 'estado') || 'disponible').toLocaleLowerCase('es');
@@ -677,6 +681,8 @@ export function FabricModule({ view }: { view: FabricView }) {
             if (!purchaseId || !rollId) throw new Error('Faltan id_compra o id_rollo. Importa rollos primero; las compras CSV exportadas ya contienen esos identificadores.');
             const roll = data.rollos.find((x) => x.id === rollId);
             if (!roll) throw new Error('No existe el rollo ' + rollId + '. Importa primero el inventario de rollos.');
+            const sourceTelaId = field(row, 'id_tela');
+            if (sourceTelaId && sourceTelaId !== roll.idTela) throw new Error('id_tela no coincide con la tela del rollo relacionado.');
             const supplierId = resolveSupplier(row);
             const date = csvDate(field(row, 'fecha_compra'));
             const unit = field(row, 'unidad_precio').toUpperCase();
@@ -687,7 +693,10 @@ export function FabricModule({ view }: { view: FabricView }) {
             if (!validQty(quantity) || !Number.isFinite(price) || price < 0) throw new Error('Cantidad o precio unitario inválido.');
             const expectedTotal = Number((quantity * price).toFixed(2));
             const providedTotal = field(row, 'importe_total');
-            if (providedTotal && Math.abs(parseCsvNumber(providedTotal) - expectedTotal) > 0.011) throw new Error('importe_total no coincide con cantidad_comprada × precio_unitario.');
+            if (providedTotal) {
+              const importedTotal = parseCsvNumber(providedTotal);
+              if (!Number.isFinite(importedTotal) || Math.abs(importedTotal - expectedTotal) > 0.011) throw new Error('importe_total no coincide con cantidad_comprada × precio_unitario.');
+            }
             if (seenRolls.has(rollId)) throw new Error('El rollo aparece más de una vez en este archivo.');
             seenRolls.add(rollId);
             const currentPurchase = purchaseMap.get(purchaseId);
@@ -696,6 +705,8 @@ export function FabricModule({ view }: { view: FabricView }) {
             const now = new Date().toISOString();
             purchaseMap.set(purchaseId, { id: purchaseId, idProveedor: supplierId, fechaCompra: date, tipoComprobante: field(row, 'tipo_comprobante'), numeroComprobante: field(row, 'numero_comprobante'), observacion: field(row, 'observacion'), createdAt: currentPurchase?.createdAt ?? now, updatedAt: now });
             const detailId = field(row, 'id_detalle') || currentDetail?.id || id();
+            const detailWithId = detailMap.get(detailId);
+            if (detailWithId && detailWithId.idRollo !== rollId) throw new Error('id_detalle ya está asignado a otro rollo.');
             if (currentDetail && currentDetail.id !== detailId) detailMap.delete(currentDetail.id);
             detailMap.set(detailId, { id: detailId, idCompra: purchaseId, idRollo: rollId, cantidadComprada: quantity, unidadPrecio: unit, precioUnitario: price, importeTotal: expectedTotal });
             imported++;
