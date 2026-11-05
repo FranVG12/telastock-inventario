@@ -791,6 +791,8 @@ export function ProductionModule({
   const textileName = (textileId: string | null) => textileContext.telas.find((x) => x.id === textileId)?.nombreTela ?? '';
   const textileColorOptions = textileContext.telaColores.filter((x) => x.idTela === variantTextileId && x.activo);
   const activeProduct = data.productModels.find((x) => x.id === selectedProductId && x.active);
+  const selectedStockComponent = data.components.find((x) => x.id === selectedStockComponentId && x.active);
+  const selectedComponentStockPiece = selectedStockComponent?.pieces.find((x) => x.id === componentStockPieceId);
   const plan = useMemo(() => {
     if (!activeProduct) return { rows: [] as Array<{ variantId: string; total: number; bySize: Record<string, number>; missingSizes: string[]; available: number; shortage: number; packs: number | null }>, unresolved: [] as string[] };
     const requirements: MaterialRequirement[] = [];
@@ -1009,11 +1011,27 @@ export function ProductionModule({
       <div className="production-component-grid">
         {data.components.filter((x) => x.active).map((component) => <article className="production-card" key={component.id}>
           {component.imageUrl && <img className="production-component-image" src={component.imageUrl} alt="" />}
-          <div className="production-card-heading"><div><strong>{component.name}</strong><span>{component.type} · {component.pieces.length} piezas · {component.materials.length} materiales</span></div><button className="button secondary" onClick={() => openComponent(component)}>Editar</button></div>
+          <div className="production-card-heading"><div><strong>{component.name}</strong><span>{component.type} · {component.pieces.length} piezas · {component.materials.length} materiales</span></div><div className="production-card-actions"><button className="button secondary" disabled={component.pieces.length === 0} onClick={() => setSelectedStockComponentId(component.id)}>Inventario de piezas</button><button className="button secondary" onClick={() => openComponent(component)}>Editar</button></div></div>
           {component.description && <p className="production-muted">{component.description}</p>}
           <div className="production-attributes">{component.pieces.map((x) => <span key={x.id}>{x.name} ×{x.unitsPerGarment}</span>)}</div>
         </article>)}
       </div>
+      {selectedStockComponent && <section className="production-component-stock">
+        <div className="panel-heading">
+          <div><h2>Inventario de piezas · {selectedStockComponent.name}</h2><p>Existencias independientes del inventario de moldes base.</p></div>
+          <button className="text-action" onClick={() => setSelectedStockComponentId('')}>Cerrar</button>
+        </div>
+        {selectedStockComponent.pieces.map((piece) => <article className="production-component-stock-piece" key={piece.id}>
+          <div className="production-component-stock-title">
+            <div><strong>{piece.name}</strong><small>{piece.laterality === 'simetrica' ? 'Control por izquierda / derecha' : 'Control por unidades'} · {piece.unitsPerGarment} por prenda</small></div>
+            <button className="button secondary" onClick={() => openComponentPieceMovement(selectedStockComponent, piece)}>Registrar movimiento</button>
+          </div>
+          <div className="production-component-stock-sizes">
+            {sizes.map((size) => <div key={size.id}><span>{size.label}</span><strong>{componentPieceStockLabel(piece, size.id)}</strong></div>)}
+          </div>
+        </article>)}
+        {selectedStockComponent.pieces.length === 0 && <div className="empty">Este componente todavía no tiene piezas de patronaje.</div>}
+      </section>}
       {data.components.length === 0 && <div className="empty">Crea tu primer cuello, bolsillo o acabado reutilizable.</div>}
     </section>;
 
@@ -1110,6 +1128,27 @@ export function ProductionModule({
         </div>}
         <div className="form-actions"><button type="button" className="button secondary" onClick={() => setShowVariantForm(false)}>Cancelar</button><button className="button primary">Guardar variante</button></div>
       </form></section></div>}
+    {showComponentPieceMovement && selectedStockComponent && selectedComponentStockPiece && <div className="modal-backdrop">
+      <section className="modal production-modal" role="dialog" aria-modal="true" aria-labelledby="component-piece-stock-title">
+        <div className="modal-heading"><div><h2 id="component-piece-stock-title">Movimiento de pieza auxiliar</h2><p>{selectedStockComponent.name} · {selectedComponentStockPiece.name}</p></div><button className="icon-button" onClick={() => setShowComponentPieceMovement(false)}>×</button></div>
+        <form className="production-form" onSubmit={saveComponentPieceMovement}>
+          <label className="field-label">Operación<select className="large-input" value={componentStockKind} onChange={(event) => setComponentStockKind(event.target.value as 'entrada' | 'salida')}><option value="entrada">Entrada</option><option value="salida">Salida / merma</option></select></label>
+          <label className="field-label">Talla<select className="large-input" value={componentStockSizeId} onChange={(event) => setComponentStockSizeId(event.target.value)} required><option value="">Seleccionar talla</option>{sizes.map((size) => <option value={size.id} key={size.id}>{size.label}</option>)}</select></label>
+          {selectedComponentStockPiece.laterality === 'simetrica' && <>
+            <label className="field-label">Forma de registrar
+              <select className="large-input" value={componentStockMode} onChange={(event) => setComponentStockMode(event.target.value as 'paridad' | 'lado')}><option value="paridad">Por paridades (izquierda + derecha)</option><option value="lado">Por un solo lado</option></select>
+            </label>
+            {componentStockMode === 'lado' && <label className="field-label">Lado<select className="large-input" value={componentStockSide} onChange={(event) => setComponentStockSide(event.target.value as 'izquierda' | 'derecha')}><option value="izquierda">Izquierda</option><option value="derecha">Derecha</option></select></label>}
+          </>}
+          <label className="field-label">{selectedComponentStockPiece.laterality === 'simetrica' && componentStockMode === 'paridad' ? 'Cantidad de pares' : 'Cantidad de piezas'}
+            <input className="large-input" type="number" min="1" step="1" inputMode="numeric" value={componentStockQuantity} onChange={(event) => setComponentStockQuantity(event.target.value)} required />
+          </label>
+          <label className="field-label">Observación<input className="large-input" value={componentStockNote} onChange={(event) => setComponentStockNote(event.target.value)} /></label>
+          <div className="notice info">{selectedComponentStockPiece.laterality === 'simetrica' && componentStockMode === 'paridad' ? 'Una paridad registra una pieza izquierda y una derecha por cada unidad indicada.' : selectedComponentStockPiece.laterality === 'simetrica' ? 'El movimiento afecta únicamente al lado seleccionado.' : 'El movimiento se registra en unidades físicas de esta pieza.'}</div>
+          <div className="form-actions"><button type="button" className="button secondary" onClick={() => setShowComponentPieceMovement(false)}>Cancelar</button><button className="button primary">Guardar movimiento</button></div>
+        </form>
+      </section>
+    </div>}
     {showStockForm && <div className="modal-backdrop"><section className="modal production-modal" role="dialog" aria-modal="true"><div className="modal-heading"><div><h2>Movimiento de stock</h2><p>Registra una entrada o salida de la variante.</p></div><button className="icon-button" onClick={() => setShowStockForm(false)}>×</button></div>
       <form className="production-form" onSubmit={saveStock}>
         <label className="field-label">Operación<select className="large-input" value={stockDirection} onChange={(e) => setStockDirection(e.target.value as 'entrada' | 'salida')}><option value="entrada">Entrada</option><option value="salida">Salida</option></select></label>
