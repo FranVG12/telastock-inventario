@@ -219,6 +219,7 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
       Number.isFinite(x.purchaseQuantity) && x.purchaseQuantity > 0 &&
       Number.isFinite(x.baseQuantityPerPack) && x.baseQuantityPerPack > 0 &&
       Number.isFinite(x.inventoryQuantity) && x.inventoryQuantity > 0 &&
+      (supply?.baseUnit !== 'und' || Number.isInteger(x.purchaseQuantity) && Number.isInteger(x.inventoryQuantity)) &&
       Math.abs(x.inventoryQuantity - x.purchaseQuantity * x.baseQuantityPerPack) < 0.00001 &&
       typeof x.purchaseUnitLabel === 'string' && x.purchaseUnitLabel.trim().length > 0 &&
       Number.isFinite(x.unitPrice) && x.unitPrice >= 0 && Number.isFinite(x.lineTotal) && x.lineTotal >= 0 &&
@@ -563,7 +564,7 @@ export function ProductionModule({
     const supply = supplies.find((x) => x.id === variantSupplyId);
     if (!supply || !variantName.trim()) return tell('Selecciona el insumo y escribe el nombre de la variante.', 'error');
     const packQuantity = numberOrNull(variantPackQuantity);
-    if (variantPackQuantity.trim() && (packQuantity === null || !Number.isFinite(packQuantity) || packQuantity <= 0)) return tell('La equivalencia del paquete debe ser mayor que cero.', 'error');
+    if (variantPackQuantity.trim() && (packQuantity === null || !Number.isFinite(packQuantity) || packQuantity <= 0 || (supply.baseUnit === 'und' && !Number.isInteger(packQuantity)))) return tell(supply.baseUnit === 'und' ? 'La equivalencia para unidades debe ser un entero.' : 'La equivalencia del paquete debe ser mayor que cero.', 'error');
     if (variantTextileId && !variantTextileColorId) return tell('Selecciona también el color asociado a esa tela.', 'error');
     if (variantTextileId) {
       const textile = textileContext.telas.find((x) => x.id === variantTextileId);
@@ -658,7 +659,7 @@ export function ProductionModule({
     const variant = variantsBySupply.get(stockVariantId);
     const supply = variant ? supplies.find((x) => x.id === variant.supplyId) : undefined;
     const quantity = Number(stockQuantity);
-    if (!variant || !supply || !Number.isFinite(quantity) || quantity <= 0) return tell('Selecciona una variante e ingresa una cantidad mayor que cero.', 'error');
+    if (!variant || !supply || !Number.isFinite(quantity) || quantity <= 0 || (supply.baseUnit === 'und' && !Number.isInteger(quantity))) return tell('Selecciona una variante e ingresa una cantidad válida para su unidad de inventario.', 'error');
     if (variant.textileId) return tell('Esta variante utiliza el stock real de rollos. Registra sus entradas o consumos desde Inventario de rollos.', 'info');
     if (supply.stockMode === 'talla' && !stockSizeId) return tell('Selecciona la talla de este insumo.', 'error');
     const sizeId = supply.stockMode === 'talla' ? stockSizeId : null;
@@ -702,7 +703,7 @@ export function ProductionModule({
       const quantity = Number(line.quantity);
       const unitPrice = Number(line.unitPrice);
       if (!variant || !supply || variant.textileId) return tell('Cada línea debe seleccionar una variante de avío válida. Las telas se compran desde el módulo de rollos.', 'error');
-      if (line.unitPrice.trim() === '' || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0) return tell('Revisa las cantidades y precios de todos los detalles.', 'error');
+      if (line.unitPrice.trim() === '' || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0 || (supply.baseUnit === 'und' && (!Number.isInteger(quantity) || !Number.isInteger(quantity * (variant.purchasePackQuantity ?? 1))))) return tell('Revisa las cantidades y precios. Los insumos controlados por unidades requieren cantidades enteras.', 'error');
       if (supply.stockMode === 'talla' && (!line.sizeId || !sizes.some((size) => size.id === line.sizeId))) return tell('Selecciona una talla para cada insumo que controla stock por talla.', 'error');
       const sizeId = supply.stockMode === 'talla' ? line.sizeId : null;
       const baseQuantityPerPack = variant.purchasePackQuantity ?? 1;
@@ -984,7 +985,7 @@ export function ProductionModule({
             </div>}
             <div className="production-form-grid">
               <label className="field-label">Cantidad ({purchaseUnit})
-                <input className="large-input" type="number" min="0.001" step="0.001" value={line.quantity} onChange={(event) => updatePurchaseLine(line.id, { quantity: event.target.value })} required />
+                <input className="large-input" type="number" min="0.001" step={supply?.baseUnit === "und" ? 1 : 0.001} value={line.quantity} onChange={(event) => updatePurchaseLine(line.id, { quantity: event.target.value })} required />
               </label>
               <label className="field-label">Precio por {purchaseUnit} (S/)
                 <input className="large-input" type="number" min="0" step="0.01" value={line.unitPrice} onChange={(event) => updatePurchaseLine(line.id, { unitPrice: event.target.value })} required />
@@ -1215,7 +1216,7 @@ export function ProductionModule({
       <form className="production-form" onSubmit={saveStock}>
         <label className="field-label">Operación<select className="large-input" value={stockDirection} onChange={(e) => setStockDirection(e.target.value as 'entrada' | 'salida')}><option value="entrada">Entrada</option><option value="salida">Salida</option></select></label>
         {(() => { const variant = variantsBySupply.get(stockVariantId); const supply = variant ? supplies.find((x) => x.id === variant.supplyId) : undefined; return supply?.stockMode === 'talla' ? <label className="field-label">Talla<select className="large-input" value={stockSizeId} onChange={(e) => setStockSizeId(e.target.value)}><option value="">Seleccionar</option>{sizes.map((x) => <option key={x.id} value={x.id}>{sizeDisplay(x)}</option>)}</select></label> : null; })()}
-        <label className="field-label">Cantidad<input className="large-input" type="number" min="0.001" step="0.001" value={stockQuantity} onChange={(e) => setStockQuantity(e.target.value)} required /></label>
+        <label className="field-label">Cantidad<input className="large-input" type="number" min="0.001" step={supplies.find((item) => item.id === variantsBySupply.get(stockVariantId)?.supplyId)?.baseUnit === "und" ? 1 : 0.001} value={stockQuantity} onChange={(e) => setStockQuantity(e.target.value)} required /></label>
         <label className="field-label">Observación<input className="large-input" value={stockNote} onChange={(e) => setStockNote(e.target.value)} /></label>
         <div className="form-actions"><button type="button" className="button secondary" onClick={() => setShowStockForm(false)}>Cancelar</button><button className="button primary">Guardar movimiento</button></div>
       </form></section></div>}
