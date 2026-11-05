@@ -1103,7 +1103,7 @@ export function ProductionModule({
           if (!(quantity > 0)) return;
           if (supply.baseUnit === 'und' && !Number.isInteger(quantity)) throw new Error(supply.name + ': el consumo configurado debe ser entero porque se controla por unidades.');
           orderMaterials.push({
-            id: id(), variantId: variant.id, sizeId, quantity: Number(quantity.toFixed(5)),
+            id: id(), variantId: variant.id, sizeId, quantity: Number(quantity.toFixed(variant.textileId ? 3 : 5)),
             unit: supply.baseUnit, unitCost: cost, lineCost: cost === null ? null : Number((quantity * cost).toFixed(2)),
           });
         };
@@ -1310,8 +1310,8 @@ export function ProductionModule({
     const actualRollAllocations: ProductionOrderRollAllocation[] = order.rollAllocations.map((allocation) => {
       const raw = draft.rollQuantities[allocation.id] ?? String(allocation.quantity);
       const quantity = Number(raw);
-      if (raw.trim() === '' || !Number.isFinite(quantity) || quantity < 0 || quantity > allocation.quantity + 0.00001) {
-        issues.push('El consumo real del rollo ' + allocation.rollId + ' debe estar entre cero y la cantidad reservada.');
+      if (raw.trim() === '' || !Number.isFinite(quantity) || quantity < 0 || quantity > allocation.quantity + 0.00001 || Math.abs(quantity - Number(quantity.toFixed(3))) > 0.000001) {
+        issues.push('El consumo real del rollo ' + allocation.rollId + ' debe estar entre cero y la cantidad reservada, con precisión máxima de 0.001 ' + allocation.unit + '.');
       }
       return { ...allocation, quantity: Number.isFinite(quantity) ? Number(quantity.toFixed(5)) : 0 };
     });
@@ -1739,7 +1739,7 @@ export function ProductionModule({
               {order.actualConsumption ? (
                 order.actualConsumption.materialCost === null
                   ? <span>Consumo real registrado · costo pendiente en {order.actualConsumption.missingCostLines} líneas</span>
-                  : <span>**Consumo real valorizado:** <strong>{money(order.actualConsumption.materialCost)}</strong></span>
+                  : <span>Consumo real valorizado: <strong>{money(order.actualConsumption.materialCost)}</strong></span>
               ) : order.estimatedMaterialCost === null
                 ? <span>Costo estimado pendiente · {order.missingCostLines} materiales sin precio de compra</span>
                 : <span>Estimado según últimos precios registrados: <strong>{money(order.estimatedMaterialCost)}</strong></span>}
