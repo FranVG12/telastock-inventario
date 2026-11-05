@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import type { ManufacturingModel, Size } from '@/lib/inventory-domain';
 import { FABRIC_STORAGE_KEYS } from '@/app/fabric-module';
 
-export type ProductionView = 'insumos' | 'componentes' | 'modelos-producto' | 'recetas' | 'planificacion';
+export type ProductionView = 'insumos' | 'compras-avios' | 'componentes' | 'modelos-producto' | 'recetas' | 'planificacion';
 export type StockUnit = 'und' | 'm' | 'cm' | 'g' | 'kg' | 'l' | 'ml';
 export type SupplyCategory =
   | 'Hilos' | 'Botones y broches' | 'Cintas elásticas' | 'Cintas para vena'
@@ -44,6 +44,31 @@ export type SupplyMovement = {
   kind: 'entrada' | 'salida' | 'ajuste';
   note: string;
   date: string;
+  sourcePurchaseDetailId?: string | null;
+};
+
+export type SupplyPurchase = {
+  id: string;
+  supplierId: string | null;
+  date: string;
+  documentType: string;
+  documentNumber: string;
+  note: string;
+  total: number;
+  createdAt: string;
+};
+
+export type SupplyPurchaseDetail = {
+  id: string;
+  purchaseId: string;
+  variantId: string;
+  sizeId: string | null;
+  purchaseQuantity: number;
+  purchaseUnitLabel: string;
+  baseQuantityPerPack: number;
+  inventoryQuantity: number;
+  unitPrice: number;
+  lineTotal: number;
 };
 
 export type ComponentPiece = {
@@ -112,6 +137,8 @@ export type ProductionBackupData = {
   supplies: Supply[];
   variants: SupplyVariant[];
   supplyMovements: SupplyMovement[];
+  supplyPurchases: SupplyPurchase[];
+  supplyPurchaseDetails: SupplyPurchaseDetail[];
   components: GarmentComponent[];
   familyRecipes: FamilyRecipe[];
   productModels: ConfiguredProductModel[];
@@ -122,13 +149,15 @@ export const PRODUCTION_STORAGE_KEYS = {
   supplies: 'telastock-supplies-v1',
   variants: 'telastock-supply-variants-v1',
   supplyMovements: 'telastock-supply-movements-v1',
+  supplyPurchases: 'telastock-supply-purchases-v1',
+  supplyPurchaseDetails: 'telastock-supply-purchase-details-v1',
   components: 'telastock-garment-components-v1',
   familyRecipes: 'telastock-family-recipes-v1',
   productModels: 'telastock-configured-product-models-v1',
 } as const;
 
 export function emptyProductionBackupData(): ProductionBackupData {
-  return { supplies: [], variants: [], supplyMovements: [], components: [], familyRecipes: [], productModels: [] };
+  return { supplies: [], variants: [], supplyMovements: [], supplyPurchases: [], supplyPurchaseDetails: [], components: [], familyRecipes: [], productModels: [] };
 }
 
 export function validateProductionBackupData(value: unknown): ProductionBackupData {
@@ -148,6 +177,8 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
   const supplyIds = new Set(output.supplies.map((x) => x.id));
   const variantIds = new Set(output.variants.map((x) => x.id));
   const componentIds = new Set(output.components.map((x) => x.id));
+  const purchaseIds = new Set(output.supplyPurchases.map((x) => x.id));
+  const purchaseDetailIds = new Set(output.supplyPurchaseDetails.map((x) => x.id));
   const validMaterials = (items: MaterialRequirement[]) => Array.isArray(items) && items.every((x) =>
     variantIds.has(x.variantId) && ['fixed', 'per_size'].includes(x.mode) &&
     ['und', 'm', 'cm', 'g', 'kg', 'l', 'ml'].includes(x.unit) &&
@@ -157,8 +188,18 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
   if (!output.variants.every((x) => supplyIds.has(x.supplyId) && x.name.trim() && (x.textileId === null || typeof x.textileId === 'string') && (x.purchasePackQuantity === null || (Number.isFinite(x.purchasePackQuantity) && x.purchasePackQuantity > 0)))) {
     throw new Error('Hay variantes asociadas a insumos inexistentes o con datos inválidos.');
   }
-  if (!output.supplyMovements.every((x) => variantIds.has(x.variantId) && (x.sizeId === null || typeof x.sizeId === 'string') && Number.isFinite(x.delta) && x.delta !== 0 && ['entrada', 'salida', 'ajuste'].includes(x.kind))) {
+  if (!output.supplyMovements.every((x) => variantIds.has(x.variantId) && (x.sizeId === null || typeof x.sizeId === 'string') && Number.isFinite(x.delta) && x.delta !== 0 && ['entrada', 'salida', 'ajuste'].includes(x.kind) && (x.sourcePurchaseDetailId == null || purchaseDetailIds.has(x.sourcePurchaseDetailId)))) {
     throw new Error('Hay movimientos de insumos inválidos.');
+  }
+  if (!output.supplyPurchases.every((x) => typeof x.date === 'string' && x.date.length > 0 && (x.supplierId === null || typeof x.supplierId === 'string') && Number.isFinite(x.total) && x.total >= 0)) {
+    throw new Error('Hay encabezados de compra de avíos inválidos.');
+  }
+  if (!output.supplyPurchaseDetails.every((x) => purchaseIds.has(x.purchaseId) && variantIds.has(x.variantId) &&
+    (x.sizeId === null || typeof x.sizeId === 'string') && Number.isFinite(x.purchaseQuantity) && x.purchaseQuantity > 0 &&
+    Number.isFinite(x.baseQuantityPerPack) && x.baseQuantityPerPack > 0 && Number.isFinite(x.inventoryQuantity) && x.inventoryQuantity > 0 &&
+    Number.isFinite(x.unitPrice) && x.unitPrice >= 0 && Number.isFinite(x.lineTotal) && x.lineTotal >= 0 &&
+    Math.abs(x.lineTotal - x.purchaseQuantity * x.unitPrice) < 0.02)) {
+    throw new Error('Hay detalles de compra de avíos inválidos.');
   }
   if (!output.components.every((x) => x.name.trim() && x.type.trim() && Array.isArray(x.pieces) && x.pieces.every((p) => p.name.trim() && Number.isInteger(p.unitsPerGarment) && p.unitsPerGarment > 0) && validMaterials(x.materials))) {
     throw new Error('Hay componentes con piezas o materiales inválidos.');
@@ -193,6 +234,8 @@ const id = () => typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypt
 const now = () => new Date().toISOString();
 const numberOrNull = (value: string) => value.trim() === '' ? null : Number(value);
 const format = (value: number) => new Intl.NumberFormat('es-PE', { maximumFractionDigits: 3 }).format(value);
+const money = (value: number) => new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN' }).format(value);
+const localDate = () => { const date = new Date(); return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
 const safeRead = <T,>(key: string, fallback: T): T => {
   try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; }
 };
@@ -213,7 +256,9 @@ type TextileRow = { id: string; nombreTela: string; unidadVenta: 'KG' | 'M' };
 type TextileColorRow = { id: string; idTela: string; idColor: string; activo: boolean };
 type ColorRow = { id: string; nombre: string };
 type RollRow = { id: string; idTela: string; idTelaColor?: string | null; metros: number | null; pesoKg: number | null; estado: string };
-type TextileContext = { telas: TextileRow[]; rollos: RollRow[]; telaColores: TextileColorRow[]; colores: ColorRow[] };
+type SupplierOption = { id: string; nombre: string; ruc?: string | null };
+type TextileContext = { telas: TextileRow[]; rollos: RollRow[]; telaColores: TextileColorRow[]; colores: ColorRow[]; proveedores: SupplierOption[] };
+type PurchaseLineDraft = { id: string; variantId: string; sizeId: string; quantity: string; unitPrice: string };
 
 function MaterialEditor({
   materials, onChange, variants, sizes, title,
@@ -299,7 +344,14 @@ export function ProductionModule({
   const [ready, setReady] = useState(false);
   const [storageSafe, setStorageSafe] = useState(true);
   const [notice, setNotice] = useState<{ text: string; kind: 'success' | 'error' | 'info' } | null>(null);
-  const [textileContext, setTextileContext] = useState<TextileContext>({ telas: [], rollos: [], telaColores: [], colores: [] });
+  const [textileContext, setTextileContext] = useState<TextileContext>({ telas: [], rollos: [], telaColores: [], colores: [], proveedores: [] });
+  const [showPurchaseForm, setShowPurchaseForm] = useState(false);
+  const [purchaseDate, setPurchaseDate] = useState(localDate);
+  const [purchaseSupplierId, setPurchaseSupplierId] = useState('');
+  const [purchaseDocumentType, setPurchaseDocumentType] = useState('Boleta');
+  const [purchaseDocumentNumber, setPurchaseDocumentNumber] = useState('');
+  const [purchaseNote, setPurchaseNote] = useState('');
+  const [purchaseLines, setPurchaseLines] = useState<PurchaseLineDraft[]>([{ id: id(), variantId: '', sizeId: '', quantity: '1', unitPrice: '' }]);
   const [supplyName, setSupplyName] = useState('');
   const [supplyCategory, setSupplyCategory] = useState<SupplyCategory>('Hilos');
   const [supplyUnit, setSupplyUnit] = useState<StockUnit>('g');
@@ -336,7 +388,8 @@ export function ProductionModule({
     const rollos = safeRead<RollRow[]>(FABRIC_STORAGE_KEYS.rollos, []);
     const telaColores = safeRead<TextileColorRow[]>(FABRIC_STORAGE_KEYS.telaColores, []);
     const colores = safeRead<ColorRow[]>(FABRIC_STORAGE_KEYS.colores, []);
-    setTextileContext({ telas, rollos, telaColores, colores });
+    const proveedores = safeRead<SupplierOption[]>(FABRIC_STORAGE_KEYS.proveedores, []);
+    setTextileContext({ telas, rollos, telaColores, colores, proveedores });
   };
 
   const loadLocal = () => {
