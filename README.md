@@ -59,7 +59,8 @@ Este MVP todavía no realiza llamadas a Supabase: los datos se guardan por naveg
 
 - `size_groups`: conjunto de tallas (prendas, medias, etc.).
 - `sizes`: talla y orden dentro del grupo.
-- `manufacturing_models`: patrón base y grupo de tallas asignado.
+- `manufacturing_models`: patrón base, familia de prenda y grupo de tallas asignado. La familia se define aquí y es heredada por los modelos comerciales.
+- `configured_product_models`: configuración comercial que referencia un patrón base; no guarda una familia propia.
 - `model_pieces`: piezas/moldes requeridos por prenda, cantidad física y lateralidad.
 - `piece_stock_movements`: ledger de movimientos con cantidad delta firmada; el saldo es una suma, no un campo editable duplicado.
 - `piece_stock_balances` y `model_size_completion`: vistas para consultar saldos y capacidad fabricable por modelo/talla.
@@ -160,7 +161,7 @@ La rama de trabajo feature/componentes-insumos incorpora un módulo local-first 
 - **Variantes y existencias:** el stock se registra mediante movimientos de entrada/salida. Las presentaciones comerciales guardan su equivalencia declarada; no se inventan conversiones entre unidades incompatibles.
 - **Vinculación textil:** una variante puede referenciar una tela y un color ya existentes. Si se vincula a un rollo, el stock se consulta desde el inventario de rollos; el nuevo módulo no crea un saldo paralelo ni consume rollos automáticamente.
 - **Componentes reutilizables:** biblioteca de cuellos, bolsillos, puños, pretinas, tapeteras y otros acabados, con piezas auxiliares, lateralidad y consumos de materiales.
-- **Modelos configurados:** una prenda comercial referencia un patrón base existente y selecciona componentes. No duplica ni mezcla el inventario de piezas cortadas del patrón.
+- **Modelos configurados:** una prenda comercial referencia un patrón base existente y selecciona componentes. Hereda automáticamente la familia del patrón base; no almacena una familia independiente ni duplica el inventario de piezas cortadas.
 - **Recetas estándar:** consumos compartidos por familia (polo, buzo y casaca), con consumo fijo o diferenciado por talla y porcentaje de desperdicio.
 - **Planificación:** estima materiales requeridos, disponibilidad y faltantes por variante, talla y presentación de compra. Es una simulación: no descuenta stock ni genera órdenes de compra.
 
@@ -174,7 +175,7 @@ No se debe sumar KG con metros ni inferir metros a partir de KG sin un rendimien
 
 ### Respaldo y migración
 
-El respaldo completo evoluciona a schemaVersion 4 e incluye insumos, variantes, movimientos, componentes, recetas y modelos configurados. Se mantienen importables los respaldos completos de versiones 1, 2 y 3; al restaurar uno antiguo, las nuevas colecciones se inicializan vacías.
+El respaldo completo usa schemaVersion 6 e incluye insumos, variantes, movimientos, componentes, recetas y modelos configurados. Se mantienen importables los respaldos completos de versiones 1, 2 y 3; al restaurar uno antiguo, las nuevas colecciones se inicializan vacías.
 
 La migración 202611060001_supplies_components_product_models.sql define el esquema relacional futuro. **No se ejecuta automáticamente** y no conecta la aplicación con Supabase. Las tablas nuevas mantienen RLS habilitado sin políticas permisivas, igual que el resto del esquema pendiente de configuración de autenticación y acceso.
 
