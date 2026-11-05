@@ -220,6 +220,42 @@ type RolloForm = {
 type SupplierForm = { id: string | null; nombre: string; contacto: string; direccion: string; nota: string; telefonos: { id: string; numero: string; etiqueta: string }[]; categorias: string[] };
 type PurchaseLineForm = { idRollo: string | null; idDetalle?: string | null; idTela: string; idTelaColor: string; unidad: FabricUnit; cantidad: string; cantidadesAdicionales: string; precio: string; color: string; pesoKg: string; metros: string; idLote: string };
 type PurchaseForm = { id: string | null; idProveedor: string; fechaCompra: string; tipoComprobante: string; numeroComprobante: string; observacion: string; lines: PurchaseLineForm[] };
+type InlineColorTarget = 'tela' | 'rollo' | 'compra';
+type InlineColorForm = { target: InlineColorTarget; telaId: string; lineIndex: number | null; idTelaColor: string | null; nombre: string; hexadecimal: string; cmykC: string; cmykM: string; cmykY: string; cmykK: string };
+
+function migrateLegacyColorData(value: FabricBackupData): FabricBackupData {
+  const colores = [...(value.colores ?? [])];
+  const telaColores = [...(value.telaColores ?? [])];
+  const colorByName = new Map(colores.map((x) => [x.nombre.trim().toLocaleLowerCase('es'), x]));
+  const variantByPair = new Map(telaColores.map((x) => [x.idTela + ':' + x.idColor, x]));
+  const now = new Date().toISOString();
+  const ensureVariant = (idTela: string, name: string) => {
+    const clean = name.trim();
+    if (!clean) return null;
+    let color = colorByName.get(clean.toLocaleLowerCase('es'));
+    if (!color) {
+      color = { id: id(), nombre: clean, createdAt: now, updatedAt: now };
+      colores.push(color);
+      colorByName.set(clean.toLocaleLowerCase('es'), color);
+    }
+    const key = idTela + ':' + color.id;
+    let variant = variantByPair.get(key);
+    if (!variant) {
+      variant = { id: id(), idTela, idColor: color.id, hexadecimal: null, cmykC: null, cmykM: null, cmykY: null, cmykK: null, activo: true, createdAt: now, updatedAt: now };
+      telaColores.push(variant);
+      variantByPair.set(key, variant);
+    }
+    return variant;
+  };
+  const rollos = value.rollos.map((roll) => {
+    const legacy = roll as FabricRoll & { idTelaColor?: string | null };
+    const variant = legacy.idTelaColor ? telaColores.find((x) => x.id === legacy.idTelaColor && x.idTela === roll.idTela) : ensureVariant(roll.idTela, roll.color ?? '');
+    const colorName = variant ? colorByName.get(variant.idColor)?.nombre ?? roll.color : roll.color;
+    return { ...roll, idTelaColor: variant?.id ?? null, color: colorName ?? '' };
+  });
+  const telas = value.telas.map((tela) => ({ ...tela, rendimientoTeorico: tela.rendimientoTeorico ?? null }));
+  return { ...value, telas, rollos, colores, telaColores };
+}
 
 function blankTela(): TelaForm { return { id: null, nombreTela: '', unidadVenta: 'KG', anchoNominalM: '', rendimientoTeorico: '', descripcion: '', activo: true }; }
 function blankRollo(telas: Textile[], telaColores: TextileColor[] = [], colores: ColorDefinition[] = []): RolloForm {
@@ -265,6 +301,7 @@ export function FabricModule({ view }: { view: FabricView }) {
   const [purchaseForm, setPurchaseForm] = useState<PurchaseForm>(() => blankPurchase([]));
   const [showInlineSupplier, setShowInlineSupplier] = useState(false);
   const [inlineSupplierName, setInlineSupplierName] = useState('');
+  const [inlineColorForm, setInlineColorForm] = useState<InlineColorForm | null>(null);
 
   const persist = (next: FabricBackupData): boolean => {
     if (!storageSafe) {
@@ -279,8 +316,9 @@ export function FabricModule({ view }: { view: FabricView }) {
         const field = key as keyof FabricBackupData;
         localStorage.setItem(FABRIC_STORAGE_KEYS[key], JSON.stringify(next[field]));
       });
-      localStorage.setItem(FABRIC_STORAGE_KEYS.version, '1');
+      localStorage.setItem(FABRIC_STORAGE_KEYS.version, '2');
       setData(next);
+      window.dispatchEvent(new Event('telastock-fabric-data-updated'));
       return true;
     } catch {
       previous.forEach((value, key) => {
@@ -299,7 +337,7 @@ export function FabricModule({ view }: { view: FabricView }) {
     let safe = true;
     let warning = '';
     const storedVersion = Number(localStorage.getItem(FABRIC_STORAGE_KEYS.version) ?? '0');
-    if (storedVersion > 1) {
+    if (storedVersion > 2) {
       safe = false;
       warning = 'Este inventario fue creado con una versión más reciente de TelaStock. No se escribieron cambios para protegerlo.';
     }
@@ -315,7 +353,7 @@ export function FabricModule({ view }: { view: FabricView }) {
       }
     });
     try {
-      return { data: validateFabricBackupData(next), safe, warning };
+      return { data: validateFabricBackupData(migrateLegacyColorData(next)), safe, warning };
     } catch {
       return { data: next, safe: false, warning: 'Las relaciones del inventario de telas no son válidas. No se sobrescribieron los datos; restaura un respaldo JSON válido.' };
     }
@@ -324,7 +362,7 @@ export function FabricModule({ view }: { view: FabricView }) {
     const loaded = loadLocal();
     setData(loaded.data);
     setStorageSafe(loaded.safe);
-    if (loaded.safe) localStorage.setItem(FABRIC_STORAGE_KEYS.version, '1');
+    if (loaded.safe) localStorage.setItem(FABRIC_STORAGE_KEYS.version, '2');
     else setNotice({ text: loaded.warning, kind: 'error' });
     setReady(true);
     const refresh = () => {
@@ -343,7 +381,7 @@ export function FabricModule({ view }: { view: FabricView }) {
         [FABRIC_STORAGE_KEYS.telas, 'telas'], [FABRIC_STORAGE_KEYS.rollos, 'rollos'], [FABRIC_STORAGE_KEYS.rolloMovimientos, 'rolloMovimientos'],
         [FABRIC_STORAGE_KEYS.proveedores, 'proveedores'], [FABRIC_STORAGE_KEYS.proveedorTelefonos, 'proveedorTelefonos'],
         [FABRIC_STORAGE_KEYS.proveedorCategorias, 'proveedorCategorias'], [FABRIC_STORAGE_KEYS.compras, 'compras'],
-        [FABRIC_STORAGE_KEYS.detalleCompra, 'detalleCompra'],
+        [FABRIC_STORAGE_KEYS.detalleCompra, 'detalleCompra'], [FABRIC_STORAGE_KEYS.colores, 'colores'], [FABRIC_STORAGE_KEYS.telaColores, 'telaColores'],
       ] as const) localStorage.setItem(key, JSON.stringify(data[field]));
     } catch {
       setStorageSafe(false);
