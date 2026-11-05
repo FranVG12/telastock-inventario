@@ -152,7 +152,7 @@ function csvDate(value: string) {
     const date = new Date(year, month - 1, day);
     if (date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day) return raw;
   }
-  const local = raw.match(/^(\\d{1,2})[/-](\\d{1,2})[/-](\\d{4})$/);
+  const local = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
   if (local) {
     const first = Number(local[1]);
     const second = Number(local[2]);
