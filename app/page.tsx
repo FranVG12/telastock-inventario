@@ -635,7 +635,12 @@ export default function Home() {
         colorOverride: piece.colorOverride ?? true,
         archived: false,
       }));
-      const legacyProductModels = safeRead<Array<{ baseModelId?: string; family?: string }>>(PRODUCTION_STORAGE_KEYS.productModels, []);
+      const legacyProductModels = (() => {
+        try {
+          const raw = localStorage.getItem(PRODUCTION_STORAGE_KEYS.productModels);
+          return raw ? JSON.parse(raw) as Array<{ baseModelId?: string; family?: string }> : [];
+        } catch { return []; }
+      })();
       setModels((current) => {
         const merged = merge(current, normalizeModelsWithSlots(parsed.models!, incomingPieces)).map((model) => ({ ...model, family: model.family || current.find((item) => item.id === model.id)?.family || '' }));
         return migrateBaseModelFamilies(merged, legacyProductModels);
