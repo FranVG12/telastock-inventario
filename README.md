@@ -195,3 +195,19 @@ Cada pieza de un componente puede tener movimientos de entrada, salida o merma p
 - No se permite retirar más stock del disponible en cualquiera de los lados.
 - Una pieza auxiliar que ya tiene movimientos no se puede eliminar ni cambiar de lateralidad desde su ficha; se conserva la referencia histórica.
 - La planificación de una prenda combina la capacidad del patrón base con la capacidad de cada pieza auxiliar seleccionada y muestra el recurso limitante por talla.
+
+## Órdenes de producción y reservas
+
+El módulo de órdenes conecta la planificación con el inventario sin crear saldos paralelos:
+
+1. **Borrador:** se crea desde Planificar con un modelo configurado y cantidades enteras por talla. La orden guarda una foto del modelo, consumos de materiales, requerimientos de piezas del patrón base, piezas auxiliares y costos estimados.
+2. **Reservada:** antes de reservar, TelaStock verifica los saldos actuales y descuenta de la disponibilidad las reservas de otras órdenes. Para telas asigna rollos físicos por unidad real (KG o M), priorizando los rollos más antiguos con la medición requerida disponible. No convierte KG a metros ni al revés.
+3. **En proceso:** mantiene apartadas las existencias para que las salidas manuales no las consuman.
+4. **Completada:** registra salidas con la referencia de la orden en avíos, piezas auxiliares, moldes base y rollos; en rollos conserva la medición complementaria como desconocida si no se vuelve a medir.
+5. **Cancelada:** libera las reservas sin descontar existencias.
+
+El costo mostrado es una estimación basada en el último precio de compra conocido por variante/unidad. Si faltan precios, la orden muestra el número de líneas sin costo y no presenta un total como si fuera completo. No incluye mano de obra ni servicios externos.
+
+Las reservas son locales a este navegador, igual que el resto de los datos del prototipo. No proporcionan bloqueo entre dos dispositivos o usuarios. Antes de operar simultáneamente en varios equipos, se requiere migrar el flujo de reservar/completar a transacciones del backend. La migración `202611060002_production_orders_and_reservations.sql` prepara las tablas, relaciones, referencias de movimientos y controles de reservas futuros; no se ejecuta ni conecta Supabase automáticamente.
+
+El respaldo completo evoluciona a `schemaVersion: 5` e incluye órdenes, estado, cantidades, reservas de rollos y snapshots. Los respaldos completos anteriores (versiones 1–4) siguen siendo importables y se inicializan con la colección de órdenes vacía.
