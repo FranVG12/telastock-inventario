@@ -147,7 +147,11 @@ function parseCsvTable(source: string) {
 }
 function csvDate(value: string) {
   const raw = value.trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const [year, month, day] = raw.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
+    if (date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day) return raw;
+  }
   const local = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
   if (local) {
     const day = Number(local[1]); const month = Number(local[2]); const year = Number(local[3]);
@@ -714,7 +718,6 @@ export function FabricModule({ view }: { view: FabricView }) {
       downloadCsv('catalogo-telas.csv', [['id_tela','nombre_tela','unidad_venta','ancho_nominal_m','descripcion','activo'], ...data.telas.map((x) => [x.id,x.nombreTela,x.unidadVenta,x.anchoNominalM ?? '',x.descripcion,x.activo ? 'TRUE' : 'FALSE'])]);
     } else if (view === 'rollos') {
       downloadCsv('inventario-rollos.csv', [['id_rollo','id_tela','nombre_tela','unidad_ingreso','cantidad_ingresada','peso_kg_real','metros_reales','color','id_lote','fecha_ingreso','id_proveedor','estado','ubicacion','nota'], ...rollRows.map((x) => [x.id,x.idTela,telaById.get(x.idTela)?.nombreTela ?? '',x.unidadIngreso,x.cantidadIngreso,x.pesoKg ?? '',x.metros ?? '',x.color,x.idLote,x.fechaIngreso,x.idProveedor ?? '',x.estado,x.ubicacion,x.nota])]);
-      downloadCsv('movimientos-rollos.csv', [['id_movimiento','id_rollo','fecha','tipo','unidad','delta','cantidad_anterior','cantidad_nueva','nota'], ...data.rolloMovimientos.map((x) => [x.id,x.idRollo,x.fecha,x.tipo,x.unidad,x.delta ?? '',x.cantidadAnterior ?? '',x.cantidadNueva ?? '',x.nota])]);
     } else if (view === 'compras') {
       downloadCsv('historial-compras-telas.csv', [['id_compra','id_proveedor','proveedor','fecha_compra','tipo_comprobante','numero_comprobante','id_detalle','id_rollo','id_tela','nombre_tela','cantidad_comprada','unidad_precio','precio_unitario','importe_total'], ...data.compras.flatMap((purchase) => (detailByPurchase.get(purchase.id) ?? []).map((detail) => {
         const roll = rollById.get(detail.idRollo);
