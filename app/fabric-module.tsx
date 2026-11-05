@@ -702,9 +702,42 @@ export function FabricModule({ view }: { view: FabricView }) {
     setShowSupplierForm(false); tell(supplierForm.id ? 'Proveedor actualizado.' : 'Proveedor registrado.');
   }
 
-  function addPurchaseLine() { setPurchaseForm((x) => ({ ...x, lines: [...x.lines, blankLine(data.telas, data.telaColores, data.colores)] })); }
+  function addPurchaseLine() {
+    setPurchaseForm((current) => {
+      const previous = current.lines[current.lines.length - 1];
+      if (!previous?.idTela) return { ...current, lines: [...current.lines, blankLine(data.telas, data.telaColores, data.colores)] };
+      const historicalPrice = lastPurchasePriceFor(current.idProveedor, previous.idTela, previous.unidad);
+      const inheritedPrice = previous.precio.trim() ? previous.precio : historicalPrice === null ? '' : String(historicalPrice);
+      return {
+        ...current,
+        lines: [...current.lines, {
+          ...previous, idRollo: null, idDetalle: null, cantidad: '', precio: inheritedPrice,
+          precioAutomatico: previous.precio.trim() ? previous.precioAutomatico : true,
+          pesoKg: '', metros: '',
+        }],
+      };
+    });
+  }
   function updatePurchaseLine(index: number, changes: Partial<PurchaseLineForm>) {
     setPurchaseForm((x) => ({ ...x, lines: x.lines.map((line, i) => i === index ? { ...line, ...changes } : line) }));
+  }
+  function selectPurchaseTextile(index: number, telaId: string) {
+    const line = purchaseForm.lines[index];
+    if (!line) return;
+    const unit = telaById.get(telaId)?.unidadVenta ?? line.unidad;
+    const price = suggestedPriceForLine(purchaseForm.idProveedor, telaId, unit, purchaseForm.lines, index);
+    const firstColor = colorsForTela(telaId)[0];
+    const variantId = firstColor ? ensureTelaColorAssociation(telaId, firstColor.idColor) : '';
+    updatePurchaseLine(index, {
+      idTela: telaId, unidad: unit, precio: price.price, precioAutomatico: price.automatic,
+      idTelaColor: variantId, color: firstColor?.color.nombre ?? '', pesoKg: '', metros: '',
+    });
+  }
+  function selectPurchaseUnit(index: number, unit: FabricUnit) {
+    const line = purchaseForm.lines[index];
+    if (!line) return;
+    const price = suggestedPriceForLine(purchaseForm.idProveedor, line.idTela, unit, purchaseForm.lines, index);
+    updatePurchaseLine(index, { unidad: unit, precio: price.price, precioAutomatico: price.automatic });
   }
   function openPurchase(purchase?: FabricPurchase) {
     if (!purchase) {
@@ -712,7 +745,7 @@ export function FabricModule({ view }: { view: FabricView }) {
     } else {
       const lines = (detailByPurchase.get(purchase.id) ?? []).map((detail) => {
         const roll = rollById.get(detail.idRollo);
-        return { idRollo: detail.idRollo, idDetalle: detail.id, idTela: roll?.idTela ?? '', idTelaColor: roll?.idTelaColor ?? '', unidad: detail.unidadPrecio, cantidad: String(detail.cantidadComprada), cantidadesAdicionales: '', precio: String(detail.precioUnitario), color: colorNameForVariant(roll?.idTelaColor, roll?.color ?? ''), pesoKg: inputNumber(roll?.pesoKg ?? null), metros: inputNumber(roll?.metros ?? null), idLote: roll?.idLote ?? '' };
+        return { idRollo: detail.idRollo, idDetalle: detail.id, idTela: roll?.idTela ?? '', idTelaColor: roll?.idTelaColor ?? '', unidad: detail.unidadPrecio, cantidad: String(detail.cantidadComprada), precio: String(detail.precioUnitario), precioAutomatico: false, color: colorNameForVariant(roll?.idTelaColor, roll?.color ?? ''), pesoKg: inputNumber(roll?.pesoKg ?? null), metros: inputNumber(roll?.metros ?? null), idLote: roll?.idLote ?? '' };
       });
       setPurchaseForm({ id: purchase.id, idProveedor: purchase.idProveedor ?? '', fechaCompra: purchase.fechaCompra, tipoComprobante: purchase.tipoComprobante, numeroComprobante: purchase.numeroComprobante, observacion: purchase.observacion, lines: lines.length ? lines : [blankLine(data.telas, data.telaColores, data.colores)] });
     }
@@ -1029,8 +1062,7 @@ export function FabricModule({ view }: { view: FabricView }) {
 
   const telaRollCount = (telaId: string) => data.rollos.filter((x) => x.idTela === telaId).length;
   const purchaseTotal = (purchaseId: string) => (detailByPurchase.get(purchaseId) ?? []).reduce((sum, x) => sum + x.importeTotal, 0);
-  const extraRollQuantities = (raw: string) => raw.split(/[;,\\s]+/).map((x) => x.trim()).filter(Boolean).map(Number).filter(validQty);
-  const purchaseLineAmount = (line: PurchaseLineForm) => ((Number(line.cantidad) || 0) + extraRollQuantities(line.cantidadesAdicionales).reduce((sum, x) => sum + x, 0)) * (Number(line.precio) || 0);
+  const purchaseLineAmount = (line: PurchaseLineForm) => (Number(line.cantidad) || 0) * (Number(line.precio) || 0);
   const rollPurchaseDetail = (rollId: string) => data.detalleCompra.find((x) => x.idRollo === rollId);
   const selectedRoll = selectedRolloId ? rollById.get(selectedRolloId) : undefined;
 
