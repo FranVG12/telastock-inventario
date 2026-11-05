@@ -102,12 +102,12 @@ const statusLabel: Record<RollStatus, string> = { disponible: 'Disponible', rese
 const csvCell = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`;
 
 function normalizeCsvHeader(value: string) {
-  return value.replace(/^\\uFEFF/, '').trim().toLocaleLowerCase('es').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+  return value.replace(/^\uFEFF/, '').trim().toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
 }
 function parseCsvTable(source: string) {
-  const text = source.replace(/^\\uFEFF/, '');
+  const text = source.replace(/^\uFEFF/, '');
   let delimiter = ';';
-  const firstLine = text.split(/\\r?\\n/, 1)[0] ?? '';
+  const firstLine = text.split(/\r?\n/, 1)[0] ?? '';
   const count = (line: string, candidate: string) => {
     let quoted = false;
     let total = 0;
@@ -131,8 +131,8 @@ function parseCsvTable(source: string) {
       else cell += char;
     } else if (char === '"') quoted = true;
     else if (char === delimiter) { row.push(cell); cell = ''; }
-    else if (char === '\\n' || char === '\\r') {
-      if (char === '\\r' && text[i + 1] === '\\n') i++;
+    else if (char === '\n' || char === '\r') {
+      if (char === '\r' && text[i + 1] === '\n') i++;
       row.push(cell); cell = '';
       if (row.some((value) => value.trim() !== '')) rows.push(row);
       row = [];
@@ -147,8 +147,8 @@ function parseCsvTable(source: string) {
 }
 function csvDate(value: string) {
   const raw = value.trim();
-  if (/^\\d{4}-\\d{2}-\\d{2}$/.test(raw)) return raw;
-  const local = raw.match(/^(\\d{1,2})[\\/-](\\d{1,2})[\\/-](\\d{4})$/);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const local = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
   if (local) {
     const day = Number(local[1]); const month = Number(local[2]); const year = Number(local[3]);
     const date = new Date(year, month - 1, day);
