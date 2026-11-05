@@ -296,9 +296,24 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
       (order.estimatedMaterialCost === null || Number.isFinite(order.estimatedMaterialCost) && order.estimatedMaterialCost >= 0) &&
       (order.actualConsumption == null || (
         Array.isArray(order.actualConsumption.materials) &&
-        order.actualConsumption.materials.every((line) => variantIds.has(line.variantId) && Number.isFinite(line.quantity) && line.quantity >= 0 && ['und','m','cm','g','kg','l','ml'].includes(line.unit)) &&
+        order.actualConsumption.materials.length === order.materials.length &&
+        order.actualConsumption.materials.every((line) => {
+          const planned = order.materials.find((item) => item.id === line.id);
+          return Boolean(planned && variantIds.has(line.variantId) && line.variantId === planned.variantId &&
+            line.sizeId === planned.sizeId && line.unit === planned.unit &&
+            Number.isFinite(line.quantity) && line.quantity >= 0 && line.quantity <= planned.quantity + 0.00001 &&
+            ['und','m','cm','g','kg','l','ml'].includes(line.unit) &&
+            (line.lineCost === null || Number.isFinite(line.lineCost) && line.lineCost >= 0));
+        }) &&
         Array.isArray(order.actualConsumption.rollAllocations) &&
-        order.actualConsumption.rollAllocations.every((allocation) => variantIds.has(allocation.variantId) && typeof allocation.rollId === 'string' && Number.isFinite(allocation.quantity) && allocation.quantity >= 0 && ['KG','M'].includes(allocation.unit)) &&
+        order.actualConsumption.rollAllocations.length === order.rollAllocations.length &&
+        order.actualConsumption.rollAllocations.every((allocation) => {
+          const reserved = order.rollAllocations.find((item) => item.id === allocation.id);
+          return Boolean(reserved && variantIds.has(allocation.variantId) && allocation.variantId === reserved.variantId &&
+            allocation.rollId === reserved.rollId && allocation.unit === reserved.unit &&
+            Number.isFinite(allocation.quantity) && allocation.quantity >= 0 && allocation.quantity <= reserved.quantity + 0.00001 &&
+            ['KG','M'].includes(allocation.unit));
+        }) &&
         Number.isInteger(order.actualConsumption.missingCostLines) && order.actualConsumption.missingCostLines >= 0 &&
         (order.actualConsumption.materialCost === null || Number.isFinite(order.actualConsumption.materialCost) && order.actualConsumption.materialCost >= 0) &&
         typeof order.actualConsumption.recordedAt === 'string'
