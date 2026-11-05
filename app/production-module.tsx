@@ -1283,11 +1283,14 @@ export function ProductionModule({
 
   function cancelProductionOrder(orderId: string) {
     const order = data.productionOrders.find((item) => item.id === orderId);
-    if (!order || !holdingStatuses.includes(order.status)) return tell('Solo puedes cancelar una orden reservada o en proceso.', 'error');
-    if (!window.confirm('¿Cancelar ' + order.number + '? Se liberarán sus reservas y no se descontará inventario.')) return;
+    if (!order || (order.status !== 'borrador' && !holdingStatuses.includes(order.status))) return tell('Esta orden ya está cerrada y no se puede cancelar.', 'error');
+    const prompt = order.status === 'borrador'
+      ? '¿Descartar el borrador ' + order.number + '? No se ha reservado ni descontado inventario.'
+      : '¿Cancelar ' + order.number + '? Se liberarán sus reservas y no se descontará inventario.';
+    if (!window.confirm(prompt)) return;
     const timestamp = now();
     if (persistProductionSnapshot({ ...data, productionOrders: data.productionOrders.map((item) => item.id === order.id ? { ...item, status: 'cancelada', cancelledAt: timestamp, updatedAt: timestamp } : item) })) {
-      tell(order.number + ' cancelada. El stock reservado volvió a estar disponible.');
+      tell(order.status === 'borrador' ? order.number + ' descartado.' : order.number + ' cancelada. El stock reservado volvió a estar disponible.');
     }
   }
 
@@ -1767,7 +1770,7 @@ export function ProductionModule({
               {order.status === 'borrador' && <button className="button primary" onClick={() => reserveProductionOrder(order.id)}>Verificar y reservar stock</button>}
               {order.status === 'reservada' && <button className="button primary" onClick={() => startProductionOrder(order.id)}>Iniciar producción</button>}
               {order.status === 'en_proceso' && <button className="button primary" onClick={() => openProductionOrderCompletion(order.id)}>Registrar consumo real y completar</button>}
-              {holdingStatuses.includes(order.status) && <button className="button secondary danger-action" onClick={() => cancelProductionOrder(order.id)}>Cancelar y liberar reserva</button>}
+              {(order.status === 'borrador' || holdingStatuses.includes(order.status)) && <button className="button secondary danger-action" onClick={() => cancelProductionOrder(order.id)}>{order.status === 'borrador' ? 'Descartar borrador' : 'Cancelar y liberar reserva'}</button>}
             </div>
           </article>;
         })}
