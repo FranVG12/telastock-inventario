@@ -1237,8 +1237,16 @@ export function ProductionModule({
     }
     for (const line of order.componentPieces) {
       const piece = data.components.find((component) => component.id === line.componentId)?.pieces.find((item) => item.id === line.pieceId);
-      const reserved = reservedPieceQuantity(otherOrders.flatMap((activeOrder) => activeOrder.componentPieces), line.pieceId, line.sizeId, line.side, order.id);
+      const reserved = reservedPieceQuantity(otherOrders.flatMap((activeOrder) => activeOrder.componentPieces), line.pieceId, line.sizeId, line.side);
       if (currentComponentPieceBalance(line.pieceId, line.sizeId, line.side) - reserved + 0.00001 < line.quantity) issues.push((piece?.name ?? 'Pieza auxiliar') + ': el stock reservado ya no está disponible.');
+    }
+    const textileMaterials = new Map<string, number>();
+    order.materials.forEach((line) => {
+      if (variantsBySupply.get(line.variantId)?.textileId) textileMaterials.set(line.variantId, (textileMaterials.get(line.variantId) ?? 0) + line.quantity);
+    });
+    for (const [variantId, required] of textileMaterials) {
+      const allocated = order.rollAllocations.filter((allocation) => allocation.variantId === variantId).reduce((sum, allocation) => sum + allocation.quantity, 0);
+      if (Math.abs(allocated - required) > 0.0001) issues.push('Las reservas físicas de tela no coinciden con el consumo de la orden.');
     }
     const fabricRaw = localStorage.getItem(FABRIC_STORAGE_KEYS.rollos);
     const movementRaw = localStorage.getItem(FABRIC_STORAGE_KEYS.rolloMovimientos);
@@ -1263,8 +1271,11 @@ export function ProductionModule({
     for (const allocation of aggregateAllocations.values()) {
       const roll = nextRolls.find((item) => item.id === allocation.rollId);
       const current = roll ? (allocation.unit === 'KG' ? roll.pesoKg : roll.metros) : null;
-      if (!roll || current === null || allocation.quantity > current + 0.00001) {
-        issues.push('El rollo ' + allocation.rollId + ' ya no tiene la medición real reservada.');
+      const reservedByOthers = otherOrders.reduce((sum, activeOrder) =>
+        sum + activeOrder.rollAllocations.filter((item) => item.rollId === allocation.rollId && item.unit === allocation.unit)
+          .reduce((total, item) => total + item.quantity, 0), 0);
+      if (!roll || current === null || allocation.quantity > current - reservedByOthers + 0.00001) {
+        issues.push('El rollo ' + allocation.rollId + ' ya no tiene la medición real reservada después de considerar otras órdenes.');
         continue;
       }
     }
