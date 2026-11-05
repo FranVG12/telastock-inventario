@@ -342,3 +342,133 @@
 .backup-warning{padding:11px 12px;border:1px solid #f3e4be;border-radius:9px;background:#fff8e9;color:#8c6c2e;font-size:10px;line-height:1.6;margin-bottom:14px}
 .backup-warning strong{color:#795518}
 @media(max-width:720px){.backup-trigger{min-height:28px;width:29px;height:28px;padding:4px;border-radius:8px}.backup-trigger-label{display:none}.backup-trigger>span:first-child{font-size:17px}.backup-options{grid-template-columns:1fr;gap:9px}.backup-option{padding:12px}.backup-option-icon{width:30px;height:30px;margin-bottom:8px}.backup-option h3{font-size:12px}.backup-option p{font-size:9px}.backup-option .button{margin-top:10px}}
+
+
+/* Módulo local de telas, rollos, compras y proveedores */
+.fabric-module{display:grid;gap:13px;min-width:0}
+.fabric-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.fabric-search-wrap{flex:1;min-width:160px;max-width:460px}
+.fabric-search-wrap .search-box{max-width:none;width:100%}
+.fabric-toolbar-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.fabric-table-wrap{width:100%;overflow-x:auto}
+.fabric-table{width:100%;border-collapse:collapse;min-width:620px}
+.fabric-table th,.fabric-table td{padding:12px 15px;border-top:1px solid #edf0f5;text-align:left;font-size:11px;white-space:nowrap}
+.fabric-table th{background:#fafbfe;color:#8791a2;font-size:9px;text-transform:uppercase;letter-spacing:.5px}
+.fabric-table td strong{display:block;color:#303b51;font-size:11px}
+.fabric-table td small{display:block;color:#9099a9;font-size:9px;margin-top:3px;white-space:normal;max-width:240px}
+.fabric-row-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;white-space:nowrap}
+.fabric-status{display:inline-flex;align-items:center;padding:5px 8px;border-radius:20px;background:#f3f5f8;color:#798496;font-size:9px;font-weight:800;white-space:nowrap}
+.fabric-status.on,.fabric-status.disponible{background:#eaf8f2;color:#238366}
+.fabric-status.off,.fabric-status.agotado{background:#f2f3f6;color:#7f8794}
+.fabric-status.reservado{background:#fff5e5;color:#a67821}
+.fabric-status.defectuoso{background:#fff0ef;color:#b44d47}
+.fabric-filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:0 15px 13px}
+.fabric-filters .large-input{height:36px;font-size:10px;padding:0 8px}
+.fabric-roll-list,.fabric-purchase-list,.fabric-supplier-list{padding:0 15px 14px}
+.fabric-roll-row{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(120px,.8fr) auto auto;align-items:center;gap:14px;padding:13px 3px;border-top:1px solid #edf0f5}
+.fabric-roll-main,.fabric-roll-measures{display:flex;flex-direction:column;gap:4px;min-width:0}
+.fabric-roll-main strong,.fabric-supplier-row strong,.fabric-purchase-head strong{font-size:12px;color:#303b51}
+.fabric-roll-main span,.fabric-supplier-row span,.fabric-purchase-head span{font-size:10px;color:#6f7b8f}
+.fabric-roll-main small,.fabric-roll-measures small,.fabric-supplier-row small,.fabric-purchase-head small{font-size:9px;color:#9aa2b0;line-height:1.4;overflow-wrap:anywhere}
+.fabric-roll-measures strong{font-size:12px;color:#2e526e}
+.fabric-roll-measures span{font-size:10px;color:#74839a}
+.fabric-purchase-card{border-top:1px solid #edf0f5;padding:14px 3px}
+.fabric-purchase-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.fabric-purchase-head>div:first-child{display:flex;flex-direction:column;gap:4px;min-width:0}
+.fabric-purchase-total{display:flex;flex-direction:column;align-items:flex-end;gap:5px;white-space:nowrap}
+.fabric-purchase-total strong{font:800 15px Manrope,sans-serif;color:#18866b}
+.fabric-purchase-details{display:grid;gap:0;margin-top:10px;padding-left:12px;border-left:2px solid #e7e5ff}
+.fabric-purchase-line{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed #edf0f5;font-size:10px;color:#68758a}
+.fabric-purchase-line:last-child{border-bottom:0}
+.fabric-purchase-line strong{font-size:10px;color:#238366}
+.fabric-purchase-line small{grid-column:1/-1;color:#9ca4b1;font-size:8px}
+.fabric-supplier-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 3px;border-top:1px solid #edf0f5}
+.fabric-supplier-row>div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.fabric-category-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:3px}
+.fabric-category-tags span{padding:3px 6px;border-radius:5px;background:#f0efff;color:#655bbc;font-size:8px;font-weight:700}
+.fabric-form-modal{width:min(100%,650px)}
+.fabric-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.fabric-form-grid.nested{margin-top:11px;gap:10px}
+.fabric-span-2{grid-column:1/-1}
+.fabric-textarea{height:72px;padding:10px;resize:vertical}
+.fabric-check{display:flex;align-items:center;gap:8px;font-size:11px;color:#536075;font-weight:700}
+.fabric-check input,.fabric-category-checks input{accent-color:#6257d9}
+.fabric-more{border:1px solid #e8ebf1;border-radius:9px;padding:10px 11px}
+.fabric-more summary,.fabric-more-line summary{cursor:pointer;display:flex;align-items:center;gap:9px;color:#59677a;font-size:11px;font-weight:800}
+.fabric-more summary span{font-size:9px;color:#99a1ae;font-weight:500}
+.fabric-form-hint{border-radius:8px;background:#f2f7fb;color:#687f91;padding:9px 10px;font-size:9px;line-height:1.5}
+.fabric-subheading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:3px 0 8px}
+.fabric-subheading strong{font-size:11px;color:#455166}
+.fabric-subheading small{font-size:9px;color:#919baa}
+.supplier-phone-row{display:grid;grid-template-columns:110px minmax(0,1fr) auto;gap:7px;margin:7px 0}
+.supplier-phone-row .large-input{height:36px;font-size:10px}
+.fabric-category-checks{display:flex;flex-wrap:wrap;gap:7px}
+.fabric-category-checks label{display:flex;align-items:center;gap:5px;padding:6px 8px;border:1px solid #e8ebf1;border-radius:7px;color:#657186;font-size:9px}
+.fabric-purchase-modal{width:min(100%,780px)}
+.fabric-purchase-form{display:grid;gap:13px}
+.fabric-provider-inline{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}
+.inline-supplier{display:flex;gap:7px;align-items:center}
+.fabric-purchase-lines-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;padding-bottom:7px;border-bottom:1px solid #edf0f5}
+.fabric-purchase-lines-heading strong{font-size:12px;color:#344056}
+.fabric-purchase-edit-lines{display:grid;gap:9px}
+.fabric-purchase-input-line{padding:11px;border:1px solid #e8ebf1;border-radius:10px;background:#fcfcff}
+.fabric-purchase-line-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px}
+.fabric-purchase-line-head strong{font-size:10px;color:#5c53b9}
+.fabric-more-line{padding-top:2px}
+.fabric-more-line summary{font-size:9px}
+.fabric-line-total,.fabric-purchase-summary{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 10px;border-radius:8px;background:#f1faf6;color:#597d70;font-size:10px}
+.fabric-line-total strong,.fabric-purchase-summary strong{font:800 13px Manrope,sans-serif;color:#18866b}
+.fabric-purchase-summary{padding:13px 14px}
+.fabric-purchase-summary strong{font-size:18px}
+.purchase-edit-line{padding:7px 0;border-top:1px solid #edf0f5;font-size:10px;color:#778397}
+.purchase-edit-line strong{color:#18866b}
+.roll-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-bottom:13px}
+.roll-detail-grid>div{padding:11px;border:1px solid #e8ebf1;border-radius:9px;background:#fcfcff;display:flex;flex-direction:column;gap:5px;min-width:0}
+.roll-detail-grid small{font-size:9px;color:#929baa}
+.roll-detail-grid strong{font-size:11px;color:#354157;overflow-wrap:anywhere}
+.roll-origin-panel{display:grid;gap:6px;padding:12px;background:#f2faf6;border:1px solid #e0f0e8;border-radius:9px;margin-bottom:14px;font-size:10px;color:#688478}
+.roll-origin-panel>strong{font-size:11px;color:#238366}
+.roll-origin-panel span>strong{color:#18866b}
+@media(max-width:720px){
+ .fabric-toolbar{align-items:stretch;flex-direction:column}
+ .fabric-search-wrap{max-width:none;width:100%}
+ .fabric-toolbar-actions{display:grid;grid-template-columns:auto 1fr}
+ .fabric-toolbar-actions .button{min-height:38px}
+ .fabric-filters{grid-template-columns:repeat(2,minmax(0,1fr));padding:0 10px 11px;gap:6px}
+ .fabric-roll-list,.fabric-purchase-list,.fabric-supplier-list{padding:0 11px 11px}
+ .fabric-roll-row{grid-template-columns:minmax(0,1fr) auto;gap:8px 10px;padding:11px 1px}
+ .fabric-roll-main{grid-column:1}
+ .fabric-roll-measures{grid-column:2;grid-row:1;align-items:flex-end;text-align:right}
+ .fabric-roll-row>.fabric-status{grid-column:1;justify-self:start}
+ .fabric-roll-row>.fabric-row-actions{grid-column:2;grid-row:2}
+ .fabric-table{min-width:570px}
+ .fabric-table th,.fabric-table td{padding:10px 11px}
+ .fabric-form-grid{gap:9px}
+ .fabric-form-modal{padding:18px 14px calc(16px + env(safe-area-inset-bottom))}
+ .fabric-form-modal .modal-heading{margin-bottom:14px}
+ .fabric-purchase-modal{padding:18px 13px calc(16px + env(safe-area-inset-bottom))}
+ .fabric-purchase-head{gap:8px}
+ .fabric-purchase-total strong{font-size:13px}
+ .fabric-purchase-line{grid-template-columns:minmax(0,1fr) auto;gap:5px}
+ .fabric-purchase-line strong{grid-column:2;grid-row:2}
+ .fabric-purchase-line small{font-size:8px}
+ .supplier-phone-row{grid-template-columns:80px minmax(0,1fr) auto;gap:5px}
+ .supplier-phone-row .large-input{padding:0 7px;font-size:9px}
+ .fabric-category-checks{gap:5px}
+ .fabric-category-checks label{padding:6px 7px;font-size:8px}
+ .fabric-provider-inline{grid-template-columns:minmax(0,1fr) auto}
+ .fabric-provider-inline>.button{font-size:9px;padding:7px}
+ .inline-supplier{flex-direction:column;align-items:stretch}
+ .fabric-purchase-input-line{padding:9px}
+ .fabric-purchase-input-line .fabric-form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .fabric-purchase-input-line .field-label{font-size:9px}
+ .fabric-purchase-input-line .large-input{height:38px}
+ .fabric-span-2{grid-column:1/-1}
+ .roll-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:380px){
+ .fabric-form-grid{grid-template-columns:1fr}
+ .fabric-span-2{grid-column:1}
+ .supplier-phone-row{grid-template-columns:1fr 1.5fr auto}
+ .fabric-purchase-input-line .fabric-form-grid{grid-template-columns:1fr 1fr}
+}
