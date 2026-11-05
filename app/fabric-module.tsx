@@ -77,7 +77,6 @@ export function validateFabricBackupData(value: unknown): FabricBackupData {
   if (!output.proveedorTelefonos.every((x) => proveedorIds.has(x.idProveedor) && x.numero.trim())) throw new Error('Hay teléfonos relacionados con proveedores inexistentes.');
   if (!output.proveedorCategorias.every((x) => proveedorIds.has(x.idProveedor) && x.categoria.trim())) throw new Error('Hay categorías relacionadas con proveedores inexistentes.');
   if (!output.rollos.every((x) => telaIds.has(x.idTela) && (x.idProveedor === null || proveedorIds.has(x.idProveedor)) && ['KG', 'M'].includes(x.unidadIngreso) && Number.isFinite(x.cantidadIngreso) && x.cantidadIngreso > 0 && ['disponible', 'reservado', 'agotado', 'defectuoso'].includes(x.estado) && (x.pesoKg === null || (Number.isFinite(x.pesoKg) && x.pesoKg >= 0)) && (x.metros === null || (Number.isFinite(x.metros) && x.metros >= 0)))) throw new Error('Hay rollos con tela, medición o proveedor inválido.');
-  if (!output.rollos.every((x) => x.unidadIngreso === 'KG' ? x.pesoKg !== null : x.metros !== null)) throw new Error('Cada rollo debe conservar la medición real de su unidad de ingreso.');
   if (!output.compras.every((x) => x.idProveedor === null || proveedorIds.has(x.idProveedor))) throw new Error('Hay compras relacionadas con proveedores inexistentes.');
   if (!output.detalleCompra.every((x) => {
     const roll = output.rollos.find((r) => r.id === x.idRollo);
@@ -127,6 +126,7 @@ function blankPurchase(telas: Textile[]): PurchaseForm { return { id: null, idPr
 export function FabricModule({ view }: { view: FabricView }) {
   const [data, setData] = useState<FabricBackupData>(emptyFabricBackupData);
   const [ready, setReady] = useState(false);
+  const [storageSafe, setStorageSafe] = useState(true);
   const [notice, setNotice] = useState<{ text: string; kind: 'success' | 'error' | 'info' } | null>(null);
   const [telaSearch, setTelaSearch] = useState('');
   const [rollSearch, setRollSearch] = useState('');
@@ -154,7 +154,10 @@ export function FabricModule({ view }: { view: FabricView }) {
   const [inlineSupplierName, setInlineSupplierName] = useState('');
 
   const persist = (next: FabricBackupData) => {
-    setData(next);
+    if (!storageSafe) {
+      setNotice({ text: 'No se guardaron cambios porque se detectó un respaldo local dañado. Restaura una copia JSON válida antes de continuar.', kind: 'error' });
+      return;
+    }
     try {
       (Object.keys(FABRIC_STORAGE_KEYS) as (keyof typeof FABRIC_STORAGE_KEYS)[]).forEach((key) => {
         if (key === 'version') return;
@@ -162,33 +165,56 @@ export function FabricModule({ view }: { view: FabricView }) {
         localStorage.setItem(FABRIC_STORAGE_KEYS[key], JSON.stringify(next[field]));
       });
       localStorage.setItem(FABRIC_STORAGE_KEYS.version, '1');
+      setData(next);
     } catch {
-      setNotice({ text: 'No se pudo guardar. El almacenamiento del navegador podría estar lleno; exporta un respaldo y libera espacio.', kind: 'error' });
+      setStorageSafe(false);
+      setNotice({ text: 'No se pudo guardar. El almacenamiento del navegador podría estar lleno o bloqueado; exporta una copia y revisa el espacio disponible.', kind: 'error' });
     }
   };
   const loadLocal = () => {
     const next = emptyFabricBackupData();
+    let safe = true;
+    let warning = '';
+    const storedVersion = Number(localStorage.getItem(FABRIC_STORAGE_KEYS.version) ?? '0');
+    if (storedVersion > 1) {
+      safe = false;
+      warning = 'Este inventario fue creado con una versión más reciente de TelaStock. No se escribieron cambios para protegerlo.';
+    }
     (Object.keys(FABRIC_STORAGE_KEYS) as (keyof typeof FABRIC_STORAGE_KEYS)[]).forEach((key) => {
       if (key === 'version') return;
       const field = key as keyof FabricBackupData;
       try {
         const raw = localStorage.getItem(FABRIC_STORAGE_KEYS[key]);
         if (raw) (next as unknown as Record<string, unknown>)[field] = JSON.parse(raw);
-      } catch { /* A corrupt key is not allowed to replace other valid local collections. */ }
+      } catch {
+        safe = false;
+        warning = 'Se encontró un apartado local dañado. No se sobrescribieron los datos; restaura un respaldo JSON válido.';
+      }
     });
-    return next;
+    try {
+      return { data: validateFabricBackupData(next), safe, warning };
+    } catch {
+      return { data: next, safe: false, warning: 'Las relaciones del inventario de telas no son válidas. No se sobrescribieron los datos; restaura un respaldo JSON válido.' };
+    }
   };
   useEffect(() => {
     const loaded = loadLocal();
-    setData(loaded);
-    localStorage.setItem(FABRIC_STORAGE_KEYS.version, '1');
+    setData(loaded.data);
+    setStorageSafe(loaded.safe);
+    if (loaded.safe) localStorage.setItem(FABRIC_STORAGE_KEYS.version, '1');
+    else setNotice({ text: loaded.warning, kind: 'error' });
     setReady(true);
-    const refresh = () => setData(loadLocal());
+    const refresh = () => {
+      const restored = loadLocal();
+      setData(restored.data);
+      setStorageSafe(restored.safe);
+      if (!restored.safe) setNotice({ text: restored.warning, kind: 'error' });
+    };
     window.addEventListener('telastock-fabric-data-restored', refresh);
     return () => window.removeEventListener('telastock-fabric-data-restored', refresh);
   }, []);
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !storageSafe) return;
     try {
       for (const [key, field] of [
         [FABRIC_STORAGE_KEYS.telas, 'telas'], [FABRIC_STORAGE_KEYS.rollos, 'rollos'], [FABRIC_STORAGE_KEYS.rolloMovimientos, 'rolloMovimientos'],
@@ -196,10 +222,13 @@ export function FabricModule({ view }: { view: FabricView }) {
         [FABRIC_STORAGE_KEYS.proveedorCategorias, 'proveedorCategorias'], [FABRIC_STORAGE_KEYS.compras, 'compras'],
         [FABRIC_STORAGE_KEYS.detalleCompra, 'detalleCompra'],
       ] as const) localStorage.setItem(key, JSON.stringify(data[field]));
-    } catch { setNotice({ text: 'No se pudo guardar el inventario de telas en este navegador.', kind: 'error' }); }
-  }, [data, ready]);
+    } catch {
+      setStorageSafe(false);
+      setNotice({ text: 'No se pudo guardar el inventario de telas en este navegador.', kind: 'error' });
+    }
+  }, [data, ready, storageSafe]);
 
-  const telaById = useMemo(() => new Map(data.telas.map((x) => [x.id, x])), [data.telas]);
+    const telaById = useMemo(() => new Map(data.telas.map((x) => [x.id, x])), [data.telas]);
   const supplierById = useMemo(() => new Map(data.proveedores.map((x) => [x.id, x])), [data.proveedores]);
   const rollById = useMemo(() => new Map(data.rollos.map((x) => [x.id, x])), [data.rollos]);
   const detailByPurchase = useMemo(() => {
