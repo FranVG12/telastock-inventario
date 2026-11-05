@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { getCompleteUnits, getPieceStock, getSymmetricStock, type PieceMovement as DomainPieceMovement, type ManufacturingModel, type ModelPiece, type Size, type SizeGroup } from '@/lib/inventory-domain';
-import { FABRIC_STORAGE_KEYS } from '@/app/fabric-module';
+import { FABRIC_STORAGE_KEYS, type RollMovement as FabricRollMovement } from '@/app/fabric-module';
 
 export type ProductionView = 'insumos' | 'compras-avios' | 'componentes' | 'modelos-producto' | 'recetas' | 'planificacion' | 'ordenes';
 export type StockUnit = 'und' | 'm' | 'cm' | 'g' | 'kg' | 'l' | 'ml';
@@ -358,7 +358,7 @@ const conversionFactor = (from: StockUnit, to: StockUnit): number | null => {
 type TextileRow = { id: string; nombreTela: string; unidadVenta: 'KG' | 'M' };
 type TextileColorRow = { id: string; idTela: string; idColor: string; activo: boolean };
 type ColorRow = { id: string; nombre: string };
-type RollRow = { id: string; idTela: string; idTelaColor?: string | null; metros: number | null; pesoKg: number | null; estado: string };
+type RollRow = { id: string; idTela: string; idTelaColor?: string | null; unidadIngreso?: 'KG' | 'M'; metros: number | null; pesoKg: number | null; estado: string; fechaIngreso?: string; updatedAt?: string; ubicacion?: string; idLote?: string };
 type SupplierOption = { id: string; nombre: string; ruc?: string | null };
 type TextileContext = { telas: TextileRow[]; rollos: RollRow[]; telaColores: TextileColorRow[]; colores: ColorRow[]; proveedores: SupplierOption[] };
 type PurchaseLineDraft = { id: string; variantId: string; sizeId: string; quantity: string; unitPrice: string };
@@ -436,7 +436,7 @@ function variantLabel(variant: SupplyVariant, variants: SupplyVariant[], supplie
 }
 
 export function ProductionModule({
-  view, baseModels, basePieces, baseMovements, sizes, sizeGroups, onNavigate,
+  view, baseModels, basePieces, baseMovements, sizes, sizeGroups, onAddBaseMovements, onNavigate,
 }: {
   view: ProductionView;
   baseModels: ManufacturingModel[];
@@ -444,6 +444,7 @@ export function ProductionModule({
   baseMovements: DomainPieceMovement[];
   sizes: Size[];
   sizeGroups: SizeGroup[];
+  onAddBaseMovements: (movements: DomainPieceMovement[]) => void;
   onNavigate: (view: ProductionView) => void;
 }) {
   const [data, setData] = useState<ProductionBackupData>(emptyProductionBackupData);
@@ -497,6 +498,7 @@ export function ProductionModule({
   const [productComponentIds, setProductComponentIds] = useState<string[]>([]);
   const [selectedProductId, setSelectedProductId] = useState('');
   const [planCounts, setPlanCounts] = useState<Record<string, string>>({});
+  const [orderNote, setOrderNote] = useState('');
 
   const refreshTextiles = () => {
     const telas = safeRead<TextileRow[]>(FABRIC_STORAGE_KEYS.telas, []);
