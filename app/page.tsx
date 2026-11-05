@@ -339,12 +339,24 @@ export default function Home() {
     }
   }
 
-  function productionOrdersSnapshot(): Array<{ status?: string; baseModelId?: string; basePieces?: Array<{ pieceId?: string }> }> | null {
+  function productionOrdersSnapshot(): Array<{
+    status?: string;
+    baseModelId?: string;
+    quantities?: Record<string, number>;
+    materials?: Array<{ sizeId?: string | null }>;
+    basePieces?: Array<{ pieceId?: string; sizeId?: string }>;
+    componentPieces?: Array<{ pieceId?: string; sizeId?: string }>;
+  }> | null {
     try {
       const raw = localStorage.getItem('telastock-production-orders-v1');
       if (!raw) return [];
       const orders = JSON.parse(raw) as unknown;
-      return Array.isArray(orders) ? orders as Array<{ status?: string; baseModelId?: string; basePieces?: Array<{ pieceId?: string }> }> : null;
+      return Array.isArray(orders) ? orders as Array<{
+        status?: string; baseModelId?: string; quantities?: Record<string, number>;
+        materials?: Array<{ sizeId?: string | null }>;
+        basePieces?: Array<{ pieceId?: string; sizeId?: string }>;
+        componentPieces?: Array<{ pieceId?: string; sizeId?: string }>;
+      }> : null;
     } catch { return null; }
   }
 
@@ -536,21 +548,13 @@ export default function Home() {
     }
     const orders = productionOrdersSnapshot();
     if (!orders) { setNoticeMessage('No se pudo verificar las órdenes guardadas. Exporta un respaldo válido antes de borrar tallas.', 'error'); return; }
-    const referencedByOrder = orders.some((order) =>
-      Boolean(order.basePieces?.some((line) => line.sizeId === size.id)) ||
-      false
-    );
-    const productionRaw = localStorage.getItem('telastock-production-orders-v1');
-    let orderSnapshots: Array<{ quantities?: Record<string, number>; materials?: Array<{ sizeId?: string | null }>; componentPieces?: Array<{ sizeId?: string }> }> = [];
-    try { orderSnapshots = productionRaw ? JSON.parse(productionRaw) as typeof orderSnapshots : []; } catch {
-      setNoticeMessage('No se pudo verificar las órdenes guardadas. Exporta un respaldo válido antes de borrar tallas.', 'error'); return;
-    }
-    const referencedInProduction = orderSnapshots.some((order) =>
+    const referencedInProduction = orders.some((order) =>
       Boolean(order.quantities?.[size.id]) ||
       order.materials?.some((line) => line.sizeId === size.id) ||
+      order.basePieces?.some((line) => line.sizeId === size.id) ||
       order.componentPieces?.some((line) => line.sizeId === size.id)
     );
-    if (referencedByOrder || referencedInProduction) {
+    if (referencedInProduction) {
       setNoticeMessage(`No se puede borrar la talla ${size.label}: está referenciada por una orden de producción. Renómbrala o déjala sin usar para conservar la trazabilidad.`, 'error'); return;
     }
     setSizes((previous) => previous.filter((item) => item.id !== size.id));
