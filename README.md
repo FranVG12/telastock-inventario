@@ -133,6 +133,6 @@ Al corregir una línea de compra, la cantidad y el precio se actualizan en el hi
 
 ### Revisión manual de datos antiguos
 
-No existe una migración automática de compras antiguas porque el inventario previo estaba centrado en piezas de confección y no contenía rollos, precios históricos ni unidades de compra estructuradas. Los registros comerciales externos con pesos como `68.45/3`, fechas ambiguas o proveedor y dirección mezclados deben importarse solo después de confirmar su significado; no se convierten automáticamente ni se inventan mediciones.
+No existe una migración automática de compras antiguas porque el inventario previo estaba centrado en piezas de confección y no contenía rollos, precios históricos ni unidades de compra estructuradas. Los registros comerciales externos con pesos como `68.45/3`, fechas ambiguas o proveedor y dirección mezclados deben importarse solo después de confirmar su significado; no se convierten automáticamente ni se inventan mediciones. En CSV, las fechas ISO `AAAA-MM-DD` se aceptan directamente. Los formatos locales con barras o guiones solo se aceptan cuando día y mes se pueden distinguir sin ambigüedad; fechas como `04/05/2025` se rechazan y deben normalizarse manualmente a `AAAA-MM-DD`.
 
 La equivalencia estimada KG↔M para una operación de corte todavía no está implementada: la aplicación actual solo muestra y descuenta mediciones reales. Cuando se implemente, deberá calcularse por tipo de tela y operación, etiquetarse como estimada y no escribirse en los campos reales del rollo.
