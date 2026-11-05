@@ -671,15 +671,15 @@ export function FabricModule({ view }: { view: FabricView }) {
             const existing = map.get(idRollo);
             if (existing && data.detalleCompra.some((detail) => detail.idRollo === existing.id) && (existing.idTela !== tela.id || existing.unidadIngreso !== unit)) throw new Error('No se puede cambiar la tela ni la unidad original de un rollo que ya tiene una compra asociada.');
             const kg = unit === 'KG' ? quantity : parseCsvNullableNumber(field(row, 'peso_kg_real', 'peso_kg'), 'peso_kg_real');
-            const metres = unit === 'M' ? quantity : parseCsvNullableNumber(field(row, 'metros_reales', 'metros'), 'metros_reales');
+            const metros = unit === 'M' ? quantity : parseCsvNullableNumber(field(row, 'metros_reales', 'metros'), 'metros_reales');
             const stateRaw = (field(row, 'estado') || 'disponible').toLocaleLowerCase('es');
             if (!['disponible','reservado','agotado','defectuoso'].includes(stateRaw)) throw new Error('estado debe ser disponible, reservado, agotado o defectuoso.');
             const now = new Date().toISOString();
-            const item: FabricRoll = { id: existing?.id ?? uniqueId(idRollo), idTela: tela.id, unidadIngreso: unit, cantidadIngreso: quantity, pesoKg: kg, metros: metres, color: field(row, 'color'), idLote: field(row, 'id_lote', 'lote'), fechaIngreso: date, idProveedor: supplierId, ubicacion: field(row, 'ubicacion'), estado: stateRaw as RollStatus, nota: field(row, 'nota'), createdAt: existing?.createdAt ?? now, updatedAt: now };
+            const item: FabricRoll = { id: existing?.id ?? uniqueId(idRollo), idTela: tela.id, unidadIngreso: unit, cantidadIngreso: quantity, pesoKg: kg, metros, color: field(row, 'color'), idLote: field(row, 'id_lote', 'lote'), fechaIngreso: date, idProveedor: supplierId, ubicacion: field(row, 'ubicacion'), estado: stateRaw as RollStatus, nota: field(row, 'nota'), createdAt: existing?.createdAt ?? now, updatedAt: now };
             map.set(item.id, item);
             if (!existing) {
               movements.push({ id: id(), idRollo: item.id, fecha: now, tipo: 'ingreso', unidad: unit, delta: quantity, cantidadAnterior: null, cantidadNueva: quantity, nota: 'Ingreso importado desde CSV' });
-              if (unit === 'KG' && metres !== null) movements.push({ id: id(), idRollo: item.id, fecha: now, tipo: 'medicion', unidad: 'M', delta: null, cantidadAnterior: null, cantidadNueva: metres, nota: 'Metros reales importados desde CSV' });
+              if (unit === 'KG' && metros !== null) movements.push({ id: id(), idRollo: item.id, fecha: now, tipo: 'medicion', unidad: 'M', delta: null, cantidadAnterior: null, cantidadNueva: metros, nota: 'Metros reales importados desde CSV' });
               if (unit === 'M' && kg !== null) movements.push({ id: id(), idRollo: item.id, fecha: now, tipo: 'medicion', unidad: 'KG', delta: null, cantidadAnterior: null, cantidadNueva: kg, nota: 'Peso real importado desde CSV' });
             } else {
               const changes: Array<{ unit: FabricUnit; before: number | null; after: number | null }> = [
