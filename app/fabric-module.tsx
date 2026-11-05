@@ -675,7 +675,7 @@ export function FabricModule({ view }: { view: FabricView }) {
             const stateRaw = (field(row, 'estado') || 'disponible').toLocaleLowerCase('es');
             if (!['disponible','reservado','agotado','defectuoso'].includes(stateRaw)) throw new Error('estado debe ser disponible, reservado, agotado o defectuoso.');
             const now = new Date().toISOString();
-            const item: FabricRoll = { id: existing?.id ?? uniqueId(idRollo), idTela: tela.id, unidadIngreso: unit, cantidadIngreso: quantity, pesoKg: kg, metros, color: field(row, 'color'), idLote: field(row, 'id_lote', 'lote'), fechaIngreso: date, idProveedor: supplierId, ubicacion: field(row, 'ubicacion'), estado: stateRaw as RollStatus, nota: field(row, 'nota'), createdAt: existing?.createdAt ?? now, updatedAt: now };
+            const item: FabricRoll = { id: existing?.id ?? uniqueId(idRollo), idTela: tela.id, unidadIngreso: unit, cantidadIngreso: quantity, pesoKg: kg, metros: metres, color: field(row, 'color'), idLote: field(row, 'id_lote', 'lote'), fechaIngreso: date, idProveedor: supplierId, ubicacion: field(row, 'ubicacion'), estado: stateRaw as RollStatus, nota: field(row, 'nota'), createdAt: existing?.createdAt ?? now, updatedAt: now };
             map.set(item.id, item);
             if (!existing) {
               movements.push({ id: id(), idRollo: item.id, fecha: now, tipo: 'ingreso', unidad: unit, delta: quantity, cantidadAnterior: null, cantidadNueva: quantity, nota: 'Ingreso importado desde CSV' });
