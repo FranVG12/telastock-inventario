@@ -191,7 +191,9 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
   const supplyIds = new Set(output.supplies.map((x) => x.id));
   const variantIds = new Set(output.variants.map((x) => x.id));
   const componentIds = new Set(output.components.map((x) => x.id));
-  const componentPieceMap = new Map(output.components.flatMap((component) => component.pieces.map((piece) => [piece.id, { componentId: component.id, piece }] as const)));
+  const allComponentPieces = output.components.flatMap((component) => Array.isArray(component.pieces) ? component.pieces.map((piece) => ({ componentId: component.id, piece })) : []);
+  const componentPieceMap = new Map(allComponentPieces.map(({ componentId, piece }) => [piece.id, { componentId, piece }] as const));
+  if (componentPieceMap.size !== allComponentPieces.length) throw new Error('Hay identificadores repetidos entre piezas auxiliares.');
   const purchaseIds = new Set(output.supplyPurchases.map((x) => x.id));
   const purchaseDetailIds = new Set(output.supplyPurchaseDetails.map((x) => x.id));
   const validMaterials = (items: MaterialRequirement[]) => Array.isArray(items) && items.every((x) =>
@@ -243,6 +245,7 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
       typeof movement.sizeId === 'string' && movement.sizeId.length > 0 &&
       Number.isInteger(movement.delta) && movement.delta !== 0 &&
       ['entrada', 'salida', 'ajuste'].includes(movement.kind) &&
+      !((movement.kind === 'entrada' && movement.delta < 0) || (movement.kind === 'salida' && movement.delta > 0)) &&
       (movement.side === undefined || movement.side === 'izquierda' || movement.side === 'derecha') &&
       (owner.piece.laterality === 'simetrica' || movement.side === undefined) &&
       typeof movement.note === 'string' && typeof movement.date === 'string';
@@ -578,6 +581,70 @@ export function ProductionModule({
     return data.supplyMovements.filter((movement) => movement.variantId === variant.id && movement.sizeId === (supply.stockMode === 'talla' ? sizeId : null))
       .reduce((sum, movement) => sum + movement.delta, 0);
   }
+  function componentPieceDomainLedger(pieceId: string, sizeId: string): DomainPieceMovement[] {
+    return data.componentPieceMovements.filter((movement) => movement.pieceId === pieceId && movement.sizeId === sizeId).map((movement) => ({
+      id: movement.id, pieceId: movement.pieceId, sizeId: movement.sizeId, delta: movement.delta,
+      kind: movement.kind, side: movement.side, note: movement.note, date: movement.date,
+    }));
+  }
+  function componentPieceStockLabel(piece: ComponentPiece, sizeId: string): string {
+    const ledger = componentPieceDomainLedger(piece.id, sizeId);
+    if (piece.laterality === 'simetrica') {
+      const stock = getSymmetricStock(ledger, piece.id, sizeId);
+      return stock.left === stock.right ? format(stock.parity) + ' par.' : format(stock.left) + '/' + format(stock.right);
+    }
+    return format(getPieceStock(ledger, piece.id, sizeId));
+  }
+  function openComponentPieceMovement(component: GarmentComponent, piece: ComponentPiece) {
+    setSelectedStockComponentId(component.id);
+    setComponentStockPieceId(piece.id);
+    setComponentStockSizeId(sizes[0]?.id ?? '');
+    setComponentStockKind('entrada');
+    setComponentStockMode('paridad');
+    setComponentStockSide('izquierda');
+    setComponentStockQuantity('');
+    setComponentStockNote('Ingreso de piezas auxiliares');
+    setShowComponentPieceMovement(true);
+  }
+  function saveComponentPieceMovement(event: FormEvent) {
+    event.preventDefault();
+    const component = data.components.find((item) => item.id === selectedStockComponentId);
+    const piece = component?.pieces.find((item) => item.id === componentStockPieceId);
+    const quantity = Number(componentStockQuantity);
+    if (!component || !piece) return tell('No se encontró la pieza auxiliar seleccionada.', 'error');
+    if (!componentStockSizeId || !sizes.some((size) => size.id === componentStockSizeId)) return tell('Selecciona una talla válida.', 'error');
+    if (!Number.isInteger(quantity) || quantity <= 0) return tell('La cantidad debe ser un entero mayor que cero.', 'error');
+    const sign = componentStockKind === 'entrada' ? 1 : -1;
+    const createdAt = now();
+    const movements: ComponentPieceMovement[] = [];
+    const createMovement = (side?: 'izquierda' | 'derecha') => movements.push({
+      id: id(), componentId: component.id, pieceId: piece.id, sizeId: componentStockSizeId,
+      delta: sign * quantity, kind: componentStockKind, side, note: componentStockNote.trim(), date: createdAt,
+    });
+    if (piece.laterality === 'simetrica' && componentStockMode === 'paridad') {
+      createMovement('izquierda');
+      createMovement('derecha');
+    } else if (piece.laterality === 'simetrica') {
+      createMovement(componentStockSide);
+    } else {
+      createMovement();
+    }
+    const candidate = [...data.componentPieceMovements, ...movements];
+    const ledger: DomainPieceMovement[] = candidate.filter((movement) => movement.pieceId === piece.id && movement.sizeId === componentStockSizeId).map((movement) => ({
+      id: movement.id, pieceId: movement.pieceId, sizeId: movement.sizeId, delta: movement.delta,
+      kind: movement.kind, side: movement.side, note: movement.note, date: movement.date,
+    }));
+    if (piece.laterality === 'simetrica') {
+      const stock = getSymmetricStock(ledger, piece.id, componentStockSizeId);
+      if (stock.left < 0 || stock.right < 0) return tell('No puedes retirar más pares o piezas que los disponibles por lado.', 'error');
+    } else if (getPieceStock(ledger, piece.id, componentStockSizeId) < 0) {
+      return tell('No puedes retirar más piezas que las disponibles.', 'error');
+    }
+    setData((current) => ({ ...current, componentPieceMovements: [...current.componentPieceMovements, ...movements] }));
+    setShowComponentPieceMovement(false);
+    tell('Movimiento de inventario auxiliar registrado.');
+  }
+
   function saveStock(event: FormEvent) {
     event.preventDefault();
     const variant = variantsBySupply.get(stockVariantId);
@@ -670,7 +737,14 @@ export function ProductionModule({
   function saveComponent(event: FormEvent) {
     event.preventDefault();
     if (!componentDraft || !componentDraft.name.trim()) return tell('Escribe el nombre del componente.', 'error');
-    if (componentDraft.pieces.some((x) => !x.name.trim() || !Number.isInteger(x.unitsPerGarment) || x.unitsPerGarment <= 0)) return tell('Revisa las piezas auxiliares y sus cantidades.', 'error');
+    if (componentDraft.pieces.some((x) => !x.name.trim() || !Number.isInteger(x.unitsPerGarment) || x.unitsPerGarment <= 0 || (x.laterality === 'simetrica' && x.unitsPerGarment % 2 !== 0))) return tell('Revisa las piezas auxiliares. Una pieza simétrica requiere una cantidad par por prenda.', 'error');
+    const previous = data.components.find((item) => item.id === componentDraft.id);
+    const removedStockedPiece = previous?.pieces.find((oldPiece) =>
+      data.componentPieceMovements.some((movement) => movement.pieceId === oldPiece.id) &&
+      (!componentDraft.pieces.some((nextPiece) => nextPiece.id === oldPiece.id) ||
+        componentDraft.pieces.find((nextPiece) => nextPiece.id === oldPiece.id)?.laterality !== oldPiece.laterality)
+    );
+    if (removedStockedPiece) return tell('No puedes quitar ni cambiar la lateralidad de "' + removedStockedPiece.name + '" porque ya tiene movimientos de inventario.', 'error');
     if (componentDraft.materials.some((x) => !variantsBySupply.has(x.variantId) || x.wastePercent < 0 || (x.mode === 'fixed' && (!Number.isFinite(x.fixedQuantity) || (x.fixedQuantity ?? -1) < 0)))) return tell('Revisa los materiales y sus consumos.', 'error');
     const row = { ...componentDraft, name: componentDraft.name.trim(), updatedAt: now() };
     setData((current) => ({ ...current, components: current.components.some((x) => x.id === row.id) ? current.components.map((x) => x.id === row.id ? row : x) : [...current.components, row] }));
