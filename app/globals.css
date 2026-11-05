@@ -432,8 +432,8 @@
 @media(max-width:720px){
  .fabric-toolbar{align-items:stretch;flex-direction:column}
  .fabric-search-wrap{max-width:none;width:100%}
- .fabric-toolbar-actions{display:grid;grid-template-columns:auto 1fr}
- .fabric-toolbar-actions .button{min-height:38px}
+ .fabric-toolbar-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+ .fabric-toolbar-actions .button{min-height:38px;padding-left:6px;padding-right:6px;font-size:9px}
  .fabric-filters{grid-template-columns:repeat(2,minmax(0,1fr));padding:0 10px 11px;gap:6px}
  .fabric-roll-list,.fabric-purchase-list,.fabric-supplier-list{padding:0 11px 11px}
  .fabric-roll-row{grid-template-columns:minmax(0,1fr) auto;gap:8px 10px;padding:11px 1px}
