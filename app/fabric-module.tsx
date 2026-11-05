@@ -593,6 +593,16 @@ export function FabricModule({ view }: { view: FabricView }) {
     } : { ...defaultRoll, idTela: tela?.id ?? '', unidadIngreso: tela?.unidadVenta ?? 'KG' });
     setShowRolloForm(true);
   }
+  function reservedProductionRollQuantity(rollId: string, unit: FabricUnit): number {
+    try {
+      const raw = localStorage.getItem('telastock-production-orders-v1');
+      const orders = raw ? JSON.parse(raw) as Array<{ status?: string; rollAllocations?: Array<{ rollId?: string; unit?: FabricUnit; quantity?: number }> }> : [];
+      if (!Array.isArray(orders)) return 0;
+      return orders.filter((order) => order.status === 'reservada' || order.status === 'en_proceso')
+        .reduce((sum, order) => sum + (Array.isArray(order.rollAllocations) ? order.rollAllocations.filter((item) => item.rollId === rollId && item.unit === unit).reduce((total, item) => total + (Number(item.quantity) || 0), 0) : 0), 0);
+    } catch { return 0; }
+  }
+
   function saveRollo(event: FormEvent) {
     event.preventDefault();
     const tela = telaById.get(rolloForm.idTela);
@@ -619,6 +629,13 @@ export function FabricModule({ view }: { view: FabricView }) {
       idProveedor: rolloForm.idProveedor || null, ubicacion: rolloForm.ubicacion.trim(), estado: rolloForm.estado, nota: rolloForm.nota.trim(),
       createdAt: rolloForm.id ? (rollById.get(rolloForm.id)?.createdAt ?? now) : now, updatedAt: now,
     };
+    if (previousRoll) {
+      const reservedKg = reservedProductionRollQuantity(previousRoll.id, 'KG');
+      const reservedM = reservedProductionRollQuantity(previousRoll.id, 'M');
+      if (reservedKg > 0 && (row.pesoKg === null || row.pesoKg + 0.00001 < reservedKg)) return tell('No puedes reducir el peso real por debajo de ' + nfmt.format(reservedKg) + ' KG: ese rollo está reservado para órdenes de producción.', 'error');
+      if (reservedM > 0 && (row.metros === null || row.metros + 0.00001 < reservedM)) return tell('No puedes reducir los metros reales por debajo de ' + nfmt.format(reservedM) + ' M: ese rollo está reservado para órdenes de producción.', 'error');
+      if ((reservedKg > 0 || reservedM > 0) && row.estado !== 'disponible') return tell('No puedes cambiar el estado de un rollo con reservas activas de producción.', 'error');
+    }
     const movementRows: RollMovement[] = [];
     const previous = rolloForm.id ? rollById.get(rolloForm.id) : undefined;
     const addMeasurement = (unit: FabricUnit, before: number | null, after: number | null) => {
@@ -654,7 +671,9 @@ export function FabricModule({ view }: { view: FabricView }) {
     if (!validQty(quantity)) return tell('La cantidad debe ser mayor que cero.', 'error');
     const current = rollMovementForm.unidad === 'KG' ? roll.pesoKg : roll.metros;
     if (current === null) return tell(`No hay una medición real en ${rollMovementForm.unidad} para este rollo. Registra primero esa medida; no se hará una conversión estimada.`, 'error');
-    if (quantity > current) return tell(`No puedes retirar ${nfmt.format(quantity)} ${rollMovementForm.unidad}: solo hay ${nfmt.format(current)} disponible.`, 'error');
+    const reserved = reservedProductionRollQuantity(roll.id, rollMovementForm.unidad);
+    const available = Math.max(0, current - reserved);
+    if (quantity > available + 0.00001) return tell(`No puedes retirar ${nfmt.format(quantity)} ${rollMovementForm.unidad}: ${nfmt.format(reserved)} están reservados y quedan ${nfmt.format(available)} disponibles para otros usos.`, 'error');
     const otherUnit: FabricUnit = rollMovementForm.unidad === 'KG' ? 'M' : 'KG';
     const otherCurrent = otherUnit === 'KG' ? roll.pesoKg : roll.metros;
     const otherEntered = nullableNumber(rollMovementForm.medidaComplementaria);
