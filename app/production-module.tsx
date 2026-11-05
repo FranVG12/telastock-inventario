@@ -521,14 +521,6 @@ export function ProductionModule({
 
   const textileName = (textileId: string | null) => textileContext.telas.find((x) => x.id === textileId)?.nombreTela ?? '';
   const textileColorOptions = textileContext.telaColores.filter((x) => x.idTela === variantTextileId && x.activo);
-  const titleByView: Record<ProductionView, { title: string; subtitle: string }> = {
-    insumos: { title: 'Insumos', subtitle: 'Administra materiales, variantes y existencias de confección.' },
-    componentes: { title: 'Componentes', subtitle: 'Crea una biblioteca reutilizable de cuellos, bolsillos, puños y acabados.' },
-    'modelos-producto': { title: 'Modelos configurados', subtitle: 'Combina un patrón base con los acabados que necesita cada prenda.' },
-    recetas: { title: 'Recetas estándar', subtitle: 'Configura los consumos habituales por familia de prenda.' },
-    planificacion: { title: 'Planificar materiales', subtitle: 'Calcula necesidades y faltantes a partir de cantidades por talla.' },
-  };
-
   const activeProduct = data.productModels.find((x) => x.id === selectedProductId && x.active);
   const plan = useMemo(() => {
     if (!activeProduct) return { rows: [] as Array<{ variantId: string; total: number; bySize: Record<string, number>; missingSizes: string[]; available: number; shortage: number; packs: number | null }>, unresolved: [] as string[] };
@@ -592,7 +584,7 @@ export function ProductionModule({
       return { variantId, total, bySize: value.bySize, missingSizes: [...new Set(value.missingSizes)], available, shortage, packs };
     });
     return { rows, unresolved };
-  }, [activeProduct, data.familyRecipes, data.components, variantsBySupply, supplies, sizes, baseModels, planCounts, textileContext, data.supplyMovements]);
+  }, [activeProduct, data.familyRecipes, data.components, variantsBySupply, supplies, sizes, baseModels, planCounts, textileContext, data.supplyMovements, stockForVariant]);
 
   const mainPanel = (() => {
     if (view === 'insumos') return <section className="panel production-panel">
