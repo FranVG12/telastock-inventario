@@ -19,13 +19,14 @@ import {
   type SizeGroup,
 } from '@/lib/inventory-domain';
 import { demoModels, demoMovements, demoPieces, demoSizes, demoSizeGroups } from '@/lib/demo-data';
-import { FabricModule, FABRIC_STORAGE_KEYS, emptyFabricBackupData, validateFabricBackupData, type FabricView } from '@/app/fabric-module';
+import { FabricModule, FABRIC_STORAGE_KEYS, emptyFabricBackupData, validateFabricBackupData, type FabricView, type ColorDefinition } from '@/app/fabric-module';
 
 type View = 'inventario' | 'modelos' | 'historial' | FabricView;
 type StockFilter = 'Con stock' | 'Vacío' | 'Todos';
 type SymmetricEntryMode = 'paridad' | 'lados';
 type StockSlot = 'paridad' | StockSide;
-type ModelFormPiece = { id: string; name: string; unitsPerGarment: string; laterality: Laterality; fabricType: string; color: string };
+type FabricSlot = 'principal' | 'secundaria_1' | 'secundaria_2' | 'secundaria_3';
+type ModelFormPiece = { id: string; name: string; unitsPerGarment: string; laterality: Laterality; fabricSlot: FabricSlot; colorId: string; fabricType: string; color: string };
 type ModelFormState = { editingId: string | null; name: string; sizeGroupId: string; pieces: ModelFormPiece[] };
 
 const STORAGE = {
@@ -38,11 +39,18 @@ const STORAGE = {
 const nf = new Intl.NumberFormat('es-PE', { maximumFractionDigits: 0 });
 const fmt = (value: number) => nf.format(value);
 const newId = () => typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-const blankModelForm = (sizeGroupId: string): ModelFormState => ({
+const fabricSlotLabels: Record<FabricSlot, string> = {
+  principal: 'Tela principal',
+  secundaria_1: 'Tela secundaria 1',
+  secundaria_2: 'Tela secundaria 2',
+  secundaria_3: 'Tela secundaria 3',
+};
+const validFabricSlots: FabricSlot[] = ['principal', 'secundaria_1', 'secundaria_2', 'secundaria_3'];
+const blankModelForm = (sizeGroupId: string, colorId = ''): ModelFormState => ({
   editingId: null,
   name: '',
   sizeGroupId,
-  pieces: [{ id: '', name: 'Pecho', unitsPerGarment: '1', laterality: 'ninguna', fabricType: 'Poliéster deportivo', color: 'Rojo' }],
+  pieces: [{ id: '', name: 'Pecho', unitsPerGarment: '1', laterality: 'ninguna', fabricSlot: 'principal', colorId, fabricType: 'Tela principal', color: '' }],
 });
 
 export default function Home() {
@@ -51,6 +59,7 @@ export default function Home() {
   const [sizes, setSizes] = useState<Size[]>(demoSizes);
   const [models, setModels] = useState<ManufacturingModel[]>(demoModels);
   const [pieces, setPieces] = useState<ModelPiece[]>(demoPieces);
+  const [fabricColors, setFabricColors] = useState<ColorDefinition[]>([]);
   const [movements, setMovements] = useState<PieceMovement[]>(demoMovements);
   const [ready, setReady] = useState(false);
 
@@ -90,13 +99,45 @@ export default function Home() {
       setSizeGroups(load(STORAGE.groups, demoSizeGroups));
       setSizes(load(STORAGE.sizes, demoSizes));
       setModels(load(STORAGE.models, demoModels));
-      // Backward-compatible migration for localStorage created before fabric/color fields existed.
-      setPieces((load<ModelPiece[]>(STORAGE.pieces, demoPieces)).map((piece) => ({ ...piece, fabricType: piece.fabricType ?? 'Poliéster deportivo', color: piece.color ?? 'Sin especificar' }))); 
+      // The global color-name dictionary is shared with the textile module. Legacy mold color names
+      // are promoted into it once; their fabric-specific HEX/CMYK variant is resolved later by tela.
+      const storedColors = load<ColorDefinition[]>(FABRIC_STORAGE_KEYS.colores, []);
+      const colorMap = new Map(storedColors.map((color) => [color.nombre.toLocaleLowerCase('es'), color]));
+      const storedPieces = load<ModelPiece[]>(STORAGE.pieces, demoPieces);
+      storedPieces.forEach((piece) => {
+        const legacyName = (piece.color ?? '').trim();
+        if (legacyName && legacyName !== 'Sin especificar' && !colorMap.has(legacyName.toLocaleLowerCase('es'))) {
+          const color = { id: newId(), nombre: legacyName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+          colorMap.set(legacyName.toLocaleLowerCase('es'), color);
+        }
+      });
+      const colors = [...colorMap.values()];
+      localStorage.setItem(FABRIC_STORAGE_KEYS.colores, JSON.stringify(colors));
+      setFabricColors(colors);
+      setPieces(storedPieces.map((piece) => ({
+        ...piece,
+        fabricType: piece.fabricType ?? 'Tela principal',
+        fabricSlot: piece.fabricSlot ?? 'principal',
+        color: piece.color ?? 'Sin especificar',
+        colorId: piece.colorId ?? colors.find((color) => color.nombre.toLocaleLowerCase('es') === (piece.color ?? '').toLocaleLowerCase('es'))?.id ?? null,
+      })));
       setMovements(load(STORAGE.movements, demoMovements));
     } catch {
       setNotice({ message: 'No se pudo leer el almacenamiento del navegador. Se muestran los datos de demostración.', kind: 'info' });
     }
     setReady(true);
+    const refreshFabricColors = () => {
+      try {
+        const raw = localStorage.getItem(FABRIC_STORAGE_KEYS.colores);
+        setFabricColors(raw ? JSON.parse(raw) as ColorDefinition[] : []);
+      } catch { /* Keep the last valid palette visible if a local color record is being edited. */ }
+    };
+    window.addEventListener('telastock-fabric-data-updated', refreshFabricColors);
+    window.addEventListener('telastock-fabric-data-restored', refreshFabricColors);
+    return () => {
+      window.removeEventListener('telastock-fabric-data-updated', refreshFabricColors);
+      window.removeEventListener('telastock-fabric-data-restored', refreshFabricColors);
+    };
   }, []);
 
   // Persistencia provisional local para el MVP visual. Nunca se presenta como sincronizada.
@@ -107,6 +148,8 @@ export default function Home() {
   useEffect(() => { if (ready) localStorage.setItem(STORAGE.movements, JSON.stringify(movements)); }, [movements, ready]);
 
   const groupById = useMemo(() => new Map(sizeGroups.map((group) => [group.id, group])), [sizeGroups]);
+  const fabricColorById = useMemo(() => new Map(fabricColors.map((color) => [color.id, color])), [fabricColors]);
+  const colorIdForName = (name: string) => fabricColors.find((color) => color.nombre.toLocaleLowerCase('es') === name.toLocaleLowerCase('es'))?.id ?? '';
   const modelPieces = (modelId: string) => pieces.filter((piece) => piece.modelId === modelId && !piece.archived).sort((a, b) => a.sortOrder - b.sortOrder);
   const groupSizes = (groupId: string) => sizes.filter((size) => size.groupId === groupId).sort((a, b) => a.sortOrder - b.sortOrder);
   const modelSizes = (model: ManufacturingModel) => groupSizes(model.sizeGroupId);
@@ -325,7 +368,7 @@ export default function Home() {
   }
 
   function openCreateModel() {
-    setModelForm(blankModelForm(sizeGroups[0]?.id ?? ''));
+    setModelForm(blankModelForm(sizeGroups[0]?.id ?? '', fabricColors[0]?.id ?? ''));
     setShowModelForm(true);
   }
 
@@ -334,7 +377,7 @@ export default function Home() {
       editingId: model.id,
       name: model.name,
       sizeGroupId: model.sizeGroupId,
-      pieces: modelPieces(model.id).map((piece) => ({ id: piece.id, name: piece.name, unitsPerGarment: String(piece.unitsPerGarment), laterality: piece.laterality, fabricType: piece.fabricType ?? '', color: piece.color ?? '' })),
+      pieces: modelPieces(model.id).map((piece) => ({ id: piece.id, name: piece.name, unitsPerGarment: String(piece.unitsPerGarment), laterality: piece.laterality, fabricSlot: piece.fabricSlot ?? 'principal', colorId: piece.colorId ?? colorIdForName(piece.color ?? ''), fabricType: piece.fabricType ?? '', color: piece.color ?? '' })),
     });
     setShowModelForm(true);
   }
@@ -344,11 +387,14 @@ export default function Home() {
   function saveModel(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const cleanName = modelForm.name.trim();
-    const cleanPieces = modelForm.pieces.map((piece) => ({ ...piece, name: piece.name.trim(), fabricType: piece.fabricType.trim(), color: piece.color.trim(), units: Number(piece.unitsPerGarment) }));
+    const cleanPieces = modelForm.pieces.map((piece) => ({ ...piece, name: piece.name.trim(), fabricType: piece.fabricType.trim(), color: fabricColorById.get(piece.colorId)?.nombre ?? piece.color.trim(), units: Number(piece.unitsPerGarment) }));
     if (!cleanName) { setNoticeMessage('Escribe el nombre del modelo.', 'error'); return; }
     if (!modelForm.sizeGroupId) { setNoticeMessage('Selecciona un grupo de tallas.', 'error'); return; }
-    if (cleanPieces.length === 0 || cleanPieces.some((piece) => !piece.name || !Number.isInteger(piece.units) || piece.units < 1)) {
+    if (cleanPieces.length === 0 || cleanPieces.some((piece) => !piece.name || !Number.isInteger(piece.units) || piece.units < 1 || !validFabricSlots.includes(piece.fabricSlot))) {
       setNoticeMessage('Cada molde debe tener nombre y una cantidad requerida entera mayor que cero.', 'error'); return;
+    }
+    if (cleanPieces.some((piece) => piece.colorId && !fabricColorById.has(piece.colorId))) {
+      setNoticeMessage('Uno de los colores seleccionados ya no existe en el catálogo central. Actualiza la selección.', 'error'); return;
     }
     if (cleanPieces.some((piece) => piece.laterality === 'simetrica' && piece.units % 2 !== 0)) {
       setNoticeMessage('Las piezas simétricas requieren una cantidad par por prenda (izquierda + derecha). Ejemplo: 2 = 1 por lado.', 'error'); return;
@@ -376,7 +422,8 @@ export default function Home() {
     const savedModel: ManufacturingModel = { id: modelId, name: cleanName, sizeGroupId: modelForm.sizeGroupId, updatedAt: new Date().toISOString() };
     const savedPieces: ModelPiece[] = cleanPieces.map((formPiece, index) => ({
       id: formPiece.id || newId(), modelId, name: formPiece.name, unitsPerGarment: formPiece.units,
-      laterality: formPiece.laterality, fabricType: formPiece.fabricType || 'Sin especificar', color: formPiece.color || 'Sin especificar', sortOrder: index + 1, archived: false,
+      laterality: formPiece.laterality, fabricSlot: formPiece.fabricSlot, colorId: formPiece.colorId || null,
+      fabricType: fabricSlotLabels[formPiece.fabricSlot], color: formPiece.color || 'Sin especificar', sortOrder: index + 1, archived: false,
     }));
     setModels((previous) => modelForm.editingId ? previous.map((model) => model.id === modelId ? savedModel : model) : [...previous, savedModel]);
     setPieces((previous) => [...previous.filter((piece) => piece.modelId !== modelId || piece.archived || archivedRemovedIds.has(piece.id)).map((piece) => archivedRemovedIds.has(piece.id) ? { ...piece, archived: true } : piece), ...savedPieces]);
