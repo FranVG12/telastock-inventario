@@ -1126,6 +1126,13 @@ export function ProductionModule({
           <div className="production-size-grid planning-counts">
             {productSizes.map((size) => <label key={size.id}><span>{size.label}</span><input type="number" min="0" step="1" inputMode="numeric" placeholder="0" value={planCounts[size.id] ?? ''} onChange={(e) => setPlanCounts((current) => ({ ...current, [size.id]: e.target.value }))} /></label>)}
           </div>
+          <div className="production-subheading"><strong>Capacidad con stock actual</strong><span>Patrón base + componentes</span></div>
+          <div className="production-table-wrap"><table className="production-table"><thead><tr><th>Talla</th><th>Patrón base</th><th>Auxiliares</th><th>Fabricables</th><th>Limitante</th></tr></thead><tbody>
+            {productSizes.map((size) => {
+              const capacity = getProductFabricableCapacity(activeProduct, size.id);
+              return <tr key={size.id}><td><strong>{size.label}</strong></td><td>{format(capacity.baseCapacity)}</td><td>{capacity.componentCapacity === null ? '—' : format(capacity.componentCapacity)}</td><td className={capacity.fabricable > 0 ? 'production-ok' : 'production-shortage'}>{format(capacity.fabricable)}</td><td>{capacity.limitingComponent || (capacity.componentCapacity === null ? 'Patrón base' : 'Patrón / auxiliar')}</td></tr>;
+            })}
+          </tbody></table></div>
           <div className="production-subheading"><strong>Materiales necesarios</strong><span>{format(plan.rows.length)} variantes</span></div>
           {plan.unresolved.length > 0 && <div className="notice error"><strong>Revisar configuración:</strong> {plan.unresolved.join(' ')}</div>}
           {plan.rows.length === 0 && <div className="empty">Agrega cantidades por talla y verifica que el modelo tenga componentes o una receta general configurada.</div>}
