@@ -568,6 +568,7 @@ export function FabricModule({ view }: { view: FabricView }) {
       const csvText = await file.text();
       const rows = parseCsvTable(csvText);
       const csvFingerprint = await stableCsvId(csvText);
+      const generatedRollIds = await Promise.all(rows.map((_, index) => stableCsvId(csvFingerprint + ':' + (index + 2))));
       const field = (row: Record<string, string>, ...names: string[]) => {
         for (const name of names) {
           const value = row[normalizeCsvHeader(name)];
@@ -647,7 +648,7 @@ export function FabricModule({ view }: { view: FabricView }) {
             const date = csvDate(field(row, 'fecha_ingreso', 'fecha'));
             const supplierId = resolveSupplier(row);
             const suppliedId = field(row, 'id_rollo', 'id');
-            const idRollo = suppliedId || await stableCsvId(csvFingerprint + ':' + (index + 2));
+            const idRollo = suppliedId || generatedRollIds[index];
             const existing = map.get(idRollo);
             const kg = unit === 'KG' ? quantity : parseCsvNullableNumber(field(row, 'peso_kg_real', 'peso_kg'), 'peso_kg_real');
             const metres = unit === 'M' ? quantity : parseCsvNullableNumber(field(row, 'metros_reales', 'metros'), 'metros_reales');
