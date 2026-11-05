@@ -460,11 +460,22 @@ begin
   if old.status <> 'borrador' or new.status <> 'reservada' then return new; end if;
 
   for r in
-    select variant_id, size_id, sum(required_quantity) as required_quantity
-    from public.production_order_materials
-    where production_order_id = new.id
-    group by variant_id, size_id
+    select material.variant_id, material.size_id, sum(material.required_quantity) as required_quantity,
+           variant.textile_id
+    from public.production_order_materials material
+    join public.supply_variants variant on variant.id = material.variant_id
+    where material.production_order_id = new.id
+    group by material.variant_id, material.size_id, variant.textile_id
   loop
+    if r.textile_id is not null then
+      select coalesce(sum(reserved_quantity),0) into v_reserved
+      from public.production_order_roll_allocations
+      where production_order_id = new.id and variant_id = r.variant_id;
+      if abs(v_reserved - r.required_quantity) > 0.0001 then
+        raise exception 'La asignación de rollos no coincide con el consumo de tela para la variante %.', r.variant_id;
+      end if;
+      continue;
+    end if;
     perform pg_advisory_xact_lock(hashtextextended(r.variant_id::text || ':' || coalesce(r.size_id::text,'total'),0));
     select coalesce(sum(m.delta_quantity),0) into v_balance
     from public.supply_stock_movements m
