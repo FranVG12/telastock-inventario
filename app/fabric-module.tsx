@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 
 export type FabricView = 'telas' | 'rollos' | 'compras' | 'proveedores';
 export type FabricUnit = 'KG' | 'M';
@@ -100,6 +100,69 @@ const validQty = (value: number) => Number.isFinite(value) && value > 0;
 const categories = ['Telas', 'Cierres', 'Bolsas', 'Elásticos', 'Hilos', 'Avíos', 'Sublimado', 'Otros'];
 const statusLabel: Record<RollStatus, string> = { disponible: 'Disponible', reservado: 'Reservado', agotado: 'Agotado', defectuoso: 'Defectuoso' };
 const csvCell = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`;
+
+function normalizeCsvHeader(value: string) {
+  return value.replace(/^\\uFEFF/, '').trim().toLocaleLowerCase('es').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+}
+function parseCsvTable(source: string) {
+  const text = source.replace(/^\\uFEFF/, '');
+  let delimiter = ';';
+  const firstLine = text.split(/\\r?\\n/, 1)[0] ?? '';
+  const count = (line: string, candidate: string) => {
+    let quoted = false;
+    let total = 0;
+    for (let i = 0; i < line.length; i++) {
+      if (line[i] === '"' && line[i + 1] === '"') { i++; continue; }
+      if (line[i] === '"') quoted = !quoted;
+      else if (!quoted && line[i] === candidate) total++;
+    }
+    return total;
+  };
+  if (count(firstLine, ',') > count(firstLine, ';')) delimiter = ',';
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (quoted) {
+      if (char === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+      else if (char === '"') quoted = false;
+      else cell += char;
+    } else if (char === '"') quoted = true;
+    else if (char === delimiter) { row.push(cell); cell = ''; }
+    else if (char === '\\n' || char === '\\r') {
+      if (char === '\\r' && text[i + 1] === '\\n') i++;
+      row.push(cell); cell = '';
+      if (row.some((value) => value.trim() !== '')) rows.push(row);
+      row = [];
+    } else cell += char;
+  }
+  row.push(cell);
+  if (row.some((value) => value.trim() !== '')) rows.push(row);
+  if (rows.length < 2) throw new Error('El CSV no contiene filas de datos.');
+  const headers = rows[0].map(normalizeCsvHeader);
+  if (new Set(headers).size !== headers.length) throw new Error('El CSV tiene encabezados repetidos.');
+  return rows.slice(1).map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ''])));
+}
+function csvDate(value: string) {
+  const raw = value.trim();
+  if (/^\\d{4}-\\d{2}-\\d{2}$/.test(raw)) return raw;
+  const local = raw.match(/^(\\d{1,2})[\\/-](\\d{1,2})[\\/-](\\d{4})$/);
+  if (local) {
+    const day = Number(local[1]); const month = Number(local[2]); const year = Number(local[3]);
+    const date = new Date(year, month - 1, day);
+    if (date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day) return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+  throw new Error('Fecha inválida. Usa AAAA-MM-DD o DD/MM/AAAA.');
+}
+function parseCsvNullableNumber(value: string, field: string) {
+  if (!value.trim()) return null;
+  const number = Number(value.replace(',', '.'));
+  if (!Number.isFinite(number) || number < 0) throw new Error(field + ' debe ser un número igual o mayor que cero, o estar vacío.');
+  return number;
+}
+
 function downloadCsv(filename: string, rows: unknown[][]) {
   const csv = '\uFEFF' + rows.map((row) => row.map(csvCell).join(';')).join('\r\n');
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
@@ -127,6 +190,7 @@ export function FabricModule({ view }: { view: FabricView }) {
   const [data, setData] = useState<FabricBackupData>(emptyFabricBackupData);
   const [ready, setReady] = useState(false);
   const [storageSafe, setStorageSafe] = useState(true);
+  const csvImportRef = useRef<HTMLInputElement>(null);
   const [notice, setNotice] = useState<{ text: string; kind: 'success' | 'error' | 'info' } | null>(null);
   const [telaSearch, setTelaSearch] = useState('');
   const [rollSearch, setRollSearch] = useState('');
@@ -467,6 +531,155 @@ export function FabricModule({ view }: { view: FabricView }) {
     setShowPurchaseForm(false);
     tell(`${oldPurchase ? 'Compra actualizada' : 'Compra registrada'}: ${lines.length} rollos por ${money.format(details.filter((x) => x.idCompra === purchaseId).reduce((sum, x) => sum + x.importeTotal, 0))}.`);
   }
+
+  async function importCsvFile(file?: File) {
+    if (!file) return;
+    try {
+      if (!storageSafe) throw new Error('No se puede importar mientras el almacenamiento local esté dañado. Restaura primero un respaldo JSON válido.');
+      const rows = parseCsvTable(await file.text());
+      const field = (row: Record<string, string>, ...names: string[]) => {
+        for (const name of names) {
+          const value = row[normalizeCsvHeader(name)];
+          if (value !== undefined) return value.trim();
+        }
+        return '';
+      };
+      const uniqueId = (value: string) => value.trim() || id();
+      const resolveSupplier = (row: Record<string, string>) => {
+        const supplierId = field(row, 'id_proveedor');
+        const supplierName = field(row, 'proveedor', 'nombre_proveedor');
+        const found = supplierId ? data.proveedores.find((x) => x.id === supplierId) : data.proveedores.find((x) => x.nombre.toLocaleLowerCase('es') === supplierName.toLocaleLowerCase('es'));
+        if ((supplierId || supplierName) && !found) throw new Error('El proveedor "' + (supplierName || supplierId) + '" no existe. Importa primero el archivo de proveedores.');
+        return found?.id ?? null;
+      };
+      let next: FabricBackupData = { ...data };
+      let imported = 0;
+      if (view === 'telas') {
+        const map = new Map(data.telas.map((x) => [x.id, x]));
+        const byName = new Map(data.telas.map((x) => [x.nombreTela.toLocaleLowerCase('es'), x]));
+        rows.forEach((row, index) => {
+          try {
+            const name = field(row, 'nombre_tela', 'nombre');
+            const unit = field(row, 'unidad_venta', 'unidad').toUpperCase();
+            if (!name) throw new Error('Falta nombre_tela.');
+            if (unit !== 'KG' && unit !== 'M') throw new Error('unidad_venta debe ser KG o M.');
+            const width = parseCsvNullableNumber(field(row, 'ancho_nominal_m'), 'ancho_nominal_m');
+            if (width !== null && width <= 0) throw new Error('ancho_nominal_m debe ser mayor que cero.');
+            const existing = map.get(field(row, 'id_tela', 'id')) ?? byName.get(name.toLocaleLowerCase('es'));
+            const activeRaw = field(row, 'activo').toLocaleLowerCase('es');
+            const active = !activeRaw ? true : ['true','1','si','sí','activo','yes'].includes(activeRaw);
+            if (activeRaw && !['true','1','si','sí','activo','yes','false','0','no','inactivo'].includes(activeRaw)) throw new Error('activo debe ser TRUE/FALSE.');
+            const now = new Date().toISOString();
+            const item: Textile = { id: existing?.id ?? uniqueId(field(row, 'id_tela', 'id')), nombreTela: name, unidadVenta: unit, anchoNominalM: width, descripcion: field(row, 'descripcion'), activo: active, createdAt: existing?.createdAt ?? now, updatedAt: now };
+            map.set(item.id, item); byName.set(name.toLocaleLowerCase('es'), item); imported++;
+          } catch (error) { throw new Error('Fila ' + (index + 2) + ': ' + (error instanceof Error ? error.message : 'dato inválido')); }
+        });
+        next = { ...data, telas: [...map.values()] };
+      } else if (view === 'proveedores') {
+        const map = new Map(data.proveedores.map((x) => [x.id, x]));
+        const phones = [...data.proveedorTelefonos];
+        const cats = [...data.proveedorCategorias];
+        rows.forEach((row, index) => {
+          try {
+            const name = field(row, 'nombre', 'nombre_comercial');
+            if (!name) throw new Error('Falta nombre del proveedor.');
+            const existing = map.get(field(row, 'id_proveedor', 'id')) ?? [...map.values()].find((x) => x.nombre.toLocaleLowerCase('es') === name.toLocaleLowerCase('es'));
+            const now = new Date().toISOString();
+            const item: Supplier = { id: existing?.id ?? uniqueId(field(row, 'id_proveedor', 'id')), nombre: name, contacto: field(row, 'contacto'), direccion: field(row, 'direccion'), nota: field(row, 'nota'), createdAt: existing?.createdAt ?? now, updatedAt: now };
+            map.set(item.id, item);
+            const rawPhones = field(row, 'telefonos', 'telefono').split('|').map((x) => x.trim()).filter(Boolean);
+            const parsedPhones = rawPhones.map((entry) => {
+              const colon = entry.indexOf(':');
+              return { id: id(), idProveedor: item.id, etiqueta: colon > 0 ? entry.slice(0, colon).trim() : 'Teléfono', numero: colon > 0 ? entry.slice(colon + 1).trim() : entry };
+            });
+            const rawCategories = field(row, 'categorias', 'rubros');
+            const parsedCategories = rawCategories.split('|').map((x) => x.trim()).filter(Boolean);
+            phones.splice(0, phones.length, ...phones.filter((x) => x.idProveedor !== item.id), ...parsedPhones);
+            cats.splice(0, cats.length, ...cats.filter((x) => x.idProveedor !== item.id), ...parsedCategories.map((categoria) => ({ id: id(), idProveedor: item.id, categoria })));
+            imported++;
+          } catch (error) { throw new Error('Fila ' + (index + 2) + ': ' + (error instanceof Error ? error.message : 'dato inválido')); }
+        });
+        next = { ...data, proveedores: [...map.values()], proveedorTelefonos: phones, proveedorCategorias: cats };
+      } else if (view === 'rollos') {
+        const map = new Map(data.rollos.map((x) => [x.id, x]));
+        const movements = [...data.rolloMovimientos];
+        rows.forEach((row, index) => {
+          try {
+            const telaId = field(row, 'id_tela');
+            const telaName = field(row, 'nombre_tela', 'tela');
+            const tela = telaId ? data.telas.find((x) => x.id === telaId) : data.telas.find((x) => x.nombreTela.toLocaleLowerCase('es') === telaName.toLocaleLowerCase('es'));
+            if (!tela) throw new Error('La tela indicada no existe. Importa primero el catálogo.');
+            const unit = field(row, 'unidad_ingreso', 'unidad').toUpperCase();
+            if (unit !== 'KG' && unit !== 'M') throw new Error('unidad_ingreso debe ser KG o M.');
+            const quantity = Number(field(row, 'cantidad_ingresada', 'cantidad'));
+            if (!validQty(quantity)) throw new Error('cantidad_ingresada debe ser mayor que cero.');
+            const date = csvDate(field(row, 'fecha_ingreso', 'fecha'));
+            const supplierId = resolveSupplier(row);
+            const idRollo = field(row, 'id_rollo', 'id');
+            const existing = idRollo ? map.get(idRollo) : undefined;
+            const kg = unit === 'KG' ? quantity : parseCsvNullableNumber(field(row, 'peso_kg_real', 'peso_kg'), 'peso_kg_real');
+            const metres = unit === 'M' ? quantity : parseCsvNullableNumber(field(row, 'metros_reales', 'metros'), 'metros_reales');
+            const stateRaw = (field(row, 'estado') || 'disponible').toLocaleLowerCase('es');
+            if (!['disponible','reservado','agotado','defectuoso'].includes(stateRaw)) throw new Error('estado debe ser disponible, reservado, agotado o defectuoso.');
+            const now = new Date().toISOString();
+            const item: FabricRoll = { id: existing?.id ?? uniqueId(idRollo), idTela: tela.id, unidadIngreso: unit, cantidadIngreso: quantity, pesoKg: kg, metros, color: field(row, 'color'), idLote: field(row, 'id_lote', 'lote'), fechaIngreso: date, idProveedor: supplierId, ubicacion: field(row, 'ubicacion'), estado: stateRaw as RollStatus, nota: field(row, 'nota'), createdAt: existing?.createdAt ?? now, updatedAt: now };
+            map.set(item.id, item);
+            if (!existing) {
+              movements.push({ id: id(), idRollo: item.id, fecha: now, tipo: 'ingreso', unidad: unit, delta: quantity, cantidadAnterior: null, cantidadNueva: quantity, nota: 'Ingreso importado desde CSV' });
+              if (unit === 'KG' && metres !== null) movements.push({ id: id(), idRollo: item.id, fecha: now, tipo: 'medicion', unidad: 'M', delta: null, cantidadAnterior: null, cantidadNueva: metres, nota: 'Metros reales importados desde CSV' });
+              if (unit === 'M' && kg !== null) movements.push({ id: id(), idRollo: item.id, fecha: now, tipo: 'medicion', unidad: 'KG', delta: null, cantidadAnterior: null, cantidadNueva: kg, nota: 'Peso real importado desde CSV' });
+            }
+            imported++;
+          } catch (error) { throw new Error('Fila ' + (index + 2) + ': ' + (error instanceof Error ? error.message : 'dato inválido')); }
+        });
+        next = { ...data, rollos: [...map.values()], rolloMovimientos: movements };
+      } else if (view === 'compras') {
+        const purchaseMap = new Map(data.compras.map((x) => [x.id, x]));
+        const detailMap = new Map(data.detalleCompra.map((x) => [x.id, x]));
+        const seenRolls = new Set<string>();
+        rows.forEach((row, index) => {
+          try {
+            const purchaseId = field(row, 'id_compra');
+            const rollId = field(row, 'id_rollo');
+            if (!purchaseId || !rollId) throw new Error('Faltan id_compra o id_rollo. Importa rollos primero; las compras CSV exportadas ya contienen esos identificadores.');
+            const roll = data.rollos.find((x) => x.id === rollId);
+            if (!roll) throw new Error('No existe el rollo ' + rollId + '. Importa primero el inventario de rollos.');
+            const supplierId = resolveSupplier(row);
+            const date = csvDate(field(row, 'fecha_compra'));
+            const unit = field(row, 'unidad_precio').toUpperCase();
+            if (unit !== 'KG' && unit !== 'M') throw new Error('unidad_precio debe ser KG o M.');
+            if (unit !== roll.unidadIngreso) throw new Error('La unidad de precio debe coincidir con la unidad de ingreso del rollo.');
+            const quantity = Number(field(row, 'cantidad_comprada'));
+            const price = Number(field(row, 'precio_unitario'));
+            if (!validQty(quantity) || !Number.isFinite(price) || price < 0) throw new Error('Cantidad o precio unitario inválido.');
+            const expectedTotal = Number((quantity * price).toFixed(2));
+            const providedTotal = field(row, 'importe_total');
+            if (providedTotal && Math.abs(Number(providedTotal.replace(',', '.')) - expectedTotal) > 0.011) throw new Error('importe_total no coincide con cantidad_comprada × precio_unitario.');
+            if (seenRolls.has(rollId)) throw new Error('El rollo aparece más de una vez en este archivo.');
+            seenRolls.add(rollId);
+            const currentPurchase = purchaseMap.get(purchaseId);
+            const currentDetail = [...detailMap.values()].find((x) => x.idRollo === rollId);
+            if (currentDetail && currentDetail.idCompra !== purchaseId) throw new Error('El rollo ya pertenece a otra compra.');
+            const now = new Date().toISOString();
+            purchaseMap.set(purchaseId, { id: purchaseId, idProveedor: supplierId, fechaCompra: date, tipoComprobante: field(row, 'tipo_comprobante'), numeroComprobante: field(row, 'numero_comprobante'), observacion: field(row, 'observacion'), createdAt: currentPurchase?.createdAt ?? now, updatedAt: now });
+            const detailId = field(row, 'id_detalle') || currentDetail?.id || id();
+            detailMap.set(detailId, { id: detailId, idCompra: purchaseId, idRollo: rollId, cantidadComprada: quantity, unidadPrecio: unit, precioUnitario: price, importeTotal: expectedTotal });
+            imported++;
+          } catch (error) { throw new Error('Fila ' + (index + 2) + ': ' + (error instanceof Error ? error.message : 'dato inválido')); }
+        });
+        next = { ...data, compras: [...purchaseMap.values()], detalleCompra: [...detailMap.values()] };
+      }
+      if (!imported) throw new Error('No se encontraron filas válidas para importar.');
+      if (!window.confirm('Se van a importar ' + imported + ' filas en ' + view + '. Los registros con el mismo ID se actualizarán; los demás se añadirán. ¿Continuar?')) return;
+      persist(next);
+      tell(imported + ' filas importadas correctamente. Las relaciones se conservaron y los importes de compra se recalcularon desde cantidad × precio.');
+    } catch (error) {
+      tell('No se pudo importar el CSV: ' + (error instanceof Error ? error.message : 'archivo no válido'), 'error');
+    } finally {
+      if (csvImportRef.current) csvImportRef.current.value = '';
+    }
+  }
+
   function exportCurrentCsv() {
     if (view === 'telas') {
       downloadCsv('catalogo-telas.csv', [['id_tela','nombre_tela','unidad_venta','ancho_nominal_m','descripcion','activo'], ...data.telas.map((x) => [x.id,x.nombreTela,x.unidadVenta,x.anchoNominalM ?? '',x.descripcion,x.activo ? 'TRUE' : 'FALSE'])]);
@@ -492,6 +705,7 @@ export function FabricModule({ view }: { view: FabricView }) {
   return <div className="fabric-module">
     {notice && <div className={`notice ${notice.kind}`} role="status"><span>{notice.text}</span><button onClick={() => setNotice(null)} aria-label="Cerrar aviso">×</button></div>}
     <div className="fabric-toolbar">
+      <input ref={csvImportRef} type="file" accept=".csv,text/csv" hidden onChange={(event) => void importCsvFile(event.target.files?.[0])} />
       <div className="fabric-search-wrap">
         {view === 'telas' && <label className="search-box"><span>⌕</span><input value={telaSearch} onChange={(e) => setTelaSearch(e.target.value)} placeholder="Buscar tela…" /></label>}
         {view === 'rollos' && <label className="search-box"><span>⌕</span><input value={rollSearch} onChange={(e) => setRollSearch(e.target.value)} placeholder="Buscar tela, color, lote o proveedor…" /></label>}
@@ -499,7 +713,8 @@ export function FabricModule({ view }: { view: FabricView }) {
         {view === 'proveedores' && <label className="search-box"><span>⌕</span><input value={supplierSearch} onChange={(e) => setSupplierSearch(e.target.value)} placeholder="Buscar proveedor, teléfono o categoría…" /></label>}
       </div>
       <div className="fabric-toolbar-actions">
-        <button className="button secondary" onClick={exportCurrentCsv}>↓ <span>CSV</span></button>
+        <button className="button secondary" onClick={() => csvImportRef.current?.click()}>↑ <span>Importar CSV</span></button>
+        <button className="button secondary" onClick={exportCurrentCsv}>↓ <span>Exportar CSV</span></button>
         {view === 'telas' && <button className="button primary" onClick={() => openTela()}>＋ <span>Nueva tela</span></button>}
         {view === 'rollos' && <button className="button primary" onClick={() => openRollo() } disabled={data.telas.filter((x) => x.activo).length === 0}>＋ <span>Nuevo rollo</span></button>}
         {view === 'compras' && <button className="button primary" onClick={() => openPurchase()} disabled={data.telas.filter((x) => x.activo).length === 0}>＋ <span>Nueva compra</span></button>}
