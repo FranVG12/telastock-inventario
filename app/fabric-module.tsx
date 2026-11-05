@@ -544,13 +544,15 @@ export function FabricModule({ view }: { view: FabricView }) {
     const color: ColorDefinition = existingColor ?? { id: id(), nombre: name, createdAt: now, updatedAt: now };
     const duplicate = data.telaColores.find((x) => x.idTela === inlineColorForm.telaId && x.idColor === color.id && x.id !== currentVariant?.id);
     if (duplicate && !currentVariant) {
-      const updatedVariant: TextileColor = { ...duplicate, hexadecimal, cmykC: cmyk[0], cmykM: cmyk[1], cmykY: cmyk[2], cmykK: cmyk[3], activo: true, updatedAt: now };
-      const next = { ...data, colores: existingColor ? data.colores : [...data.colores, color], telaColores: data.telaColores.map((x) => x.id === duplicate.id ? updatedVariant : x) };
+      // The color is already associated with this textile. Reuse it without replacing its HEX/CMYK;
+      // code edits are done explicitly from the textile's color list.
+      const reusedVariant: TextileColor = { ...duplicate, activo: true, updatedAt: now };
+      const next = { ...data, colores: existingColor ? data.colores : [...data.colores, color], telaColores: data.telaColores.map((x) => x.id === duplicate.id ? reusedVariant : x) };
       if (!persist(next)) return;
-      if (inlineColorForm.target === 'rollo') setRolloForm((x) => ({ ...x, idTelaColor: updatedVariant.id, color: color.nombre }));
-      if (inlineColorForm.target === 'compra' && inlineColorForm.lineIndex !== null) updatePurchaseLine(inlineColorForm.lineIndex, { idTelaColor: updatedVariant.id, color: color.nombre });
+      if (inlineColorForm.target === 'rollo') setRolloForm((x) => ({ ...x, idTelaColor: reusedVariant.id, color: color.nombre }));
+      if (inlineColorForm.target === 'compra' && inlineColorForm.lineIndex !== null) updatePurchaseLine(inlineColorForm.lineIndex, { idTelaColor: reusedVariant.id, color: color.nombre });
       setInlineColorForm(null);
-      tell('Se actualizaron los códigos del color para esta tela.');
+      tell('Este color ya estaba asociado a la tela. Se reutilizó su código HEX/CMYK.');
       return;
     }
     const variant: TextileColor = {
