@@ -547,7 +547,9 @@ export default function Home() {
         colorId: piece.colorId ?? mergedColors.find((color) => color.nombre.toLocaleLowerCase('es') === (piece.color ?? '').toLocaleLowerCase('es'))?.id ?? null,
         colorOverride: piece.colorOverride ?? true,
         archived: false,
-      }))));
+      }));
+      setModels((current) => merge(current, normalizeModelsWithSlots(parsed.models!, incomingPieces)));
+      setPieces((current) => merge(current, incomingPieces));
       window.dispatchEvent(new Event('telastock-fabric-data-updated'));
       setNoticeMessage('Configuración importada. Se combinaron los modelos, moldes, colores y tallas por ID; el historial de movimientos existente se conservó.');
     } catch (error) {
@@ -627,8 +629,9 @@ export default function Home() {
 
       const importedGroups = getRows('sizeGroups') as unknown as SizeGroup[];
       const importedSizes = getRows('sizes') as unknown as Size[];
-      const importedModels = getRows('models') as unknown as ManufacturingModel[];
+      const importedModelsRaw = getRows('models') as unknown as ManufacturingModel[];
       const importedPieces = getRows('pieces') as unknown as ModelPiece[];
+      const importedModels = normalizeModelsWithSlots(importedModelsRaw, importedPieces);
       const importedMovements = getRows('movements') as unknown as PieceMovement[];
       let importedFabric = Number(raw.schemaVersion) >= 2 ? validateFabricBackupData(data.fabricInventory) : emptyFabricBackupData();
       const hasText = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
