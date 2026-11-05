@@ -941,6 +941,408 @@ export function ProductionModule({
     return { rows, unresolved };
   }, [activeProduct, data.familyRecipes, data.components, variantsBySupply, supplies, sizes, baseModels, planCounts, textileContext, data.supplyMovements, stockForVariant]);
 
+
+  const holdingStatuses: ProductionOrderStatus[] = ['reservada', 'en_proceso'];
+  const ordersHoldingStock = data.productionOrders.filter((order) => holdingStatuses.includes(order.status));
+  const isUnitCostAvailable = (value: number | null): value is number => value !== null && Number.isFinite(value) && value >= 0;
+
+  function latestUnitCost(variant: SupplyVariant, unit: StockUnit): number | null {
+    if (variant.textileId) {
+      const fabricRolls = safeRead<Array<{ id: string; idTela: string; idTelaColor?: string | null }>>(FABRIC_STORAGE_KEYS.rollos, []);
+      const fabricPurchases = safeRead<Array<{ id: string; fechaCompra: string; updatedAt?: string }>>(FABRIC_STORAGE_KEYS.compras, []);
+      const fabricDetails = safeRead<Array<{ idCompra: string; idRollo: string; unidadPrecio: 'KG' | 'M'; precioUnitario: number }>>(FABRIC_STORAGE_KEYS.detalleCompra, []);
+      const purchaseById = new Map(fabricPurchases.map((purchase) => [purchase.id, purchase]));
+      const rollById = new Map(fabricRolls.map((roll) => [roll.id, roll]));
+      const targetUnit = unit === 'm' ? 'M' : unit === 'kg' ? 'KG' : null;
+      if (!targetUnit) return null;
+      const candidates = fabricDetails.map((detail, index) => {
+        const roll = rollById.get(detail.idRollo);
+        const purchase = purchaseById.get(detail.idCompra);
+        return { detail, roll, purchase, index };
+      }).filter((item) => item.roll?.idTela === variant.textileId &&
+        (!variant.textileColorId || item.roll.idTelaColor === variant.textileColorId) &&
+        item.detail.unidadPrecio === targetUnit && Number.isFinite(item.detail.precioUnitario) && item.detail.precioUnitario >= 0
+      ).sort((a, b) =>
+        (b.purchase?.fechaCompra ?? '').localeCompare(a.purchase?.fechaCompra ?? '') ||
+        (b.purchase?.updatedAt ?? '').localeCompare(a.purchase?.updatedAt ?? '') || b.index - a.index
+      );
+      return candidates[0]?.detail.precioUnitario ?? null;
+    }
+    const candidates = data.supplyPurchaseDetails.map((detail, index) => ({
+      detail,
+      purchase: data.supplyPurchases.find((purchase) => purchase.id === detail.purchaseId),
+      index,
+    })).filter((item) => item.detail.variantId === variant.id)
+      .sort((a, b) =>
+        (b.purchase?.date ?? '').localeCompare(a.purchase?.date ?? '') ||
+        (b.purchase?.createdAt ?? '').localeCompare(a.purchase?.createdAt ?? '') || b.index - a.index
+      );
+    const detail = candidates[0]?.detail;
+    return detail ? detail.unitPrice / detail.baseQuantityPerPack : null;
+  }
+
+  function makePieceRequirements(product: ConfiguredProductModel, quantities: Record<string, number>) {
+    const base: ProductionOrderPieceRequirement[] = [];
+    const auxiliary: ProductionOrderComponentPieceRequirement[] = [];
+    const productBasePieces = basePieces.filter((piece) => piece.modelId === product.baseModelId && !piece.archived);
+    for (const [sizeId, garmentCount] of Object.entries(quantities)) {
+      for (const piece of productBasePieces) {
+        if (piece.laterality === 'simetrica') {
+          if (piece.unitsPerGarment % 2 !== 0) throw new Error('El molde base "' + piece.name + '" tiene una cantidad simétrica impar.');
+          const eachSide = garmentCount * piece.unitsPerGarment / 2;
+          if (eachSide > 0) {
+            base.push({ id: id(), pieceId: piece.id, sizeId, side: 'izquierda', quantity: eachSide });
+            base.push({ id: id(), pieceId: piece.id, sizeId, side: 'derecha', quantity: eachSide });
+          }
+        } else {
+          const required = garmentCount * piece.unitsPerGarment;
+          if (required > 0) base.push({ id: id(), pieceId: piece.id, sizeId, side: null, quantity: required });
+        }
+      }
+      for (const selection of product.components) {
+        const component = data.components.find((item) => item.id === selection.componentId && item.active);
+        if (!component) throw new Error('Un componente del modelo ya no está disponible. Revisa el modelo antes de crear la orden.');
+        for (const piece of component.pieces) {
+          const perGarment = piece.unitsPerGarment * selection.quantity;
+          const required = garmentCount * perGarment;
+          if (!Number.isInteger(required)) throw new Error('La cantidad de "' + piece.name + '" no es un número entero de piezas por talla.');
+          if (piece.laterality === 'simetrica') {
+            if (!Number.isInteger(perGarment) || perGarment % 2 !== 0) throw new Error('La pieza simétrica "' + piece.name + '" necesita una cantidad par por prenda.');
+            const eachSide = required / 2;
+            if (eachSide > 0) {
+              auxiliary.push({ id: id(), componentId: component.id, pieceId: piece.id, sizeId, side: 'izquierda', quantity: eachSide });
+              auxiliary.push({ id: id(), componentId: component.id, pieceId: piece.id, sizeId, side: 'derecha', quantity: eachSide });
+            }
+          } else if (required > 0) {
+            auxiliary.push({ id: id(), componentId: component.id, pieceId: piece.id, sizeId, side: null, quantity: required });
+          }
+        }
+      }
+    }
+    return { base, auxiliary };
+  }
+
+  function createProductionOrderDraft() {
+    if (!activeProduct) return tell('Selecciona un modelo configurado antes de crear una orden.', 'error');
+    if (plan.unresolved.length > 0) return tell('No se puede crear la orden: hay materiales con unidades o variantes sin resolver.', 'error');
+    if (plan.rows.some((row) => row.missingSizes.length > 0)) return tell('Completa los consumos por talla que faltan antes de crear la orden.', 'error');
+    const groupId = baseModels.find((model) => model.id === activeProduct.baseModelId)?.sizeGroupId;
+    const productSizes = sizes.filter((size) => size.groupId === groupId);
+    const quantities: Record<string, number> = {};
+    for (const size of productSizes) {
+      const raw = planCounts[size.id] ?? '';
+      if (raw.trim() === '') continue;
+      const count = Number(raw);
+      if (!Number.isInteger(count) || count < 0) return tell('Las cantidades de una orden deben ser números enteros iguales o mayores que cero.', 'error');
+      if (count > 0) quantities[size.id] = count;
+    }
+    if (Object.keys(quantities).length === 0) return tell('Indica al menos una cantidad de prendas por talla.', 'error');
+
+    const orderMaterials: ProductionOrderMaterial[] = [];
+    for (const row of plan.rows) {
+      const variant = variantsBySupply.get(row.variantId);
+      const supply = variant ? supplies.find((item) => item.id === variant.supplyId) : undefined;
+      if (!variant || !supply) return tell('Una variante de material dejó de estar disponible. Revisa la receta.', 'error');
+      const cost = latestUnitCost(variant, supply.baseUnit);
+      const addLine = (sizeId: string | null, quantity: number) => {
+        if (!(quantity > 0)) return;
+        orderMaterials.push({
+          id: id(), variantId: variant.id, sizeId, quantity: Number(quantity.toFixed(5)),
+          unit: supply.baseUnit, unitCost: cost, lineCost: cost === null ? null : Number((quantity * cost).toFixed(2)),
+        });
+      };
+      if (supply.stockMode === 'total') {
+        addLine(null, Object.values(row.bySize).reduce((sum, value) => sum + value, 0));
+      } else {
+        Object.entries(row.bySize).forEach(([sizeId, quantity]) => addLine(sizeId, quantity));
+      }
+    }
+    const pieceRequirements = makePieceRequirements(activeProduct, quantities);
+    const missingCostLines = orderMaterials.filter((line) => line.unitCost === null).length;
+    const estimatedMaterialCost = missingCostLines > 0
+      ? null
+      : Number(orderMaterials.reduce((sum, line) => sum + (line.lineCost ?? 0), 0).toFixed(2));
+    const dateCode = localDate().replaceAll('-', '');
+    const todaysOrders = data.productionOrders.filter((order) => order.number.startsWith('OT-' + dateCode + '-')).length;
+    const timestamp = now();
+    const order: ProductionOrder = {
+      id: id(), number: 'OT-' + dateCode + '-' + String(todaysOrders + 1).padStart(3, '0'),
+      productModelId: activeProduct.id, productName: activeProduct.name, baseModelId: activeProduct.baseModelId,
+      status: 'borrador', quantities, materials: orderMaterials,
+      basePieces: pieceRequirements.base, componentPieces: pieceRequirements.auxiliary, rollAllocations: [],
+      estimatedMaterialCost, missingCostLines, note: orderNote.trim(),
+      createdAt: timestamp, updatedAt: timestamp,
+    };
+    const next = { ...data, productionOrders: [...data.productionOrders, order] };
+    if (persistProductionSnapshot(next)) {
+      setOrderNote('');
+      onNavigate('ordenes');
+      tell('Borrador ' + order.number + ' creado. Reserva los materiales y las piezas para iniciar la producción.');
+    }
+  }
+
+  function persistProductionSnapshot(next: ProductionBackupData): boolean {
+    const keys = Object.keys(emptyProductionBackupData()) as (keyof ProductionBackupData)[];
+    const previous = new Map<string, string | null>();
+    try {
+      keys.forEach((key) => previous.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
+      keys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(next[key])));
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '2');
+      setData(next);
+      return true;
+    } catch {
+      previous.forEach((value, key) => {
+        try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch { /* rollback best effort */ }
+      });
+      tell('No se pudo guardar la orden. El navegador no permitió completar el respaldo local.', 'error');
+      return false;
+    }
+  }
+
+  function currentBasePieceBalance(pieceId: string, sizeId: string, side: 'izquierda' | 'derecha' | null): number {
+    const piece = basePieces.find((item) => item.id === pieceId);
+    if (!piece) return 0;
+    if (piece.laterality === 'simetrica') {
+      const stock = getSymmetricStock(baseMovements, piece.id, sizeId);
+      return side === 'derecha' ? stock.right : stock.left;
+    }
+    return getPieceStock(baseMovements, piece.id, sizeId);
+  }
+
+  function currentComponentPieceBalance(pieceId: string, sizeId: string, side: 'izquierda' | 'derecha' | null): number {
+    const piece = data.components.flatMap((component) => component.pieces).find((item) => item.id === pieceId);
+    if (!piece) return 0;
+    const ledger = componentPieceDomainLedger(pieceId, sizeId);
+    if (piece.laterality === 'simetrica') {
+      const stock = getSymmetricStock(ledger, pieceId, sizeId);
+      return side === 'derecha' ? stock.right : stock.left;
+    }
+    return getPieceStock(ledger, pieceId, sizeId);
+  }
+
+  function reservedSupplyQuantity(variantId: string, sizeId: string | null, excludingOrderId?: string): number {
+    return ordersHoldingStock.filter((order) => order.id !== excludingOrderId).reduce((sum, order) =>
+      sum + order.materials.filter((line) => line.variantId === variantId && line.sizeId === sizeId && !variantsBySupply.get(line.variantId)?.textileId)
+        .reduce((total, line) => total + line.quantity, 0), 0);
+  }
+  function reservedPieceQuantity(lines: Array<ProductionOrderPieceRequirement | ProductionOrderComponentPieceRequirement>, pieceId: string, sizeId: string, side: 'izquierda' | 'derecha' | null, excludingOrderId?: string): number {
+    return ordersHoldingStock.filter((order) => order.id !== excludingOrderId).reduce((sum, order) =>
+      sum + lines.filter((line) => line.pieceId === pieceId && line.sizeId === sizeId && line.side === side)
+        .reduce((total, line) => total + line.quantity, 0), 0);
+  }
+
+  function reserveProductionOrder(orderId: string) {
+    const order = data.productionOrders.find((item) => item.id === orderId);
+    if (!order || order.status !== 'borrador') return tell('Solo puedes reservar una orden en borrador.', 'error');
+    const issues: string[] = [];
+    const rollAllocations: ProductionOrderRollAllocation[] = [];
+    const provisionalRolls = new Map<string, number>();
+    const provisionalSupply = new Map<string, number>();
+    const otherOrders = data.productionOrders.filter((item) => item.id !== order.id && holdingStatuses.includes(item.status));
+
+    for (const line of order.materials) {
+      const variant = variantsBySupply.get(line.variantId);
+      const supply = variant ? supplies.find((item) => item.id === variant.supplyId) : undefined;
+      if (!variant || !supply) { issues.push('Material no disponible en el catálogo.'); continue; }
+      if (variant.textileId) {
+        if (supply.baseUnit !== 'm' && supply.baseUnit !== 'kg') { issues.push(supply.name + ': la tela vinculada requiere unidad M o KG.'); continue; }
+        const unit: 'M' | 'KG' = supply.baseUnit === 'm' ? 'M' : 'KG';
+        const candidates = textileContext.rollos.filter((roll) =>
+          roll.idTela === variant.textileId && (!variant.textileColorId || roll.idTelaColor === variant.textileColorId) && roll.estado === 'disponible'
+        ).filter((roll) => (unit === 'M' ? roll.metros : roll.pesoKg) !== null)
+          .sort((a, b) => (a.fechaIngreso ?? '').localeCompare(b.fechaIngreso ?? '') || a.id.localeCompare(b.id));
+        let remaining = line.quantity;
+        for (const roll of candidates) {
+          const physical = unit === 'M' ? roll.metros ?? 0 : roll.pesoKg ?? 0;
+          const key = roll.id + ':' + unit;
+          const reservedByOthers = otherOrders.reduce((sum, activeOrder) => sum + activeOrder.rollAllocations.filter((allocation) => allocation.rollId === roll.id && allocation.unit === unit).reduce((total, allocation) => total + allocation.quantity, 0), 0);
+          const available = Math.max(0, physical - reservedByOthers - (provisionalRolls.get(key) ?? 0));
+          if (available <= 0) continue;
+          const quantity = Math.min(remaining, available);
+          if (quantity > 0) {
+            rollAllocations.push({ id: id(), variantId: variant.id, rollId: roll.id, unit, quantity: Number(quantity.toFixed(5)) });
+            provisionalRolls.set(key, (provisionalRolls.get(key) ?? 0) + quantity);
+            remaining = Number((remaining - quantity).toFixed(5));
+          }
+          if (remaining <= 0.00001) break;
+        }
+        if (remaining > 0.00001) issues.push(supply.name + ' · ' + variant.name + ': faltan ' + format(remaining) + ' ' + unit);
+      } else {
+        const key = variant.id + ':' + (line.sizeId ?? 'total');
+        const reservedByOthers = otherOrders.reduce((sum, activeOrder) =>
+          sum + activeOrder.materials.filter((item) => item.variantId === variant.id && item.sizeId === line.sizeId)
+            .reduce((total, item) => total + item.quantity, 0), 0);
+        const alreadyAllocated = provisionalSupply.get(key) ?? 0;
+        const available = stockForVariant(variant, line.sizeId) - reservedByOthers - alreadyAllocated;
+        if (available + 0.00001 < line.quantity) issues.push(supply.name + ' · ' + variant.name + ': faltan ' + format(line.quantity - Math.max(0, available)) + ' ' + unitLabel[supply.baseUnit]);
+        provisionalSupply.set(key, alreadyAllocated + line.quantity);
+      }
+    }
+    for (const line of order.basePieces) {
+      const piece = basePieces.find((item) => item.id === line.pieceId);
+      const balance = currentBasePieceBalance(line.pieceId, line.sizeId, line.side);
+      const reserved = reservedPieceQuantity(otherOrders.flatMap((activeOrder) => activeOrder.basePieces), line.pieceId, line.sizeId, line.side, order.id);
+      if (balance - reserved + 0.00001 < line.quantity) issues.push((piece?.name ?? 'Molde base') + ' · ' + (sizes.find((size) => size.id === line.sizeId)?.label ?? 'Talla') + ': faltan ' + format(line.quantity - Math.max(0, balance - reserved)) + ' piezas' + (line.side ? ' ' + line.side : ''));
+    }
+    for (const line of order.componentPieces) {
+      const piece = data.components.find((component) => component.id === line.componentId)?.pieces.find((item) => item.id === line.pieceId);
+      const balance = currentComponentPieceBalance(line.pieceId, line.sizeId, line.side);
+      const reserved = reservedPieceQuantity(otherOrders.flatMap((activeOrder) => activeOrder.componentPieces), line.pieceId, line.sizeId, line.side, order.id);
+      if (balance - reserved + 0.00001 < line.quantity) issues.push((piece?.name ?? 'Pieza auxiliar') + ' · ' + (sizes.find((size) => size.id === line.sizeId)?.label ?? 'Talla') + ': faltan ' + format(line.quantity - Math.max(0, balance - reserved)) + ' piezas' + (line.side ? ' ' + line.side : ''));
+    }
+    if (issues.length > 0) return tell('No se reservó ' + order.number + '. ' + issues.join(' · '), 'error');
+    const timestamp = now();
+    const updated: ProductionOrder = { ...order, status: 'reservada', rollAllocations, reservedAt: timestamp, updatedAt: timestamp };
+    persistProductionSnapshot({ ...data, productionOrders: data.productionOrders.map((item) => item.id === order.id ? updated : item) });
+    tell(order.number + ': materiales y piezas reservados correctamente.');
+  }
+
+  function startProductionOrder(orderId: string) {
+    const order = data.productionOrders.find((item) => item.id === orderId);
+    if (!order || order.status !== 'reservada') return tell('La orden debe estar reservada antes de iniciar.', 'error');
+    const timestamp = now();
+    persistProductionSnapshot({ ...data, productionOrders: data.productionOrders.map((item) => item.id === order.id ? { ...item, status: 'en_proceso', startedAt: timestamp, updatedAt: timestamp } : item) });
+  }
+
+  function cancelProductionOrder(orderId: string) {
+    const order = data.productionOrders.find((item) => item.id === orderId);
+    if (!order || !holdingStatuses.includes(order.status)) return tell('Solo puedes cancelar una orden reservada o en proceso.', 'error');
+    if (!window.confirm('¿Cancelar ' + order.number + '? Se liberarán sus reservas y no se descontará inventario.')) return;
+    const timestamp = now();
+    persistProductionSnapshot({ ...data, productionOrders: data.productionOrders.map((item) => item.id === order.id ? { ...item, status: 'cancelada', cancelledAt: timestamp, updatedAt: timestamp } : item) });
+    tell(order.number + ' cancelada. El stock reservado volvió a estar disponible.');
+  }
+
+  function completeProductionOrder(orderId: string) {
+    const order = data.productionOrders.find((item) => item.id === orderId);
+    if (!order || order.status !== 'en_proceso') return tell('La orden debe estar en proceso antes de completarla.', 'error');
+    const issues: string[] = [];
+    const otherOrders = data.productionOrders.filter((item) => item.id !== order.id && holdingStatuses.includes(item.status));
+    for (const line of order.materials) {
+      const variant = variantsBySupply.get(line.variantId);
+      const supply = variant ? supplies.find((item) => item.id === variant.supplyId) : undefined;
+      if (!variant || !supply) { issues.push('Material ya no disponible: ' + line.variantId); continue; }
+      if (!variant.textileId) {
+        const reservedByOthers = otherOrders.reduce((sum, activeOrder) => sum + activeOrder.materials.filter((item) => item.variantId === line.variantId && item.sizeId === line.sizeId).reduce((total, item) => total + item.quantity, 0), 0);
+        const available = stockForVariant(variant, line.sizeId) - reservedByOthers;
+        if (available + 0.00001 < line.quantity) issues.push(supply.name + ': el saldo físico cambió; faltan ' + format(line.quantity - Math.max(0, available)) + ' ' + unitLabel[supply.baseUnit]);
+      }
+    }
+    for (const line of order.basePieces) {
+      const piece = basePieces.find((item) => item.id === line.pieceId);
+      const reserved = reservedPieceQuantity(otherOrders.flatMap((activeOrder) => activeOrder.basePieces), line.pieceId, line.sizeId, line.side, order.id);
+      if (currentBasePieceBalance(line.pieceId, line.sizeId, line.side) - reserved + 0.00001 < line.quantity) issues.push((piece?.name ?? 'Molde base') + ': el stock reservado ya no está disponible.');
+    }
+    for (const line of order.componentPieces) {
+      const piece = data.components.find((component) => component.id === line.componentId)?.pieces.find((item) => item.id === line.pieceId);
+      const reserved = reservedPieceQuantity(otherOrders.flatMap((activeOrder) => activeOrder.componentPieces), line.pieceId, line.sizeId, line.side, order.id);
+      if (currentComponentPieceBalance(line.pieceId, line.sizeId, line.side) - reserved + 0.00001 < line.quantity) issues.push((piece?.name ?? 'Pieza auxiliar') + ': el stock reservado ya no está disponible.');
+    }
+    const fabricRaw = localStorage.getItem(FABRIC_STORAGE_KEYS.rollos);
+    const movementRaw = localStorage.getItem(FABRIC_STORAGE_KEYS.rolloMovimientos);
+    let previousFabricRolls: string | null = fabricRaw;
+    let previousFabricMovements: string | null = movementRaw;
+    let nextRolls: RollRow[] = [];
+    let nextRollMovements: FabricRollMovement[] = [];
+    try {
+      nextRolls = fabricRaw ? JSON.parse(fabricRaw) as RollRow[] : [];
+      nextRollMovements = movementRaw ? JSON.parse(movementRaw) as FabricRollMovement[] : [];
+      if (!Array.isArray(nextRolls) || !Array.isArray(nextRollMovements)) throw new Error('El registro local de rollos o movimientos no es válido.');
+    } catch (error) {
+      return tell('No se puede completar la orden: ' + (error instanceof Error ? error.message : 'respaldo de rollos inválido'), 'error');
+    }
+    const aggregateAllocations = new Map<string, { rollId: string; variantId: string; unit: 'KG' | 'M'; quantity: number }>();
+    order.rollAllocations.forEach((allocation) => {
+      const key = allocation.rollId + ':' + allocation.unit;
+      const current = aggregateAllocations.get(key);
+      aggregateAllocations.set(key, { rollId: allocation.rollId, variantId: allocation.variantId, unit: allocation.unit, quantity: (current?.quantity ?? 0) + allocation.quantity });
+    });
+    const timestamp = now();
+    for (const allocation of aggregateAllocations.values()) {
+      const roll = nextRolls.find((item) => item.id === allocation.rollId);
+      const current = roll ? (allocation.unit === 'KG' ? roll.pesoKg : roll.metros) : null;
+      if (!roll || current === null || allocation.quantity > current + 0.00001) {
+        issues.push('El rollo ' + allocation.rollId + ' ya no tiene la medición real reservada.');
+        continue;
+      }
+    }
+    if (issues.length > 0) return tell('No se puede completar ' + order.number + ': ' + issues.join(' · '), 'error');
+
+    const updatedRolls = nextRolls.map((roll) => {
+      const allocation = aggregateAllocations.get(roll.id + ':M') ?? aggregateAllocations.get(roll.id + ':KG');
+      if (!allocation) return roll;
+      const current = allocation.unit === 'KG' ? roll.pesoKg : roll.metros;
+      if (current === null) return roll;
+      const next = Number((current - allocation.quantity).toFixed(3));
+      const otherUnit: 'KG' | 'M' = allocation.unit === 'KG' ? 'M' : 'KG';
+      const otherCurrent = otherUnit === 'KG' ? roll.pesoKg : roll.metros;
+      if (otherCurrent !== null) nextRollMovements.push({
+        id: id(), idRollo: roll.id, fecha: timestamp, tipo: 'medicion', unidad: otherUnit,
+        delta: null, cantidadAnterior: otherCurrent, cantidadNueva: null,
+        nota: 'Medición complementaria no disponible después del consumo de ' + order.number,
+        sourceProductionOrderId: order.id,
+      });
+      nextRollMovements.push({
+        id: id(), idRollo: roll.id, fecha: timestamp, tipo: 'consumo', unidad: allocation.unit,
+        delta: -allocation.quantity, cantidadAnterior: current, cantidadNueva: next,
+        nota: 'Consumo de orden ' + order.number, sourceProductionOrderId: order.id,
+      });
+      return {
+        ...roll,
+        pesoKg: allocation.unit === 'KG' ? next : null,
+        metros: allocation.unit === 'M' ? next : null,
+        estado: next === 0 ? 'agotado' : roll.estado,
+        updatedAt: timestamp,
+      };
+    });
+
+    const supplyMovements: SupplyMovement[] = order.materials.filter((line) => !variantsBySupply.get(line.variantId)?.textileId).map((line) => ({
+      id: id(), variantId: line.variantId, sizeId: line.sizeId, delta: -line.quantity, kind: 'salida',
+      note: 'Consumo de orden ' + order.number, date: timestamp, sourceProductionOrderId: order.id,
+    }));
+    const componentMovements: ComponentPieceMovement[] = order.componentPieces.map((line) => ({
+      id: id(), componentId: line.componentId, pieceId: line.pieceId, sizeId: line.sizeId,
+      side: line.side ?? undefined, delta: -line.quantity, kind: 'salida',
+      note: 'Consumo de orden ' + order.number, date: timestamp, sourceProductionOrderId: order.id,
+    }));
+    const baseEntries: DomainPieceMovement[] = order.basePieces.map((line) => ({
+      id: id(), pieceId: line.pieceId, sizeId: line.sizeId, side: line.side ?? undefined,
+      delta: -line.quantity, kind: 'salida', note: 'Consumo de orden ' + order.number,
+      date: timestamp, sourceProductionOrderId: order.id,
+    }));
+
+    const nextData: ProductionBackupData = {
+      ...data,
+      supplyMovements: [...data.supplyMovements, ...supplyMovements],
+      componentPieceMovements: [...data.componentPieceMovements, ...componentMovements],
+      productionOrders: data.productionOrders.map((item) => item.id === order.id ? {
+        ...item, status: 'completada', completedAt: timestamp, updatedAt: timestamp,
+      } : item),
+    };
+
+    const productionKeys = Object.keys(emptyProductionBackupData()) as (keyof ProductionBackupData)[];
+    const previousProduction = new Map<string, string | null>();
+    try {
+      productionKeys.forEach((key) => previousProduction.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
+      productionKeys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(nextData[key])));
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '2');
+      localStorage.setItem(FABRIC_STORAGE_KEYS.rollos, JSON.stringify(updatedRolls));
+      localStorage.setItem(FABRIC_STORAGE_KEYS.rolloMovimientos, JSON.stringify(nextRollMovements));
+      const nextBase = [...baseMovements, ...baseEntries];
+      if (!onAddBaseMovements(nextBase)) throw new Error('No se pudo guardar el consumo de piezas del patrón base.');
+      setData(nextData);
+      window.dispatchEvent(new Event('telastock-fabric-data-restored'));
+      tell(order.number + ' completada. Los materiales, rollos y piezas fueron descontados y el historial quedó registrado.');
+    } catch (error) {
+      previousProduction.forEach((value, key) => {
+        try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch { /* best effort rollback */ }
+      });
+      try { if (previousFabricRolls === null) localStorage.removeItem(FABRIC_STORAGE_KEYS.rollos); else localStorage.setItem(FABRIC_STORAGE_KEYS.rollos, previousFabricRolls); } catch { /* best effort rollback */ }
+      try { if (previousFabricMovements === null) localStorage.removeItem(FABRIC_STORAGE_KEYS.rolloMovimientos); else localStorage.setItem(FABRIC_STORAGE_KEYS.rolloMovimientos, previousFabricMovements); } catch { /* best effort rollback */ }
+      tell('No se pudo completar la orden. No se confirmó el movimiento: ' + (error instanceof Error ? error.message : 'error de almacenamiento'), 'error');
+    }
+  }
+
   const mainPanel = (() => {
     if (view === 'insumos') return <section className="panel production-panel">
       <div className="panel-heading"><div><h2>Catálogo de insumos</h2><p>Registra cada material una sola vez y agrega sus variantes.</p></div><button className="button primary" onClick={() => setShowSupplyForm((x) => !x)}>＋ Nuevo insumo</button></div>
