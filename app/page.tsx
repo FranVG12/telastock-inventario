@@ -699,7 +699,7 @@ export default function Home() {
   }
 
   function exportCsv() {
-    const rows = [['Modelo', 'Grupo de tallas', 'Talla', 'Molde', 'Tipo de tela', 'Color', 'Piezas físicas en stock', 'Stock izquierdo', 'Stock derecho', 'Paridades completas', 'Piezas por prenda', 'Unidades fabricables', 'Faltante para siguiente unidad']];
+    const rows = [['Modelo', 'Grupo de tallas', 'Talla', 'Molde', 'Ranura de tela', 'Color base', 'Piezas físicas en stock', 'Stock izquierdo', 'Stock derecho', 'Paridades completas', 'Piezas por prenda', 'Unidades fabricables', 'Faltante para siguiente unidad']];
     for (const model of models) {
       const parts = modelPieces(model.id);
       for (const size of modelSizes(model)) {
@@ -716,8 +716,8 @@ export default function Home() {
             groupById.get(model.sizeGroupId)?.name ?? '',
             size.label,
             piece.name,
-            piece.fabricType ?? '',
-            piece.color ?? '',
+            fabricSlotLabels[piece.fabricSlot ?? 'principal'],
+            fabricColorById.get(piece.colorId ?? '')?.nombre ?? piece.color ?? '',
             String(current),
             symmetric ? String(symmetric.left) : '',
             symmetric ? String(symmetric.right) : '',
@@ -881,7 +881,7 @@ export default function Home() {
               const group = groupById.get(model.sizeGroupId);
               return <article className="managed-model" key={model.id}>
                 <div className="managed-model-top"><span className="model-symbol" aria-hidden="true">◇</span><div className="managed-model-title"><strong>{model.name}</strong><span>{group?.name ?? 'Grupo no disponible'}</span></div><button className="button secondary edit-model" onClick={() => openEditModel(model)}>Editar</button></div>
-                <div className="piece-chip-list">{modelPartList.map((piece) => <span className="piece-chip" key={piece.id}><span>{piece.name}</span><strong>×{piece.unitsPerGarment}</strong><small>{piece.fabricType} · {piece.color}</small>{piece.laterality === 'simetrica' && <small>espejo</small>}</span>)}</div>
+                <div className="piece-chip-list">{modelPartList.map((piece) => <span className="piece-chip" key={piece.id}><span>{piece.name}</span><strong>×{piece.unitsPerGarment}</strong><small>{fabricSlotLabels[piece.fabricSlot ?? 'principal']} · {fabricColorById.get(piece.colorId ?? '')?.nombre ?? piece.color}</small>{piece.laterality === 'simetrica' && <small>espejo</small>}</span>)}</div>
                 <div className="managed-model-bottom"><span>{modelPartList.length} moldes · {modelSizes(model).length} tallas disponibles</span><button className="text-action" onClick={() => openStockForm('entrada', model.id)}>Registrar stock →</button></div>
               </article>;
             })}</div>
