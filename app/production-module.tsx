@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { getPieceStock, getSymmetricStock, type PieceMovement as DomainPieceMovement, type ManufacturingModel, type Size } from '@/lib/inventory-domain';
+import { getCompleteUnits, getPieceStock, getSymmetricStock, type PieceMovement as DomainPieceMovement, type ManufacturingModel, type ModelPiece, type Size } from '@/lib/inventory-domain';
 import { FABRIC_STORAGE_KEYS } from '@/app/fabric-module';
 
 export type ProductionView = 'insumos' | 'compras-avios' | 'componentes' | 'modelos-producto' | 'recetas' | 'planificacion';
@@ -395,10 +395,12 @@ function variantLabel(variant: SupplyVariant, variants: SupplyVariant[], supplie
 }
 
 export function ProductionModule({
-  view, baseModels, sizes, onNavigate,
+  view, baseModels, basePieces, baseMovements, sizes, onNavigate,
 }: {
   view: ProductionView;
   baseModels: ManufacturingModel[];
+  basePieces: ModelPiece[];
+  baseMovements: DomainPieceMovement[];
   sizes: Size[];
   onNavigate: (view: ProductionView) => void;
 }) {
@@ -796,6 +798,37 @@ export function ProductionModule({
   const activeProduct = data.productModels.find((x) => x.id === selectedProductId && x.active);
   const selectedStockComponent = data.components.find((x) => x.id === selectedStockComponentId && x.active);
   const selectedComponentStockPiece = selectedStockComponent?.pieces.find((x) => x.id === componentStockPieceId);
+  function getProductFabricableCapacity(product: ConfiguredProductModel, sizeId: string) {
+    const baseModel = baseModels.find((item) => item.id === product.baseModelId);
+    const baseModelPieces = basePieces.filter((piece) => piece.modelId === product.baseModelId && !piece.archived);
+    const baseCapacity = baseModel ? getCompleteUnits(baseModelPieces, baseMovements, sizeId) : 0;
+    let componentCapacity = Number.POSITIVE_INFINITY;
+    let limitingComponent = '';
+    product.components.forEach((selection) => {
+      const component = data.components.find((item) => item.id === selection.componentId && item.active);
+      if (!component || component.pieces.length === 0) return;
+      let currentComponentCapacity = Number.POSITIVE_INFINITY;
+      component.pieces.forEach((piece) => {
+        const ledger = componentPieceDomainLedger(piece.id, sizeId);
+        const required = piece.unitsPerGarment * selection.quantity;
+        const capacity = piece.laterality === 'simetrica'
+          ? Math.floor(Math.min(getSymmetricStock(ledger, piece.id, sizeId).left, getSymmetricStock(ledger, piece.id, sizeId).right) / (required / 2))
+          : Math.floor(Math.max(0, getPieceStock(ledger, piece.id, sizeId)) / required);
+        if (capacity < currentComponentCapacity) currentComponentCapacity = capacity;
+      });
+      if (currentComponentCapacity < componentCapacity) {
+        componentCapacity = currentComponentCapacity;
+        limitingComponent = component.name;
+      }
+    });
+    const boundedComponentCapacity = Number.isFinite(componentCapacity) ? componentCapacity : null;
+    return {
+      baseCapacity,
+      componentCapacity: boundedComponentCapacity,
+      fabricable: boundedComponentCapacity === null ? baseCapacity : Math.min(baseCapacity, boundedComponentCapacity),
+      limitingComponent,
+    };
+  }
   const plan = useMemo(() => {
     if (!activeProduct) return { rows: [] as Array<{ variantId: string; total: number; bySize: Record<string, number>; missingSizes: string[]; available: number; shortage: number; packs: number | null }>, unresolved: [] as string[] };
     const requirements: MaterialRequirement[] = [];
