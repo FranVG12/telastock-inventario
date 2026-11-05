@@ -38,6 +38,7 @@ export type PieceMovement = {
   side?: StockSide;
   note: string;
   date: string;
+  sourceProductionOrderId?: string | null;
 };
 export type PieceBalance = { pieceId: string; quantity: number };
 export type SymmetricStock = {
