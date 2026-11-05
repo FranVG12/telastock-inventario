@@ -490,3 +490,9 @@
 .roll-consumption-form{display:grid;gap:9px;padding:12px;border:1px solid #dfeee7;border-radius:10px;background:#f5fbf8;margin:12px 0}
 .roll-consumption-form>strong{font-size:11px;color:#26765f}
 .roll-consumption-form .large-input{height:38px}
+
+.mold-heading-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:flex-end}
+.fabric-slot-summary{display:flex;flex-direction:column;gap:4px;border:1px solid #ebeaf9;background:#fafaff;border-radius:8px;padding:9px 11px;margin:-2px 0 11px}
+.fabric-slot-summary strong{font-size:10px;color:#554bc6}
+.fabric-slot-summary span{font-size:9px;color:#838ba0;line-height:1.4}
+@media(max-width:720px){.mold-heading-actions{gap:8px;justify-content:flex-end}.fabric-slot-summary{margin-top:-4px}.fabric-slot-summary span{line-height:1.5}}
