@@ -658,3 +658,15 @@
  .production-order-actions .button{width:100%}
  .production-order-details{padding:9px}
 }
+
+.production-completion-modal{max-height:min(88vh,820px);overflow-y:auto}
+.production-completion-line{display:grid;grid-template-columns:minmax(0,1fr) minmax(110px,150px);align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #edf0f5}
+.production-completion-line>span{display:grid;gap:4px;min-width:0}
+.production-completion-line strong{font-size:11px;color:#40536f;overflow-wrap:anywhere}
+.production-completion-line small{font-size:10px;color:#8792a3}
+.production-completion-line input{min-width:0;text-align:right;font-variant-numeric:tabular-nums}
+@media(max-width:720px){
+ .production-completion-line{grid-template-columns:minmax(0,1fr) 102px;gap:8px}
+ .production-completion-line strong{font-size:10px}
+ .production-completion-line small{font-size:9px}
+}
