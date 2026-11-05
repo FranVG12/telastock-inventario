@@ -73,7 +73,7 @@ La migración incluye comprobación de correspondencia entre el grupo de tallas 
 3. Mantener cantidades físicas requeridas por prenda explícitas.
 4. No borrar físicamente moldes con historial; archivarlos fuera de la composición activa para preservar trazabilidad y permitir guardar el modelo.
 5. Registrar pérdidas, destrucción o correcciones con movimientos negativos auditables; nunca borrar el historial para corregir el saldo.
-6. Cada molde conserva sus propiedades de tipo de tela y color, porque una prenda puede combinar materiales/colores distintos.
+6. Cada molde referencia una ranura de material (principal o secundaria 1–3) y un color base del catálogo global. La tela concreta y su fórmula HEX/CMYK se resolverán por producto al definir qué material ocupa cada ranura.
 7. Mantener los filtros móviles y el formulario de ingreso corto: modelo → checklist de tallas → cantidades por molde.
 8. Probar siempre los casos de pieza simétrica ×2, falta de un único molde y tallas de grupos distintos.
 
@@ -138,7 +138,7 @@ La migración SQL respalda los nombres antiguos de color de rollos y moldes ante
 ### Exportación y respaldo
 
 - En Telas, Rollos, Compras y Proveedores, el botón CSV exporta la vista correspondiente.
-- El respaldo JSON completo incluye las ocho colecciones del módulo textil y las colecciones del inventario de piezas. Es el formato recomendado para trasladar y restaurar los datos manteniendo identificadores y relaciones.
+- El respaldo JSON completo incluye las diez colecciones del módulo textil y las colecciones del inventario de piezas, incluidos el diccionario global de colores y sus variantes por tela. Es el formato recomendado para trasladar y restaurar los datos manteniendo identificadores y relaciones.
 - La importación de respaldo reemplaza los datos locales después de validar las relaciones y pedir confirmación. Conserva primero una copia del estado actual si necesitas volver atrás.
 
 ### Revisión manual de datos antiguos
@@ -148,4 +148,4 @@ No existe una migración automática de compras antiguas porque el inventario pr
 La equivalencia estimada KG↔M para una operación de corte todavía no está implementada: la aplicación actual solo muestra y descuenta mediciones reales. Cuando se implemente, deberá calcularse por tipo de tela y operación, etiquetarse como estimada y no escribirse en los campos reales del rollo.
 
 
-La importación CSV de insumos acepta fechas `AAAA-MM-DD`, `DD/MM/AAAA` y `DD-MM-AAAA`; revisa siempre las fechas de origen antes de cargar archivos antiguos.
+La importación CSV de insumos acepta `AAAA-MM-DD` y formatos locales con barras o guiones solo cuando día y mes se distinguen sin ambigüedad; valores como `04/05/2025` se rechazan para evitar cambiar el día por el mes.
