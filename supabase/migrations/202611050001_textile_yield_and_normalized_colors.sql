@@ -120,7 +120,9 @@ alter table public.model_pieces
   drop constraint if exists model_pieces_fabric_slot_check;
 alter table public.model_pieces
   add constraint model_pieces_fabric_slot_check
-  check (fabric_slot = 'principal' or fabric_slot ~ '^secundaria_[1-9][0-9]*do $$
+  check (fabric_slot = 'principal' or fabric_slot ~ '^secundaria_[1-9][0-9]*$');
+
+do $$
 begin
   if not exists (
     select 1 from pg_constraint
