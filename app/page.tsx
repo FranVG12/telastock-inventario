@@ -644,6 +644,11 @@ export default function Home() {
       const hasText = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
       const groupIds = new Set(importedGroups.map((item) => item.id));
       const sizeIds = new Set(importedSizes.map((item) => item.id));
+      const productionSizeLinksValid =
+        importedProduction.supplyMovements.every((movement) => movement.sizeId === null || sizeIds.has(movement.sizeId)) &&
+        importedProduction.supplyPurchaseDetails.every((detail) => detail.sizeId === null || sizeIds.has(detail.sizeId)) &&
+        importedProduction.componentPieceMovements.every((movement) => sizeIds.has(movement.sizeId));
+      if (!productionSizeLinksValid) throw new Error('Hay movimientos o compras de insumos vinculados a tallas que no existen en este respaldo.');
       const modelIds = new Set(importedModels.map((item) => item.id));
       const pieceIds = new Set(importedPieces.map((item) => item.id));
       const importedColorMap = new Map(importedFabric.colores.map((color) => [color.nombre.toLocaleLowerCase('es'), color]));
