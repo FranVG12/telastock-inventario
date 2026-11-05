@@ -674,3 +674,204 @@ for each row execute function public.validate_production_order_size();
 create unique index if not exists production_order_material_movement_once_uidx
   on public.supply_stock_movements(source_production_order_id, variant_id, coalesce(size_id, '00000000-0000-0000-0000-000000000000'::uuid))
   where source_production_order_id is not null;
+
+
+-- Record actual consumption separately from the quantity originally reserved.
+alter table public.production_orders
+  add column if not exists actual_material_cost numeric(14,2) null
+    check (actual_material_cost is null or actual_material_cost >= 0),
+  add column if not exists actual_missing_cost_lines integer null
+    check (actual_missing_cost_lines is null or actual_missing_cost_lines >= 0),
+  add column if not exists consumption_recorded_at timestamptz null;
+
+alter table public.production_order_materials
+  add column if not exists actual_consumed_quantity numeric(14,5) null
+    check (actual_consumed_quantity is null or actual_consumed_quantity >= 0),
+  add column if not exists actual_line_cost_snapshot numeric(14,2) null
+    check (actual_line_cost_snapshot is null or actual_line_cost_snapshot >= 0);
+
+alter table public.production_order_roll_allocations
+  add column if not exists actual_consumed_quantity numeric(14,3) null
+    check (actual_consumed_quantity is null or actual_consumed_quantity >= 0);
+
+create or replace function public.validate_production_order_actual_material()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_status text;
+  v_base_unit text;
+begin
+  select status into v_status from public.production_orders where id = new.production_order_id;
+  if v_status not in ('en_proceso','completada') then
+    raise exception 'El consumo real solo se registra cuando la orden está en proceso.';
+  end if;
+  if new.actual_consumed_quantity is not null then
+    if new.actual_consumed_quantity > new.required_quantity + 0.00001 then
+      raise exception 'El consumo real no puede superar la cantidad reservada.';
+    end if;
+    select s.base_unit into v_base_unit
+    from public.supply_variants v join public.supply_catalog s on s.id = v.supply_id
+    where v.id = new.variant_id;
+    if v_base_unit = 'und' and new.actual_consumed_quantity <> trunc(new.actual_consumed_quantity) then
+      raise exception 'El consumo real de un insumo por unidades debe ser entero.';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists production_order_actual_material_guard on public.production_order_materials;
+create trigger production_order_actual_material_guard
+before insert or update on public.production_order_materials
+for each row execute function public.validate_production_order_actual_material();
+
+create or replace function public.validate_production_order_actual_roll()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_status text;
+begin
+  select status into v_status from public.production_orders where id = new.production_order_id;
+  if v_status not in ('en_proceso','completada') then
+    raise exception 'El consumo real de rollo solo se registra cuando la orden está en proceso.';
+  end if;
+  if new.actual_consumed_quantity is not null
+     and (new.actual_consumed_quantity > new.reserved_quantity + 0.00001
+          or new.actual_consumed_quantity <> round(new.actual_consumed_quantity, 3)) then
+    raise exception 'El consumo real del rollo debe estar entre cero y la reserva, con precisión de 0.001.';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists production_order_actual_roll_guard on public.production_order_roll_allocations;
+create trigger production_order_actual_roll_guard
+before insert or update on public.production_order_roll_allocations
+for each row execute function public.validate_production_order_actual_roll();
+
+create or replace function public.validate_production_order_transition()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_missing_cost integer;
+  v_total_cost numeric(14,2);
+begin
+  if new.status = old.status then return new; end if;
+
+  if old.status = 'borrador' and new.status = 'reservada' then
+    new.reserved_at := coalesce(new.reserved_at, now());
+  elsif old.status = 'reservada' and new.status = 'en_proceso' then
+    new.started_at := coalesce(new.started_at, now());
+  elsif old.status = 'en_proceso' and new.status = 'completada' then
+    if exists (
+      select 1 from public.production_order_materials m
+      where m.production_order_id = new.id and m.actual_consumed_quantity is null
+    ) or exists (
+      select 1 from public.production_order_roll_allocations a
+      where a.production_order_id = new.id and a.actual_consumed_quantity is null
+    ) then
+      raise exception 'Registra el consumo real de todos los materiales y rollos antes de completar la orden.';
+    end if;
+
+    if exists (
+      select 1
+      from public.production_order_materials m
+      join public.supply_variants v on v.id = m.variant_id
+      where m.production_order_id = new.id and v.textile_id is not null
+      group by m.variant_id
+      having abs(sum(m.actual_consumed_quantity) - (
+        select coalesce(sum(a.actual_consumed_quantity),0)
+        from public.production_order_roll_allocations a
+        where a.production_order_id = new.id and a.variant_id = m.variant_id
+      )) > 0.0001
+    ) then
+      raise exception 'El consumo real de tela debe coincidir con el consumo asignado a sus rollos.';
+    end if;
+
+    if exists (
+      select 1 from public.production_order_materials m
+      join public.supply_variants v on v.id = m.variant_id
+      where m.production_order_id = new.id
+        and v.textile_id is null
+        and m.actual_consumed_quantity > 0
+        and not exists (
+          select 1 from public.supply_stock_movements movement
+          where movement.source_production_order_id = new.id
+            and movement.variant_id = m.variant_id
+            and movement.size_id is not distinct from m.size_id
+            and movement.movement_type = 'salida'
+            and abs(movement.delta_quantity + m.actual_consumed_quantity) < 0.0001
+        )
+    ) then
+      raise exception 'Falta registrar una salida de avío que coincida con el consumo real.';
+    end if;
+
+    if exists (
+      select 1 from public.production_order_base_piece_requirements requirement
+      where requirement.production_order_id = new.id
+        and not exists (
+          select 1 from public.piece_stock_movements movement
+          where movement.source_production_order_id = new.id
+            and movement.model_piece_id = requirement.model_piece_id
+            and movement.size_id = requirement.size_id
+            and movement.side is not distinct from requirement.side
+            and movement.movement_type = 'salida'
+            and movement.delta_quantity = -requirement.required_quantity
+        )
+    ) then
+      raise exception 'Falta registrar el descuento de una pieza del patrón base.';
+    end if;
+
+    if exists (
+      select 1 from public.production_order_component_piece_requirements requirement
+      where requirement.production_order_id = new.id
+        and not exists (
+          select 1 from public.component_piece_stock_movements movement
+          where movement.source_production_order_id = new.id
+            and movement.component_piece_id = requirement.component_piece_id
+            and movement.size_id = requirement.size_id
+            and movement.side is not distinct from requirement.side
+            and movement.movement_type = 'salida'
+            and movement.delta_quantity = -requirement.required_quantity
+        )
+    ) then
+      raise exception 'Falta registrar el descuento de una pieza auxiliar.';
+    end if;
+
+    if exists (
+      select 1 from public.production_order_roll_allocations allocation
+      where allocation.production_order_id = new.id
+        and allocation.actual_consumed_quantity > 0
+        and not exists (
+          select 1 from public.rollo_movimientos movement
+          where movement.source_production_order_id = new.id
+            and movement.id_rollo = allocation.roll_id
+            and movement.unidad = allocation.unit
+            and movement.tipo = 'consumo'
+            and abs(movement.delta + allocation.actual_consumed_quantity) < 0.001
+        )
+    ) then
+      raise exception 'Falta registrar el consumo real de un rollo.';
+    end if;
+
+    select count(*) filter (where actual_consumed_quantity > 0 and actual_line_cost_snapshot is null),
+           sum(actual_line_cost_snapshot)
+      into v_missing_cost, v_total_cost
+    from public.production_order_materials
+    where production_order_id = new.id;
+    new.actual_missing_cost_lines := coalesce(v_missing_cost,0);
+    new.actual_material_cost := case when coalesce(v_missing_cost,0) > 0 then null else coalesce(v_total_cost,0) end;
+    new.consumption_recorded_at := coalesce(new.consumption_recorded_at, now());
+    new.completed_at := coalesce(new.completed_at, now());
+  elsif old.status in ('reservada','en_proceso') and new.status = 'cancelada' then
+    new.cancelled_at := coalesce(new.cancelled_at, now());
+  else
+    raise exception 'Transición de estado de orden no permitida: % -> %.', old.status, new.status;
+  end if;
+
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+comment on column public.production_order_materials.actual_consumed_quantity is
+  'Cantidad efectivamente consumida, confirmada al cerrar la orden. Puede ser menor que la reserva.';
+comment on column public.production_order_roll_allocations.actual_consumed_quantity is
+  'Cantidad realmente consumida del rollo, con precisión de 0.001 KG o M.';
+comment on column public.production_orders.actual_material_cost is
+  'Costo real de materiales calculable a partir de los precios congelados; null cuando hay precios faltantes.';
