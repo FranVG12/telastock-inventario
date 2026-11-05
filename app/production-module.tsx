@@ -1736,14 +1736,18 @@ export function ProductionModule({
               {order.rollAllocations.length > 0 && <div><strong>Rollos reservados</strong><small>{order.rollAllocations.length} asignaciones físicas · {order.rollAllocations.reduce((sum, allocation) => sum + allocation.quantity, 0).toFixed(3)} unidades de medición</small></div>}
             </div>
             <div className="production-order-cost">
-              {order.estimatedMaterialCost === null
-                ? <span>Costo de materiales pendiente · {order.missingCostLines} materiales sin precio de compra</span>
-                : <span>Materiales según últimos precios registrados: <strong>{money(order.estimatedMaterialCost)}</strong></span>}
+              {order.actualConsumption ? (
+                order.actualConsumption.materialCost === null
+                  ? <span>Consumo real registrado · costo pendiente en {order.actualConsumption.missingCostLines} líneas</span>
+                  : <span>**Consumo real valorizado:** <strong>{money(order.actualConsumption.materialCost)}</strong></span>
+              ) : order.estimatedMaterialCost === null
+                ? <span>Costo estimado pendiente · {order.missingCostLines} materiales sin precio de compra</span>
+                : <span>Estimado según últimos precios registrados: <strong>{money(order.estimatedMaterialCost)}</strong></span>}
             </div>
             <div className="production-order-actions">
               {order.status === 'borrador' && <button className="button primary" onClick={() => reserveProductionOrder(order.id)}>Verificar y reservar stock</button>}
               {order.status === 'reservada' && <button className="button primary" onClick={() => startProductionOrder(order.id)}>Iniciar producción</button>}
-              {order.status === 'en_proceso' && <button className="button primary" onClick={() => { if (window.confirm('¿Confirmas que ' + order.number + ' terminó y que deben descontarse los materiales y piezas reservados?')) completeProductionOrder(order.id); }}>Completar y descontar</button>}
+              {order.status === 'en_proceso' && <button className="button primary" onClick={() => openProductionOrderCompletion(order.id)}>Registrar consumo real y completar</button>}
               {holdingStatuses.includes(order.status) && <button className="button secondary danger-action" onClick={() => cancelProductionOrder(order.id)}>Cancelar y liberar reserva</button>}
             </div>
           </article>;
@@ -1806,6 +1810,51 @@ export function ProductionModule({
     </div>
     {notice && <div className={'notice ' + notice.kind}><span>{notice.text}</span><button onClick={() => setNotice(null)} aria-label="Cerrar">×</button></div>}
     {mainPanel}
+    {completionDraft && (() => {
+      const order = data.productionOrders.find((item) => item.id === completionDraft.orderId);
+      if (!order) return null;
+      return <div className="modal-backdrop">
+        <section className="modal production-modal production-completion-modal" role="dialog" aria-modal="true" aria-labelledby="production-completion-title">
+          <div className="modal-heading">
+            <div><h2 id="production-completion-title">Consumo real · {order.number}</h2><p>Confirma lo realmente utilizado. Los valores no pueden superar las cantidades reservadas.</p></div>
+            <button className="icon-button" onClick={() => setCompletionDraft(null)}>×</button>
+          </div>
+          <form className="production-form" onSubmit={confirmProductionOrderCompletion}>
+            <div className="production-subheading"><strong>Avíos y materiales</strong><span>{order.materials.length} líneas</span></div>
+            {order.materials.map((line) => {
+              const variant = variantsBySupply.get(line.variantId) ?? data.variants.find((item) => item.id === line.variantId);
+              const supply = variant ? supplies.find((item) => item.id === variant.supplyId) : undefined;
+              const size = sizes.find((item) => item.id === line.sizeId);
+              return <label className="production-completion-line" key={line.id}>
+                <span><strong>{supply?.name ?? 'Material'} · {variant?.name ?? 'Variante'}{size ? ' · ' + size.label : ''}</strong><small>Reservado: {format(line.quantity)} {unitLabel[line.unit]}</small></span>
+                <input className="large-input" type="number" min="0" max={line.quantity} step={line.unit === 'und' ? 1 : 0.001}
+                  value={completionDraft.materialQuantities[line.id] ?? String(line.quantity)}
+                  onChange={(event) => setCompletionDraft((current) => current ? { ...current, materialQuantities: { ...current.materialQuantities, [line.id]: event.target.value } } : current)}
+                  required />
+              </label>;
+            })}
+            <div className="production-subheading"><strong>Consumo por rollo</strong><span>{order.rollAllocations.length} asignaciones</span></div>
+            {order.rollAllocations.length === 0 && <p className="production-muted">Esta orden no requiere rollos textiles.</p>}
+            {order.rollAllocations.map((allocation) => {
+              const variant = variantsBySupply.get(allocation.variantId) ?? data.variants.find((item) => item.id === allocation.variantId);
+              const roll = textileContext.rollos.find((item) => item.id === allocation.rollId);
+              return <label className="production-completion-line" key={allocation.id}>
+                <span><strong>{textileName(variant?.textileId ?? null) || 'Tela'} · {variant?.name ?? 'Variante'}</strong><small>Rollo {roll?.id ?? allocation.rollId} · Reservado: {format(allocation.quantity)} {allocation.unit}</small></span>
+                <input className="large-input" type="number" min="0" max={allocation.quantity} step="0.001"
+                  value={completionDraft.rollQuantities[allocation.id] ?? String(allocation.quantity)}
+                  onChange={(event) => setCompletionDraft((current) => current ? { ...current, rollQuantities: { ...current.rollQuantities, [allocation.id]: event.target.value } } : current)}
+                  required />
+              </label>;
+            })}
+            <div className="notice info">TelaStock descontará las piezas del patrón base y los componentes según las cantidades necesarias para las prendas de esta orden. Los sobrantes de material que indiques quedarán disponibles nuevamente.</div>
+            <div className="form-actions">
+              <button type="button" className="button secondary" onClick={() => setCompletionDraft(null)}>Volver</button>
+              <button className="button primary">Confirmar consumo y completar</button>
+            </div>
+          </form>
+        </section>
+      </div>;
+    })()}
     {showVariantForm && <div className="modal-backdrop"><section className="modal production-modal" role="dialog" aria-modal="true"><div className="modal-heading"><div><h2>Nueva variante</h2><p>Registra color, ancho u otra característica.</p></div><button className="icon-button" onClick={() => setShowVariantForm(false)}>×</button></div>
       <form className="production-form" onSubmit={saveVariant}>
         <label className="field-label">Nombre de variante<input className="large-input" value={variantName} onChange={(e) => setVariantName(e.target.value)} placeholder="Ej. Negro · 3.5 cm" required /></label>
