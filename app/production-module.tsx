@@ -236,7 +236,7 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
     return Boolean(detail && movement.kind === 'entrada' && movement.variantId === detail.variantId &&
       movement.sizeId === detail.sizeId && Math.abs(movement.delta - detail.inventoryQuantity) < 0.00001);
   })) throw new Error('Hay movimientos de compra que no coinciden con su detalle.');
-  if (!output.components.every((x) => x.name.trim() && x.type.trim() && Array.isArray(x.pieces) && x.pieces.every((p) => p.name.trim() && Number.isInteger(p.unitsPerGarment) && p.unitsPerGarment > 0 && (p.laterality !== 'simetrica' || p.unitsPerGarment % 2 === 0)) && validMaterials(x.materials))) {
+  if (!output.components.every((x) => x.name.trim() && x.type.trim() && Array.isArray(x.pieces) && x.pieces.every((p) => p.name.trim() && Number.isInteger(p.unitsPerGarment) && p.unitsPerGarment > 0 && ['ninguna', 'simetrica', 'izquierda', 'derecha'].includes(p.laterality) && (p.laterality !== 'simetrica' || p.unitsPerGarment % 2 === 0)) && validMaterials(x.materials))) {
     throw new Error('Hay componentes con piezas o materiales inválidos.');
   }
   if (!output.componentPieceMovements.every((movement) => {
@@ -635,8 +635,11 @@ export function ProductionModule({
       kind: movement.kind, side: movement.side, note: movement.note, date: movement.date,
     }));
     if (piece.laterality === 'simetrica') {
-      const stock = getSymmetricStock(ledger, piece.id, componentStockSizeId);
-      if (stock.left < 0 || stock.right < 0) return tell('No puedes retirar más pares o piezas que los disponibles por lado.', 'error');
+      const legacy = ledger.filter((movement) => !movement.side).reduce((sum, movement) => sum + movement.delta, 0);
+      const legacyPairs = Math.floor(Math.max(0, legacy) / 2);
+      const left = legacyPairs + ledger.filter((movement) => movement.side === 'izquierda').reduce((sum, movement) => sum + movement.delta, 0);
+      const right = legacyPairs + ledger.filter((movement) => movement.side === 'derecha').reduce((sum, movement) => sum + movement.delta, 0);
+      if (legacy < 0 || left < 0 || right < 0) return tell('No puedes retirar más pares o piezas que los disponibles por lado.', 'error');
     } else if (getPieceStock(ledger, piece.id, componentStockSizeId) < 0) {
       return tell('No puedes retirar más piezas que las disponibles.', 'error');
     }
