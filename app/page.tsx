@@ -339,6 +339,15 @@ export default function Home() {
     }
   }
 
+  function productionOrdersSnapshot(): Array<{ status?: string; baseModelId?: string; basePieces?: Array<{ pieceId?: string }> }> | null {
+    try {
+      const raw = localStorage.getItem('telastock-production-orders-v1');
+      if (!raw) return [];
+      const orders = JSON.parse(raw) as unknown;
+      return Array.isArray(orders) ? orders as Array<{ status?: string; baseModelId?: string; basePieces?: Array<{ pieceId?: string }> }> : null;
+    } catch { return null; }
+  }
+
   function addStock(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!currentStockModel || selectedSizeIds.length === 0) {
@@ -444,16 +453,21 @@ export default function Home() {
     const duplicateName = models.some((model) => model.id !== modelForm.editingId && model.name.trim().toLocaleLowerCase('es') === cleanName.toLocaleLowerCase('es') && model.sizeGroupId === modelForm.sizeGroupId);
     if (duplicateName) { setNoticeMessage('Ya existe un modelo con ese nombre en el mismo grupo de tallas.', 'error'); return; }
 
+    const productionOrders = productionOrdersSnapshot();
+    if (!productionOrders) { setNoticeMessage('No se pudo verificar las órdenes de producción guardadas. Exporta un respaldo válido antes de modificar moldes.', 'error'); return; }
+    const orderPieceIds = new Set(productionOrders.flatMap((order) => Array.isArray(order.basePieces) ? order.basePieces.map((line) => line.pieceId ?? '').filter(Boolean) : []));
     const previousPieces = modelForm.editingId ? modelPieces(modelForm.editingId) : [];
     const removedPieces = previousPieces.filter((oldPiece) => !cleanPieces.some((formPiece) => formPiece.id === oldPiece.id));
-    // Never hard-delete a mold that has ledger rows: archive it from the active model instead.
-    // This fixes the old save blocker while preserving historical movement references.
-    const archivedRemovedIds = new Set(removedPieces.filter((piece) => movements.some((movement) => movement.pieceId === piece.id)).map((piece) => piece.id));
+    // Preserve molds referenced by either the movement ledger or a production order snapshot.
+    const archivedRemovedIds = new Set(removedPieces.filter((piece) =>
+      movements.some((movement) => movement.pieceId === piece.id) || orderPieceIds.has(piece.id)
+    ).map((piece) => piece.id));
     if (modelForm.editingId) {
       const original = models.find((model) => model.id === modelForm.editingId);
       const hasMovementHistory = previousPieces.some((piece) => movements.some((movement) => movement.pieceId === piece.id));
-      if (original && original.sizeGroupId !== modelForm.sizeGroupId && hasMovementHistory) {
-        setNoticeMessage('No se puede cambiar el grupo de tallas después de registrar movimientos. Crea un nuevo modelo para conservar la trazabilidad.', 'error'); return;
+      const hasOrderHistory = productionOrders.some((order) => order.baseModelId === modelForm.editingId);
+      if (original && original.sizeGroupId !== modelForm.sizeGroupId && (hasMovementHistory || hasOrderHistory)) {
+        setNoticeMessage('No se puede cambiar el grupo de tallas después de registrar movimientos u órdenes. Crea un nuevo modelo para conservar la trazabilidad.', 'error'); return;
       }
     }
 
