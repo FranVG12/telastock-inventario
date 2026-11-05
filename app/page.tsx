@@ -19,8 +19,9 @@ import {
   type SizeGroup,
 } from '@/lib/inventory-domain';
 import { demoModels, demoMovements, demoPieces, demoSizes, demoSizeGroups } from '@/lib/demo-data';
+import { FabricModule, FABRIC_STORAGE_KEYS, emptyFabricBackupData, validateFabricBackupData, type FabricView } from '@/app/fabric-module';
 
-type View = 'inventario' | 'modelos' | 'historial';
+type View = 'inventario' | 'modelos' | 'historial' | FabricView;
 type StockFilter = 'Con stock' | 'Vacío' | 'Todos';
 type SymmetricEntryMode = 'paridad' | 'lados';
 type StockSlot = 'paridad' | StockSide;
@@ -488,12 +489,26 @@ export default function Home() {
       return;
     }
     try {
+      const fabricInventory = emptyFabricBackupData();
+      const localCollections: [string, keyof typeof fabricInventory][] = [
+        [FABRIC_STORAGE_KEYS.telas, 'telas'],
+        [FABRIC_STORAGE_KEYS.rollos, 'rollos'],
+        [FABRIC_STORAGE_KEYS.proveedores, 'proveedores'],
+        [FABRIC_STORAGE_KEYS.proveedorTelefonos, 'proveedorTelefonos'],
+        [FABRIC_STORAGE_KEYS.proveedorCategorias, 'proveedorCategorias'],
+        [FABRIC_STORAGE_KEYS.compras, 'compras'],
+        [FABRIC_STORAGE_KEYS.detalleCompra, 'detalleCompra'],
+      ];
+      localCollections.forEach(([storageKey, field]) => {
+        const raw = localStorage.getItem(storageKey);
+        if (raw) (fabricInventory[field] as unknown) = JSON.parse(raw);
+      });
       const payload = {
         app: 'TelaStock',
         backupType: 'full',
-        schemaVersion: 1,
+        schemaVersion: 2,
         exportedAt: new Date().toISOString(),
-        data: { sizeGroups, sizes, models, pieces, movements },
+        data: { sizeGroups, sizes, models, pieces, movements, fabricInventory },
       };
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
       const url = URL.createObjectURL(blob);
@@ -516,7 +531,7 @@ export default function Home() {
       const raw = JSON.parse(await file.text()) as unknown;
       const isRecord = (value: unknown): value is Record<string, unknown> =>
         Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-      if (!isRecord(raw) || raw.app !== 'TelaStock' || raw.backupType !== 'full' || raw.schemaVersion !== 1 || !isRecord(raw.data)) {
+      if (!isRecord(raw) || raw.app !== 'TelaStock' || raw.backupType !== 'full' || ![1, 2].includes(Number(raw.schemaVersion)) || !isRecord(raw.data)) {
         throw new Error('Este no es un respaldo completo de TelaStock compatible.');
       }
       const data = raw.data;
@@ -538,6 +553,7 @@ export default function Home() {
       const importedModels = getRows('models') as unknown as ManufacturingModel[];
       const importedPieces = getRows('pieces') as unknown as ModelPiece[];
       const importedMovements = getRows('movements') as unknown as PieceMovement[];
+      const importedFabric = raw.schemaVersion === 2 ? validateFabricBackupData(data.fabricInventory) : emptyFabricBackupData();
       const hasText = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
       const groupIds = new Set(importedGroups.map((item) => item.id));
       const sizeIds = new Set(importedSizes.map((item) => item.id));
@@ -579,13 +595,22 @@ export default function Home() {
         color: piece.color ?? 'Sin especificar',
       })));
       setMovements(importedMovements);
+      localStorage.setItem(FABRIC_STORAGE_KEYS.telas, JSON.stringify(importedFabric.telas));
+      localStorage.setItem(FABRIC_STORAGE_KEYS.rollos, JSON.stringify(importedFabric.rollos));
+      localStorage.setItem(FABRIC_STORAGE_KEYS.proveedores, JSON.stringify(importedFabric.proveedores));
+      localStorage.setItem(FABRIC_STORAGE_KEYS.proveedorTelefonos, JSON.stringify(importedFabric.proveedorTelefonos));
+      localStorage.setItem(FABRIC_STORAGE_KEYS.proveedorCategorias, JSON.stringify(importedFabric.proveedorCategorias));
+      localStorage.setItem(FABRIC_STORAGE_KEYS.compras, JSON.stringify(importedFabric.compras));
+      localStorage.setItem(FABRIC_STORAGE_KEYS.detalleCompra, JSON.stringify(importedFabric.detalleCompra));
+      localStorage.setItem(FABRIC_STORAGE_KEYS.version, '1');
+      window.dispatchEvent(new Event('telastock-fabric-data-restored'));
       setExpandedModels(importedModels.slice(0, 1).map((model) => model.id));
       setSelectedModelId(importedModels[0]?.id ?? '');
       setSelectedSizeIds([]);
       setStockAmounts({});
       setStockEntryModes({});
       setShowBackupModal(false);
-      setNoticeMessage(`Respaldo restaurado correctamente: ${importedModels.length} modelos y ${importedMovements.length} movimientos. Los datos se guardaron en este navegador.`);
+      setNoticeMessage(`Respaldo restaurado: ${importedModels.length} modelos, ${importedMovements.length} movimientos, ${importedFabric.rollos.length} rollos y ${importedFabric.compras.length} compras.`);
     } catch (error) {
       setNoticeMessage(`No se pudo restaurar el respaldo: ${error instanceof Error ? error.message : 'archivo no válido'}`, 'error');
     } finally {
@@ -676,24 +701,33 @@ export default function Home() {
         <button className={`nav-item ${view === 'inventario' ? 'active' : ''}`} onClick={() => setView('inventario')}><span aria-hidden="true">▦</span> Inventario de piezas</button>
         <button className={`nav-item ${view === 'modelos' ? 'active' : ''}`} onClick={() => setView('modelos')}><span aria-hidden="true">◇</span> Modelos y moldes</button>
         <button className={`nav-item ${view === 'historial' ? 'active' : ''}`} onClick={() => setView('historial')}><span aria-hidden="true">↔</span> Historial</button>
+        <div className="side-label fabric-nav-label">INSUMOS</div>
+        <button className={`nav-item ${view === 'telas' ? 'active' : ''}`} onClick={() => setView('telas')}><span aria-hidden="true">▤</span> Catálogo de telas</button>
+        <button className={`nav-item ${view === 'rollos' ? 'active' : ''}`} onClick={() => setView('rollos')}><span aria-hidden="true">▥</span> Inventario de rollos</button>
+        <button className={`nav-item ${view === 'compras' ? 'active' : ''}`} onClick={() => setView('compras')}><span aria-hidden="true">＋</span> Compras</button>
+        <button className={`nav-item ${view === 'proveedores' ? 'active' : ''}`} onClick={() => setView('proveedores')}><span aria-hidden="true">♙</span> Proveedores</button>
         <div className="sidebar-bottom"><div className="avatar">P</div><div><strong>Usuario de prueba</strong><span>Administrador</span></div><span className="online-dot" /></div>
       </aside>
 
       <section className="main-area">
         <header className="topbar">
-          <div className="crumb">Fábrica / <strong>{view === 'inventario' ? 'Inventario de piezas' : view === 'modelos' ? 'Modelos y moldes' : 'Historial'}</strong></div>
+          <div className="crumb">TelaStock / <strong>{view === 'inventario' ? 'Inventario de piezas' : view === 'modelos' ? 'Modelos y moldes' : view === 'historial' ? 'Historial' : view === 'telas' ? 'Catálogo de telas' : view === 'rollos' ? 'Inventario de rollos' : view === 'compras' ? 'Compras de telas' : 'Proveedores'}</strong></div>
           <div className="top-actions"><button className="backup-trigger" onClick={() => setShowBackupModal(true)} title="Importar o exportar todos los datos" aria-label="Importar o exportar todos los datos"><span aria-hidden="true">⇅</span><span className="backup-trigger-label">Respaldo</span></button><span className="local-pill"><i /> Prototipo local</span><button className="icon-button" title="Ayuda sobre cálculo" onClick={() => setNoticeMessage('Las unidades fabricables se calculan con el molde más limitante: todos los moldes requeridos deben alcanzar. Es una capacidad de fabricación con el stock actual, no una cantidad de prendas ya confeccionadas.', 'info')}>?</button></div>
         </header>
 
-        <div className="mobile-nav" role="navigation" aria-label="Módulos">
+        <div className="mobile-nav fabric-mobile-nav" role="navigation" aria-label="Módulos">
           <button className={view === 'inventario' ? 'active' : ''} onClick={() => setView('inventario')}>Piezas</button>
           <button className={view === 'modelos' ? 'active' : ''} onClick={() => setView('modelos')}>Modelos</button>
           <button className={view === 'historial' ? 'active' : ''} onClick={() => setView('historial')}>Historial</button>
+          <button className={view === 'telas' ? 'active' : ''} onClick={() => setView('telas')}>Telas</button>
+          <button className={view === 'rollos' ? 'active' : ''} onClick={() => setView('rollos')}>Rollos</button>
+          <button className={view === 'compras' ? 'active' : ''} onClick={() => setView('compras')}>Compras</button>
+          <button className={view === 'proveedores' ? 'active' : ''} onClick={() => setView('proveedores')}>Proveedores</button>
         </div>
 
         <div className="content">
           <div className="page-heading">
-            <div><div className="eyebrow">INVENTARIO DE FABRICACIÓN</div><h1>{view === 'inventario' ? 'Piezas por talla' : view === 'modelos' ? 'Modelos de fabricación' : 'Movimientos de piezas'}</h1><p>{view === 'inventario' ? 'Consulta cuántas prendas puedes fabricar con el stock disponible de todos sus moldes.' : view === 'modelos' ? 'Define el patrón base, su grupo de tallas y cuántas piezas requiere cada prenda.' : 'Revisa las entradas registradas y el detalle de cada molde y talla.'}</p></div>
+            <div><div className="eyebrow">{['telas','rollos','compras','proveedores'].includes(view) ? 'INVENTARIO DE INSUMOS' : 'INVENTARIO DE FABRICACIÓN'}</div><h1>{view === 'inventario' ? 'Piezas por talla' : view === 'modelos' ? 'Modelos de fabricación' : view === 'historial' ? 'Movimientos de piezas' : view === 'telas' ? 'Catálogo de telas' : view === 'rollos' ? 'Inventario de rollos' : view === 'compras' ? 'Compras de telas' : 'Proveedores'}</h1><p>{view === 'inventario' ? 'Consulta cuántas prendas puedes fabricar con el stock disponible de todos sus moldes.' : view === 'modelos' ? 'Define el patrón base, su grupo de tallas y cuántas piezas requiere cada prenda.' : view === 'historial' ? 'Revisa las entradas registradas y el detalle de cada molde y talla.' : view === 'telas' ? 'Administra los tipos de tela, unidades habituales y características.' : view === 'rollos' ? 'Controla cada rollo físico y sus mediciones reales en KG y metros.' : view === 'compras' ? 'Registra compras por proveedor y conserva sus precios históricos.' : 'Administra contactos, teléfonos y rubros de proveedores.'}</p></div>
             <div className="heading-actions">
               {view === 'inventario' && <button className="button secondary" onClick={exportCsv}>↧ <span>Exportar</span></button>}
               {view === 'inventario' && <button className="button secondary" onClick={() => openStockForm('salida')}>− <span>Retirar / merma</span></button>}
@@ -787,6 +821,8 @@ export default function Home() {
             })}{historyRows.length === 0 && <div className="empty">No se encontraron movimientos.</div>}</div>
             <div className="panel-footer"><span>Historial actual: almacenamiento del navegador.</span><span>Al conectar Supabase, cada movimiento tendrá fecha y usuario de origen.</span></div>
           </section>}
+
+          {(['telas', 'rollos', 'compras', 'proveedores'] as View[]).includes(view) && <FabricModule view={view as FabricView} />}
 
           <div className="prototype-note"><span>ⓘ</span><div><strong>Prototipo de validación · datos de demostración</strong><p>Los registros se guardan en este navegador y no se sincronizan entre dispositivos todavía. El proyecto incluye una migración SQL normalizada para Supabase; antes de producción se deben configurar autenticación, políticas de acceso y pruebas de concurrencia.</p></div></div>
         </div>
