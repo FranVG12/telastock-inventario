@@ -218,10 +218,10 @@ type RolloForm = {
   ubicacion: string; estado: RollStatus; nota: string;
 };
 type SupplierForm = { id: string | null; nombre: string; contacto: string; direccion: string; nota: string; telefonos: { id: string; numero: string; etiqueta: string }[]; categorias: string[] };
-type PurchaseLineForm = { idRollo: string | null; idDetalle?: string | null; idTela: string; idTelaColor: string; unidad: FabricUnit; cantidad: string; cantidadesAdicionales: string; precio: string; color: string; pesoKg: string; metros: string; idLote: string };
+type PurchaseLineForm = { idRollo: string | null; idDetalle?: string | null; idTela: string; idTelaColor: string; unidad: FabricUnit; cantidad: string; precio: string; precioAutomatico: boolean; color: string; pesoKg: string; metros: string; idLote: string };
 type PurchaseForm = { id: string | null; idProveedor: string; fechaCompra: string; tipoComprobante: string; numeroComprobante: string; observacion: string; lines: PurchaseLineForm[] };
 type InlineColorTarget = 'tela' | 'rollo' | 'compra';
-type InlineColorForm = { target: InlineColorTarget; telaId: string; lineIndex: number | null; idTelaColor: string | null; nombre: string; hexadecimal: string; cmykC: string; cmykM: string; cmykY: string; cmykK: string };
+type InlineColorForm = { target: InlineColorTarget; telaId: string; lineIndex: number | null; idTelaColor: string | null; idColorGlobal: string; nombre: string; hexadecimal: string; cmykC: string; cmykM: string; cmykY: string; cmykK: string };
 
 function migrateLegacyColorData(value: FabricBackupData): FabricBackupData {
   const colores = [...(value.colores ?? [])];
@@ -267,7 +267,7 @@ function blankRollo(telas: Textile[], telaColores: TextileColor[] = [], colores:
 function blankLine(telas: Textile[], telaColores: TextileColor[] = [], colores: ColorDefinition[] = []): PurchaseLineForm {
   const tela = telas.find((x) => x.activo);
   const firstColor = telaColores.find((x) => x.idTela === tela?.id && x.activo);
-  return { idRollo: null, idDetalle: null, idTela: tela?.id ?? '', idTelaColor: firstColor?.id ?? '', unidad: tela?.unidadVenta ?? 'KG', cantidad: '', cantidadesAdicionales: '', precio: '', color: colores.find((x) => x.id === firstColor?.idColor)?.nombre ?? '', pesoKg: '', metros: '', idLote: '' };
+  return { idRollo: null, idDetalle: null, idTela: tela?.id ?? '', idTelaColor: firstColor?.id ?? '', unidad: tela?.unidadVenta ?? 'KG', cantidad: '', precio: '', precioAutomatico: true, color: colores.find((x) => x.id === firstColor?.idColor)?.nombre ?? '', pesoKg: '', metros: '', idLote: '' };
 }
 function blankPurchase(telas: Textile[], telaColores: TextileColor[] = [], colores: ColorDefinition[] = []): PurchaseForm { return { id: null, idProveedor: '', fechaCompra: today(), tipoComprobante: 'Factura', numeroComprobante: '', observacion: '', lines: [blankLine(telas, telaColores, colores)] }; }
 
@@ -398,12 +398,62 @@ export function FabricModule({ view }: { view: FabricView }) {
     const variant = variantId ? telaColorById.get(variantId) : undefined;
     return variant ? colorById.get(variant.idColor)?.nombre ?? fallback : fallback;
   };
-  const colorsForTela = (telaId: string, includeVariantId = '') => data.telaColores.filter((x) => x.idTela === telaId && (x.activo || x.id === includeVariantId)).map((variant) => ({ ...variant, color: colorById.get(variant.idColor) })).filter((x) => x.color).sort((a,b) => (a.color?.nombre ?? '').localeCompare(b.color?.nombre ?? '', 'es'));
+  const colorsForTela = (telaId: string) => {
+    const variantByColor = new Map(data.telaColores.filter((variant) => variant.idTela === telaId).map((variant) => [variant.idColor, variant]));
+    const colorByVariantId = new Map(data.telaColores.map((variant) => [variant.id, variant.idColor]));
+    const countForColor = (colorId: string, colorName: string) => data.rollos.filter((roll) => {
+      if (roll.idTela !== telaId) return false;
+      const linkedColorId = roll.idTelaColor ? colorByVariantId.get(roll.idTelaColor) : data.colores.find((color) => color.nombre.toLocaleLowerCase('es') === (roll.color ?? '').toLocaleLowerCase('es'))?.id;
+      return linkedColorId === colorId || (!linkedColorId && (roll.color ?? '').toLocaleLowerCase('es') === colorName.toLocaleLowerCase('es'));
+    }).length;
+    return data.colores.map((color) => {
+      const variant = variantByColor.get(color.id);
+      return { idColor: color.id, idTelaColor: variant?.id ?? '', color, hexadecimal: variant?.hexadecimal ?? null, cmykC: variant?.cmykC ?? null, cmykM: variant?.cmykM ?? null, cmykY: variant?.cmykY ?? null, cmykK: variant?.cmykK ?? null, cantidadRollos: countForColor(color.id, color.nombre) };
+    }).sort((a, b) => b.cantidadRollos - a.cantidadRollos || a.color.nombre.localeCompare(b.color.nombre, 'es'));
+  };
+  function ensureTelaColorAssociation(telaId: string, colorId: string): string {
+    if (!telaId || !colorId) return '';
+    const existing = data.telaColores.find((variant) => variant.idTela === telaId && variant.idColor === colorId);
+    if (existing) {
+      if (!existing.activo && !persist({ ...data, telaColores: data.telaColores.map((variant) => variant.id === existing.id ? { ...variant, activo: true, updatedAt: new Date().toISOString() } : variant) })) return '';
+      return existing.id;
+    }
+    const now = new Date().toISOString();
+    const variant: TextileColor = { id: id(), idTela: telaId, idColor: colorId, hexadecimal: null, cmykC: null, cmykM: null, cmykY: null, cmykK: null, activo: true, createdAt: now, updatedAt: now };
+    return persist({ ...data, telaColores: [...data.telaColores, variant] }) ? variant.id : '';
+  }
   const detailByPurchase = useMemo(() => {
     const map = new Map<string, PurchaseDetail[]>();
     data.detalleCompra.forEach((detail) => map.set(detail.idCompra, [...(map.get(detail.idCompra) ?? []), detail]));
     return map;
   }, [data.detalleCompra]);
+  const lastPurchasePriceFor = (supplierId: string, telaId: string, unit: FabricUnit): number | null => {
+    if (!supplierId || !telaId) return null;
+    const candidates = data.detalleCompra.map((detail, index) => {
+      const purchase = data.compras.find((item) => item.id === detail.idCompra);
+      const roll = rollById.get(detail.idRollo);
+      return { detail, purchase, roll, index };
+    }).filter((item) => item.purchase?.idProveedor === supplierId && item.roll?.idTela === telaId && item.detail.unidadPrecio === unit);
+    candidates.sort((a, b) => (b.purchase?.fechaCompra ?? '').localeCompare(a.purchase?.fechaCompra ?? '') || (b.purchase?.updatedAt ?? '').localeCompare(a.purchase?.updatedAt ?? '') || b.index - a.index);
+    return candidates[0]?.detail.precioUnitario ?? null;
+  };
+  const suggestedPriceForLine = (supplierId: string, telaId: string, unit: FabricUnit, lines: PurchaseLineForm[], currentIndex: number) => {
+    const samePurchaseLine = lines.slice(0, currentIndex).reverse().find((item) => !item.idRollo && item.idTela === telaId && item.unidad === unit && item.precio.trim());
+    if (samePurchaseLine) return { price: samePurchaseLine.precio, automatic: samePurchaseLine.precioAutomatico };
+    const historical = lastPurchasePriceFor(supplierId, telaId, unit);
+    return { price: historical === null ? '' : String(historical), automatic: true };
+  };
+  function changePurchaseSupplier(supplierId: string) {
+    setPurchaseForm((current) => ({
+      ...current,
+      idProveedor: supplierId,
+      lines: current.lines.map((line) => {
+        if (line.idRollo || !line.idTela || !line.precioAutomatico) return line;
+        const historical = lastPurchasePriceFor(supplierId, line.idTela, line.unidad);
+        return { ...line, precio: historical === null ? '' : String(historical), precioAutomatico: true };
+      }),
+    }));
+  }
 
   const tell = (text: string, kind: 'success' | 'error' | 'info' = 'success') => setNotice({ text, kind });
   const telaRows = useMemo(() => data.telas.filter((x) => !telaSearch || `${x.nombreTela} ${x.descripcion}`.toLocaleLowerCase('es').includes(telaSearch.toLocaleLowerCase('es'))).sort((a,b) => a.nombreTela.localeCompare(b.nombreTela, 'es')), [data.telas, telaSearch]);
