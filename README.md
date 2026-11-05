@@ -73,7 +73,7 @@ La migración incluye comprobación de correspondencia entre el grupo de tallas 
 3. Mantener cantidades físicas requeridas por prenda explícitas.
 4. No borrar físicamente moldes con historial; archivarlos fuera de la composición activa para preservar trazabilidad y permitir guardar el modelo.
 5. Registrar pérdidas, destrucción o correcciones con movimientos negativos auditables; nunca borrar el historial para corregir el saldo.
-6. Cada molde referencia una ranura de material (principal o secundaria 1–3) y un color base del catálogo global. La tela concreta y su fórmula HEX/CMYK se resolverán por producto al definir qué material ocupa cada ranura.
+6. Cada molde referencia una ranura de material: principal o una de las ranuras secundarias ilimitadas que configure el modelo. El color base viene del catálogo global. La tela concreta y su fórmula HEX/CMYK se resolverán por producto al definir qué material ocupa cada ranura.
 7. Mantener los filtros móviles y el formulario de ingreso corto: modelo → checklist de tallas → cantidades por molde.
 8. Probar siempre los casos de pieza simétrica ×2, falta de un único molde y tallas de grupos distintos.
 
@@ -130,7 +130,9 @@ Al corregir una línea de compra, la cantidad y el precio se actualizan en el hi
 ### Colores, moldes y compras por lotes
 
 - Los colores se registran sin salir del formulario de rollos o compras. El nombre se reutiliza del diccionario global; el HEX y los cuatro valores CMYK pertenecen a la combinación específica tela-color.
-- El editor de moldes asigna a cada molde una ranura: tela principal o tela secundaria 1, 2 o 3. El color base se elige de la paleta central; por defecto los moldes comparten el primer color disponible, pero cada molde puede cambiarlo.
+- El editor de moldes ofrece una tela principal y un botón para añadir tantas ranuras secundarias como requiera el modelo. Cada molde elige una de las ranuras disponibles. El color base se elige de la paleta central; los moldes heredan el color de referencia salvo que se sobrescriba individualmente.
+- En compras, cada tarjeta representa un rollo físico. Al añadir otro rollo se repiten tela, color y precio, pero la cantidad queda vacía. El precio se propone desde la última compra del mismo proveedor, tela y unidad, y puede editarse.
+- Los desplegables de color muestran todos los nombres globales; si el nombre aún no está asociado a la tela se crea la relación al seleccionarlo. Las opciones se ordenan por frecuencia de rollos de esa tela y después alfabéticamente.
 - Al registrar varios rollos del mismo material, color y precio en una compra, escribe las cantidades adicionales separadas por comas (usa punto decimal, por ejemplo `15, 18.5, 22`). TelaStock crea un rollo y una línea de detalle por cantidad, con saldo físico individual y el mismo precio unitario histórico.
 
 La migración SQL respalda los nombres antiguos de color de rollos y moldes antes de quitar los campos de texto libre. Los moldes antiguos quedan asignados por defecto a `principal`; los nombres de color se promueven al diccionario global y se vinculan por ID. Los códigos HEX/CMYK históricos desconocidos permanecen nulos.
