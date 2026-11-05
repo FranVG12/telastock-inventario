@@ -16,6 +16,11 @@ export type ModelPiece = {
   unitsPerGarment: number;
   laterality: Laterality;
   sortOrder: number;
+  /** Slot de tela que podrá materializarse en un producto: principal o secundaria 1–3. */
+  fabricSlot?: 'principal' | 'secundaria_1' | 'secundaria_2' | 'secundaria_3';
+  /** Color del catálogo global; el HEX/CMYK final se resuelve para la tela elegida en el producto. */
+  colorId?: string | null;
+  /** Campos conservados por compatibilidad con modelos guardados antes de la migración. */
   fabricType: string;
   color: string;
   archived?: boolean;
