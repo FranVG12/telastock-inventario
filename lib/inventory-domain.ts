@@ -20,6 +20,8 @@ export type ModelPiece = {
   fabricSlot?: 'principal' | 'secundaria_1' | 'secundaria_2' | 'secundaria_3';
   /** Color del catálogo global; el HEX/CMYK final se resuelve para la tela elegida en el producto. */
   colorId?: string | null;
+  /** True cuando el usuario eligió un color distinto del valor heredado del modelo. */
+  colorOverride?: boolean;
   /** Campos conservados por compatibilidad con modelos guardados antes de la migración. */
   fabricType: string;
   color: string;
