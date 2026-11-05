@@ -38,6 +38,7 @@ export type PurchaseDetail = {
 export type RollMovement = {
   id: string; idRollo: string; fecha: string; tipo: 'ingreso' | 'consumo' | 'ajuste' | 'medicion';
   unidad: FabricUnit; delta: number | null; cantidadAnterior: number | null; cantidadNueva: number | null; nota: string;
+  sourceProductionOrderId?: string | null;
 };
 export type FabricBackupData = {
   telas: Textile[]; rollos: FabricRoll[]; rolloMovimientos: RollMovement[]; proveedores: Supplier[];
