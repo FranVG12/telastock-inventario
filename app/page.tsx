@@ -841,6 +841,11 @@ export default function Home() {
           <button className={view === 'rollos' ? 'active' : ''} onClick={() => setView('rollos')}>Rollos</button>
           <button className={view === 'compras' ? 'active' : ''} onClick={() => setView('compras')}>Compras</button>
           <button className={view === 'proveedores' ? 'active' : ''} onClick={() => setView('proveedores')}>Proveedores</button>
+          <button className={view === 'insumos' ? 'active' : ''} onClick={() => setView('insumos')}>Avíos</button>
+          <button className={view === 'componentes' ? 'active' : ''} onClick={() => setView('componentes')}>Componentes</button>
+          <button className={view === 'modelos-producto' ? 'active' : ''} onClick={() => setView('modelos-producto')}>Modelos</button>
+          <button className={view === 'recetas' ? 'active' : ''} onClick={() => setView('recetas')}>Recetas</button>
+          <button className={view === 'planificacion' ? 'active' : ''} onClick={() => setView('planificacion')}>Planificar</button>
         </div>
 
         <div className="content">
