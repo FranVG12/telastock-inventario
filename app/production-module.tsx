@@ -687,9 +687,12 @@ export function ProductionModule({
       const legacyPairs = Math.floor(Math.max(0, legacy) / 2);
       const left = legacyPairs + ledger.filter((movement) => movement.side === 'izquierda').reduce((sum, movement) => sum + movement.delta, 0);
       const right = legacyPairs + ledger.filter((movement) => movement.side === 'derecha').reduce((sum, movement) => sum + movement.delta, 0);
-      if (legacy < 0 || left < 0 || right < 0) return tell('No puedes retirar más pares o piezas que los disponibles por lado.', 'error');
-    } else if (getPieceStock(ledger, piece.id, componentStockSizeId) < 0) {
-      return tell('No puedes retirar más piezas que las disponibles.', 'error');
+      const reservedLeft = reservedPieceQuantity(ordersHoldingStock.flatMap((order) => order.componentPieces), piece.id, componentStockSizeId, 'izquierda');
+      const reservedRight = reservedPieceQuantity(ordersHoldingStock.flatMap((order) => order.componentPieces), piece.id, componentStockSizeId, 'derecha');
+      if (legacy < 0 || left < reservedLeft || right < reservedRight) return tell('No puedes retirar ese stock: hay piezas reservadas para órdenes de producción.', 'error');
+    } else {
+      const reserved = reservedPieceQuantity(ordersHoldingStock.flatMap((order) => order.componentPieces), piece.id, componentStockSizeId, null);
+      if (getPieceStock(ledger, piece.id, componentStockSizeId) < reserved) return tell('No puedes retirar ese stock: hay piezas reservadas para órdenes de producción.', 'error');
     }
     setData((current) => ({ ...current, componentPieceMovements: [...current.componentPieceMovements, ...movements] }));
     setShowComponentPieceMovement(false);
@@ -706,7 +709,7 @@ export function ProductionModule({
     if (supply.stockMode === 'talla' && !stockSizeId) return tell('Selecciona la talla de este insumo.', 'error');
     const sizeId = supply.stockMode === 'talla' ? stockSizeId : null;
     const delta = stockDirection === 'entrada' ? quantity : -quantity;
-    if (delta < 0 && stockForVariant(variant, sizeId) < quantity) return tell('No puedes retirar más de lo disponible.', 'error');
+    if (delta < 0 && stockForVariant(variant, sizeId) - reservedSupplyQuantity(variant.id, sizeId) < quantity) return tell('No puedes retirar esa cantidad: una parte del stock está reservada para órdenes de producción.', 'error');
     const movement: SupplyMovement = { id: id(), variantId: variant.id, sizeId, delta, kind: stockDirection, note: stockNote.trim(), date: now() };
     setData((current) => ({ ...current, supplyMovements: [...current.supplyMovements, movement] }));
     setShowStockForm(false); setStockQuantity(''); tell('Movimiento de insumo registrado.');
@@ -1186,7 +1189,7 @@ export function ProductionModule({
     for (const line of order.componentPieces) {
       const piece = data.components.find((component) => component.id === line.componentId)?.pieces.find((item) => item.id === line.pieceId);
       const balance = currentComponentPieceBalance(line.pieceId, line.sizeId, line.side);
-      const reserved = reservedPieceQuantity(otherOrders.flatMap((activeOrder) => activeOrder.componentPieces), line.pieceId, line.sizeId, line.side, order.id);
+      const reserved = reservedPieceQuantity(otherOrders.flatMap((activeOrder) => activeOrder.componentPieces), line.pieceId, line.sizeId, line.side);
       if (balance - reserved + 0.00001 < line.quantity) issues.push((piece?.name ?? 'Pieza auxiliar') + ' · ' + (sizes.find((size) => size.id === line.sizeId)?.label ?? 'Talla') + ': faltan ' + format(line.quantity - Math.max(0, balance - reserved)) + ' piezas' + (line.side ? ' ' + line.side : ''));
     }
     if (issues.length > 0) return tell('No se reservó ' + order.number + '. ' + issues.join(' · '), 'error');
