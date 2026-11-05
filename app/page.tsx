@@ -493,6 +493,7 @@ export default function Home() {
       const localCollections: [string, keyof typeof fabricInventory][] = [
         [FABRIC_STORAGE_KEYS.telas, 'telas'],
         [FABRIC_STORAGE_KEYS.rollos, 'rollos'],
+        [FABRIC_STORAGE_KEYS.rolloMovimientos, 'rolloMovimientos'],
         [FABRIC_STORAGE_KEYS.proveedores, 'proveedores'],
         [FABRIC_STORAGE_KEYS.proveedorTelefonos, 'proveedorTelefonos'],
         [FABRIC_STORAGE_KEYS.proveedorCategorias, 'proveedorCategorias'],
@@ -519,7 +520,7 @@ export default function Home() {
       anchor.click();
       anchor.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setNoticeMessage('Respaldo completo descargado. Guárdalo en un lugar seguro; incluye modelos, moldes, tallas y todo el historial.');
+      setNoticeMessage('Respaldo completo descargado: fabricación, telas, rollos, compras, proveedores y sus historiales. Guarda el archivo en un lugar seguro.');
     } catch {
       setNoticeMessage('No se pudo crear el respaldo. Comprueba que el navegador permita descargar archivos.', 'error');
     }
@@ -581,8 +582,9 @@ export default function Home() {
         (item.side === undefined || item.side === 'izquierda' || item.side === 'derecha')
       )) throw new Error('Hay movimientos inválidos o vinculados a moldes/tallas inexistentes.');
 
+      const legacyWarning = raw.schemaVersion === 1 ? '\\nEste respaldo antiguo no contiene datos de telas, rollos ni compras; al restaurarlo, esas colecciones quedarán vacías.' : '';
       const confirmed = window.confirm(
-        `Vas a restaurar ${importedModels.length} modelos, ${importedPieces.length} moldes y ${importedMovements.length} movimientos. Esto reemplazará todos los datos guardados actualmente en este navegador. Exporta un respaldo de lo actual antes de continuar si lo necesitas. ¿Continuar?`
+        `Vas a restaurar ${importedModels.length} modelos, ${importedPieces.length} moldes y ${importedMovements.length} movimientos, además de ${importedFabric.rollos.length} rollos y ${importedFabric.compras.length} compras. Esto reemplazará los datos del navegador actual. Exporta un respaldo previo si necesitas conservarlos.${legacyWarning} ¿Continuar?`
       );
       if (!confirmed) return;
 
@@ -597,6 +599,7 @@ export default function Home() {
       setMovements(importedMovements);
       localStorage.setItem(FABRIC_STORAGE_KEYS.telas, JSON.stringify(importedFabric.telas));
       localStorage.setItem(FABRIC_STORAGE_KEYS.rollos, JSON.stringify(importedFabric.rollos));
+      localStorage.setItem(FABRIC_STORAGE_KEYS.rolloMovimientos, JSON.stringify(importedFabric.rolloMovimientos));
       localStorage.setItem(FABRIC_STORAGE_KEYS.proveedores, JSON.stringify(importedFabric.proveedores));
       localStorage.setItem(FABRIC_STORAGE_KEYS.proveedorTelefonos, JSON.stringify(importedFabric.proveedorTelefonos));
       localStorage.setItem(FABRIC_STORAGE_KEYS.proveedorCategorias, JSON.stringify(importedFabric.proveedorCategorias));
@@ -946,7 +949,7 @@ export default function Home() {
             <article className="backup-option">
               <div className="backup-option-icon export">↓</div>
               <h3>Guardar una copia</h3>
-              <p>Descarga modelos, moldes, tallas, stock por lado y todo el historial en un solo archivo.</p>
+              <p>Descarga fabricación, telas, rollos, compras, proveedores, mediciones y todo el historial en un solo archivo.</p>
               <button type="button" className="button primary" disabled={!ready} onClick={exportFullBackup}>Descargar respaldo</button>
             </article>
             <article className="backup-option">
