@@ -572,12 +572,7 @@ export function ProductionModule({
 
   useEffect(() => {
     const loaded = loadLocal();
-    const productModelsWithoutLegacyFamily = loaded.data.productModels.map((product) => {
-      const normalized = { ...product } as ConfiguredProductModel & { family?: string };
-      delete normalized.family;
-      return normalized;
-    });
-    setData({ ...loaded.data, productModels: productModelsWithoutLegacyFamily });
+    setData(loaded.data);
     setStorageSafe(loaded.safe);
     if (loaded.safe) localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '2');
     else setNotice({ text: loaded.warning, kind: 'error' });
