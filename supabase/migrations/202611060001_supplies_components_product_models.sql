@@ -402,3 +402,77 @@ comment on table public.supply_purchase_details is
   'Líneas de compra con cantidad, precio histórico, presentación y equivalencia declarada en unidad base.';
 comment on column public.supply_stock_movements.source_purchase_detail_id is
   'Detalle que originó la entrada de stock, si el movimiento proviene de una compra.';
+
+
+-- Auxiliary pattern-piece stock is a separate ledger from base model_pieces.
+-- Symmetric pieces are recorded by side; a parity entry posts one movement per side.
+create table if not exists public.component_piece_stock_movements (
+  id uuid primary key default gen_random_uuid(),
+  component_id uuid not null references public.garment_components(id) on delete restrict,
+  component_piece_id uuid not null references public.component_pattern_pieces(id) on delete restrict,
+  size_id uuid not null references public.sizes(id) on delete restrict,
+  delta_quantity integer not null check (delta_quantity <> 0),
+  movement_type text not null check (movement_type in ('entrada','salida','ajuste')),
+  side text null check (side is null or side in ('izquierda','derecha')),
+  note text not null default '',
+  created_at timestamptz not null default now(),
+  created_by uuid null references auth.users(id) on delete set null
+);
+create index if not exists component_piece_movements_piece_size_date_idx
+  on public.component_piece_stock_movements(component_piece_id, size_id, created_at desc);
+
+create or replace function public.validate_component_piece_stock_movement()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_laterality text;
+  v_owner_id uuid;
+  v_balance bigint;
+  v_lock_key bigint;
+begin
+  select p.laterality, p.component_id
+    into v_laterality, v_owner_id
+  from public.component_pattern_pieces p
+  where p.id = new.component_piece_id;
+
+  if v_laterality is null then
+    raise exception 'La pieza auxiliar no existe.';
+  end if;
+  if v_owner_id <> new.component_id then
+    raise exception 'La pieza no pertenece al componente indicado.';
+  end if;
+  if (v_laterality = 'simetrica' and new.side is null)
+     or (v_laterality <> 'simetrica' and new.side is not null) then
+    raise exception 'La lateralidad del movimiento no coincide con la pieza.';
+  end if;
+  if (new.movement_type = 'entrada' and new.delta_quantity <= 0)
+     or (new.movement_type = 'salida' and new.delta_quantity >= 0) then
+    raise exception 'El signo de la cantidad no coincide con el tipo de movimiento.';
+  end if;
+
+  v_lock_key := hashtextextended(
+    new.component_piece_id::text || ':' || new.size_id::text || ':' || coalesce(new.side, 'unico'), 0
+  );
+  perform pg_advisory_xact_lock(v_lock_key);
+
+  select coalesce(sum(m.delta_quantity), 0)
+    into v_balance
+  from public.component_piece_stock_movements m
+  where m.component_piece_id = new.component_piece_id
+    and m.size_id = new.size_id
+    and m.side is not distinct from new.side;
+
+  if v_balance + new.delta_quantity < 0 then
+    raise exception 'Stock insuficiente para registrar la salida de la pieza auxiliar.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists component_piece_stock_movement_guard on public.component_piece_stock_movements;
+create trigger component_piece_stock_movement_guard
+before insert on public.component_piece_stock_movements
+for each row execute function public.validate_component_piece_stock_movement();
+
+alter table public.component_piece_stock_movements enable row level security;
+comment on table public.component_piece_stock_movements is
+  'Ledger independiente de piezas auxiliares por componente, talla y lado; no se mezcla con el stock de patrones base.';
