@@ -105,3 +105,34 @@ En la cabecera de la aplicación, abre **Respaldo** para descargar o restaurar u
 - Los datos siguen siendo locales al navegador; importar/exportar no activa sincronización entre personas o dispositivos.
 
 El CSV disponible en Inventario sirve para consultar el stock en Excel; el JSON de respaldo es el que debes conservar para poder restaurar también la configuración y los movimientos.
+
+
+## Módulo de telas, rollos, compras y proveedores
+
+El módulo está integrado en la navegación principal mediante `app/fabric-module.tsx` y mantiene sus datos locales separados de los movimientos de piezas de confección.
+
+- `telas`: catálogo maestro con unidad habitual, ancho nominal, descripción y estado activo.
+- `rollos`: una fila por rollo físico; las mediciones reales `pesoKg` y `metros` son independientes y pueden permanecer en `null`.
+- `rolloMovimientos`: historial de ingresos, consumos, ajustes y registro de mediciones.
+- `proveedores`, `proveedorTelefonos`, `proveedorCategorias`: proveedor normalizado con múltiples teléfonos y rubros.
+- `compras` y `detalleCompra`: cabecera y líneas de compra; cada rollo puede tener una sola línea de origen y conserva su precio unitario histórico.
+
+La migración SQL aditiva es `supabase/migrations/202611040001_textile_rolls_purchases.sql`. No se ejecuta automáticamente: Supabase no está conectado a esta versión local-first. Las tablas tienen RLS habilitado sin políticas permisivas; antes de una futura conexión remota deben configurarse autenticación y políticas de acceso.
+
+### Cantidades y mediciones
+
+La cantidad de ingreso se registra en la unidad elegida (KG o M) y se copia únicamente a la medición real de esa misma unidad. La otra medición queda `null` salvo que el operador la conozca y la introduzca. No hay conversión estimada automática. El consumo requiere una medición real de la unidad elegida y nunca descuenta de una medida desconocida.
+
+Al corregir una línea de compra, la cantidad y el precio se actualizan en el historial comercial; no se reescribe el saldo físico ni las mediciones reales del rollo. Los consumos y mediciones se registran en el historial del rollo.
+
+### Exportación y respaldo
+
+- En Telas, Rollos, Compras y Proveedores, el botón CSV exporta la vista correspondiente.
+- El respaldo JSON completo incluye las ocho colecciones del módulo textil y las colecciones del inventario de piezas. Es el formato recomendado para trasladar y restaurar los datos manteniendo identificadores y relaciones.
+- La importación de respaldo reemplaza los datos locales después de validar las relaciones y pedir confirmación. Conserva primero una copia del estado actual si necesitas volver atrás.
+
+### Revisión manual de datos antiguos
+
+No existe una migración automática de compras antiguas porque el inventario previo estaba centrado en piezas de confección y no contenía rollos, precios históricos ni unidades de compra estructuradas. Los registros comerciales externos con pesos como `68.45/3`, fechas ambiguas o proveedor y dirección mezclados deben importarse solo después de confirmar su significado; no se convierten automáticamente ni se inventan mediciones.
+
+La equivalencia estimada KG↔M para una operación de corte todavía no está implementada: la aplicación actual solo muestra y descuenta mediciones reales. Cuando se implemente, deberá calcularse por tipo de tela y operación, etiquetarse como estimada y no escribirse en los campos reales del rollo.
