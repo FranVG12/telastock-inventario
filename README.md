@@ -111,19 +111,29 @@ El CSV disponible en Inventario sirve para consultar el stock en Excel; el JSON 
 
 El módulo está integrado en la navegación principal mediante `app/fabric-module.tsx` y mantiene sus datos locales separados de los movimientos de piezas de confección.
 
-- `telas`: catálogo maestro con unidad habitual, ancho nominal, descripción y estado activo.
-- `rollos`: una fila por rollo físico; las mediciones reales `pesoKg` y `metros` son independientes y pueden permanecer en `null`.
+- `telas`: catálogo maestro con unidad habitual, ancho nominal, rendimiento teórico y estado activo. El rendimiento se expresa como `m/kg` cuando la unidad de venta es KG y como `kg/m` cuando es M; nunca se copia a las mediciones reales de los rollos.
+- `colores`: diccionario global de nombres de color.
+- `telaColores`: relación entre tela y color; cada asociación conserva sus propios HEX y CMYK, por lo que el mismo nombre puede tener códigos distintos para materiales diferentes.
+- `rollos`: una fila por rollo físico; las mediciones reales `pesoKg` y `metros` son independientes y pueden permanecer en `null`. El color se relaciona mediante `idTelaColor`.
 - `rolloMovimientos`: historial de ingresos, consumos, ajustes y registro de mediciones.
 - `proveedores`, `proveedorTelefonos`, `proveedorCategorias`: proveedor normalizado con múltiples teléfonos y rubros.
-- `compras` y `detalleCompra`: cabecera y líneas de compra; cada rollo puede tener una sola línea de origen y conserva su precio unitario histórico.
+- `compras` y `detalleCompra`: cabecera y líneas de compra; cada rollo puede tener una sola línea de origen y conserva su precio unitario histórico. En una línea de compra se pueden ingresar varias cantidades adicionales; cada cantidad crea su propio rollo y detalle, compartiendo proveedor, tela, color, unidad y precio.
 
-La migración SQL aditiva es `supabase/migrations/202611040001_textile_rolls_purchases.sql`. No se ejecuta automáticamente: Supabase no está conectado a esta versión local-first. Las tablas tienen RLS habilitado sin políticas permisivas; antes de una futura conexión remota deben configurarse autenticación y políticas de acceso.
+La migración inicial es `supabase/migrations/202611040001_textile_rolls_purchases.sql`. La migración de rendimiento, colores y ranuras de moldes es `supabase/migrations/202611050001_textile_yield_and_normalized_colors.sql`. Son aditivas, pero deben ejecutarse en orden. No se ejecutan automáticamente: Supabase no está conectado a esta versión local-first. Las tablas mantienen RLS habilitado sin políticas permisivas; antes de una futura conexión remota deben configurarse autenticación y políticas de acceso.
 
 ### Cantidades y mediciones
 
 La cantidad de ingreso se registra en la unidad elegida (KG o M) y se copia únicamente a la medición real de esa misma unidad. La otra medición queda `null` salvo que el operador la conozca y la introduzca. No hay conversión estimada automática. El consumo requiere una medición real de la unidad elegida y nunca descuenta de una medida desconocida.
 
 Al corregir una línea de compra, la cantidad y el precio se actualizan en el historial comercial; no se reescribe el saldo físico ni las mediciones reales del rollo. Los consumos y mediciones se registran en el historial del rollo.
+
+### Colores, moldes y compras por lotes
+
+- Los colores se registran sin salir del formulario de rollos o compras. El nombre se reutiliza del diccionario global; el HEX y los cuatro valores CMYK pertenecen a la combinación específica tela-color.
+- El editor de moldes asigna a cada molde una ranura: tela principal o tela secundaria 1, 2 o 3. El color base se elige de la paleta central; por defecto los moldes comparten el primer color disponible, pero cada molde puede cambiarlo.
+- Al registrar varios rollos del mismo material, color y precio en una compra, escribe las cantidades adicionales separadas por comas (usa punto decimal, por ejemplo `15, 18.5, 22`). TelaStock crea un rollo y una línea de detalle por cantidad, con saldo físico individual y el mismo precio unitario histórico.
+
+La migración SQL respalda los nombres antiguos de color de rollos y moldes antes de quitar los campos de texto libre. Los moldes antiguos quedan asignados por defecto a `principal`; los nombres de color se promueven al diccionario global y se vinculan por ID. Los códigos HEX/CMYK históricos desconocidos permanecen nulos.
 
 ### Exportación y respaldo
 
