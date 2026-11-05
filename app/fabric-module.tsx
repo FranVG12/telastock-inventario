@@ -152,9 +152,14 @@ function csvDate(value: string) {
     const date = new Date(year, month - 1, day);
     if (date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day) return raw;
   }
-  const local = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  const local = raw.match(/^(\\d{1,2})[/-](\\d{1,2})[/-](\\d{4})$/);
   if (local) {
-    const day = Number(local[1]); const month = Number(local[2]); const year = Number(local[3]);
+    const first = Number(local[1]);
+    const second = Number(local[2]);
+    const year = Number(local[3]);
+    if (first <= 12 && second <= 12) throw new Error('Fecha ambigua. Reemplázala por AAAA-MM-DD para evitar una interpretación incorrecta.');
+    const day = first > 12 ? first : second;
+    const month = first > 12 ? second : first;
     const date = new Date(year, month - 1, day);
     if (date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day) return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   }
