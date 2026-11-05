@@ -1069,7 +1069,7 @@ export default function Home() {
           </section>}
 
           {(['telas', 'rollos', 'compras', 'proveedores'] as View[]).includes(view) && <FabricModule view={view as FabricView} />}
-          {(['insumos', 'compras-avios', 'componentes', 'modelos-producto', 'recetas', 'planificacion', 'ordenes'] as View[]).includes(view) && <ProductionModule view={view as ProductionView} baseModels={models} basePieces={pieces} baseMovements={movements} sizes={sizes} sizeGroups={sizeGroups} onAddBaseMovements={replaceBaseMovements} onNavigate={(next) => setView(next)} />}
+          {(['insumos', 'compras-avios', 'componentes', 'modelos-producto', 'recetas', 'planificacion', 'ordenes'] as View[]).includes(view) && <ProductionModule view={view as ProductionView} baseModels={models} baseModelsReady={ready} basePieces={pieces} baseMovements={movements} sizes={sizes} sizeGroups={sizeGroups} onAddBaseMovements={replaceBaseMovements} onNavigate={(next) => setView(next)} />}
 
           <div className="prototype-note"><span>ⓘ</span><div><strong>Prototipo de validación · datos de demostración</strong><p>Los registros se guardan en este navegador y no se sincronizan entre dispositivos todavía. El proyecto incluye una migración SQL normalizada para Supabase; antes de producción se deben configurar autenticación, políticas de acceso y pruebas de concurrencia.</p></div></div>
         </div>
