@@ -502,7 +502,7 @@ export default function Home() {
       ];
       localCollections.forEach(([storageKey, field]) => {
         const raw = localStorage.getItem(storageKey);
-        if (raw) (fabricInventory[field] as unknown) = JSON.parse(raw);
+        if (raw) (fabricInventory as unknown as Record<string, unknown>)[field] = JSON.parse(raw);
       });
       const payload = {
         app: 'TelaStock',
