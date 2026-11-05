@@ -5,7 +5,7 @@
  */
 export type SizeGroup = { id: string; name: string; description?: string };
 export type Size = { id: string; groupId: string; label: string; sortOrder: number };
-export type ManufacturingModel = { id: string; name: string; sizeGroupId: string; updatedAt?: string };
+export type ManufacturingModel = { id: string; name: string; sizeGroupId: string; secondaryFabricSlots?: number; updatedAt?: string };
 export type Laterality = 'simetrica' | 'izquierda' | 'derecha' | 'ninguna';
 export type StockSide = 'izquierda' | 'derecha';
 export type ModelPiece = {
@@ -16,8 +16,8 @@ export type ModelPiece = {
   unitsPerGarment: number;
   laterality: Laterality;
   sortOrder: number;
-  /** Slot de tela que podrá materializarse en un producto: principal o secundaria 1–3. */
-  fabricSlot?: 'principal' | 'secundaria_1' | 'secundaria_2' | 'secundaria_3';
+  /** Ranura dinámica de material: principal o secundaria_N, sin límite fijo. */
+  fabricSlot?: string;
   /** Color del catálogo global; el HEX/CMYK final se resuelve para la tela elegida en el producto. */
   colorId?: string | null;
   /** True cuando el usuario eligió un color distinto del valor heredado del modelo. */
