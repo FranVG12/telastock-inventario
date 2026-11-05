@@ -1232,7 +1232,7 @@ export function ProductionModule({
     }
     for (const line of order.basePieces) {
       const piece = basePieces.find((item) => item.id === line.pieceId);
-      const reserved = reservedPieceQuantity(otherOrders.flatMap((activeOrder) => activeOrder.basePieces), line.pieceId, line.sizeId, line.side, order.id);
+      const reserved = reservedPieceQuantity(otherOrders.flatMap((activeOrder) => activeOrder.basePieces), line.pieceId, line.sizeId, line.side);
       if (currentBasePieceBalance(line.pieceId, line.sizeId, line.side) - reserved + 0.00001 < line.quantity) issues.push((piece?.name ?? 'Molde base') + ': el stock reservado ya no está disponible.');
     }
     for (const line of order.componentPieces) {
@@ -1582,6 +1582,61 @@ export function ProductionModule({
       </form>}
     </section>;
 
+    if (view === 'ordenes') return <section className="panel production-panel">
+      <div className="panel-heading">
+        <div><h2>Órdenes de producción</h2><p>Reserva existencias, inicia el trabajo y confirma los consumos al terminar cada orden.</p></div>
+        <button className="button secondary" onClick={() => onNavigate('planificacion')}>＋ Nueva orden</button>
+      </div>
+      <div className="production-order-summary">
+        {(['borrador','reservada','en_proceso','completada','cancelada'] as ProductionOrderStatus[]).map((status) => {
+          const count = data.productionOrders.filter((order) => order.status === status).length;
+          const labels: Record<ProductionOrderStatus,string> = { borrador:'Borradores', reservada:'Reservadas', en_proceso:'En proceso', completada:'Completadas', cancelada:'Canceladas' };
+          return <div key={status}><strong>{count}</strong><small>{labels[status]}</small></div>;
+        })}
+      </div>
+      <div className="production-list">
+        {[...data.productionOrders].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((order) => {
+          const statusLabels: Record<ProductionOrderStatus,string> = { borrador:'Borrador', reservada:'Reservada', en_proceso:'En proceso', completada:'Completada', cancelada:'Cancelada' };
+          const statusClass: Record<ProductionOrderStatus,string> = { borrador:'draft', reservada:'reserved', en_proceso:'progress', completada:'done', cancelada:'cancelled' };
+          const quantityText = Object.entries(order.quantities).map(([sizeId, quantity]) => {
+            const size = sizes.find((item) => item.id === sizeId);
+            return (size?.label ?? 'Talla') + ': ' + quantity;
+          }).join(' · ');
+          const materialText = order.materials.map((line) => {
+            const variant = variantsBySupply.get(line.variantId) ?? data.variants.find((item) => item.id === line.variantId);
+            const supply = variant ? supplies.find((item) => item.id === variant.supplyId) : undefined;
+            const size = sizes.find((item) => item.id === line.sizeId);
+            return (supply?.name ?? 'Material') + ' ' + (variant?.name ?? '') + ': ' + format(line.quantity) + ' ' + unitLabel[line.unit] + (size ? ' (' + size.label + ')' : '');
+          });
+          return <article className="production-card production-order-card" key={order.id}>
+            <div className="production-card-heading">
+              <div><strong>{order.number} · {order.productName}</strong><span>{new Date(order.createdAt).toLocaleDateString('es-PE')} · {quantityText || 'Sin cantidades'} </span></div>
+              <span className={'production-order-status ' + statusClass[order.status]}>{statusLabels[order.status]}</span>
+            </div>
+            {order.note && <p className="production-muted">{order.note}</p>}
+            <div className="production-order-details">
+              <div><strong>Materiales</strong><small>{materialText.length ? materialText.join(' · ') : 'Sin consumos de materiales configurados'}</small></div>
+              <div><strong>Piezas de moldes</strong><small>{order.basePieces.length} requerimientos de patrón base · {order.componentPieces.length} de componentes</small></div>
+              {order.rollAllocations.length > 0 && <div><strong>Rollos reservados</strong><small>{order.rollAllocations.length} asignaciones físicas · {order.rollAllocations.reduce((sum, allocation) => sum + allocation.quantity, 0).toFixed(3)} unidades de medición</small></div>}
+            </div>
+            <div className="production-order-cost">
+              {order.estimatedMaterialCost === null
+                ? <span>Costo de materiales pendiente · {order.missingCostLines} materiales sin precio de compra</span>
+                : <span>Materiales según últimos precios registrados: <strong>{money(order.estimatedMaterialCost)}</strong></span>}
+            </div>
+            <div className="production-order-actions">
+              {order.status === 'borrador' && <button className="button primary" onClick={() => reserveProductionOrder(order.id)}>Verificar y reservar stock</button>}
+              {order.status === 'reservada' && <button className="button primary" onClick={() => startProductionOrder(order.id)}>Iniciar producción</button>}
+              {order.status === 'en_proceso' && <button className="button primary" onClick={() => { if (window.confirm('¿Confirmas que ' + order.number + ' terminó y que deben descontarse los materiales y piezas reservados?')) completeProductionOrder(order.id); }}>Completar y descontar</button>}
+              {holdingStatuses.includes(order.status) && <button className="button secondary danger-action" onClick={() => cancelProductionOrder(order.id)}>Cancelar y liberar reserva</button>}
+            </div>
+          </article>;
+        })}
+        {data.productionOrders.length === 0 && <div className="empty">Todavía no hay órdenes. Crea un modelo configurado y calcula una producción desde Planificar.</div>}
+      </div>
+      <p className="production-muted">Una orden en borrador no reserva stock. Las órdenes reservadas o en proceso apartan existencias; cancelar libera la reserva. Al completar, TelaStock registra salidas de insumos, rollos, moldes base y piezas auxiliares.</p>
+    </section>;
+
     return <section className="panel production-panel">
       <div className="panel-heading"><div><h2>Planificación de materiales</h2><p>Indica cuántas prendas necesitas por talla. TelaStock calcula los consumos configurados.</p></div></div>
       <label className="field-label">Modelo de prenda<select className="large-input" value={selectedProductId} onChange={(e) => { setSelectedProductId(e.target.value); setPlanCounts({}); }}><option value="">Seleccionar modelo</option>{data.productModels.filter((x) => x.active).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
@@ -1609,7 +1664,14 @@ export function ProductionModule({
               return <tr key={row.variantId}><td><strong>{supply.name}</strong><small>{variant.name}</small>{row.missingSizes.length > 0 && <em>Consumo pendiente: {row.missingSizes.join(', ')}</em>}</td><td>{format(row.total)} {supply.baseUnit}</td><td>{format(row.available)} {supply.baseUnit}</td><td className={row.shortage > 0 || row.missingSizes.length > 0 ? 'production-shortage' : 'production-ok'}>{format(row.shortage)} {supply.baseUnit}</td><td>{row.packs === null ? (row.shortage > 0 ? 'Sin presentación' : '—') : row.packs + ' ' + (variant.purchasePackLabel || 'paquete(s)')}</td></tr>;
             })}
           </tbody></table></div>
-          <p className="production-muted">La planificación es una estimación basada en las recetas guardadas y el stock visible. No descuenta existencias ni crea compras automáticamente. El consumo real debe registrarse en su módulo correspondiente.</p>
+          <div className="production-order-create">
+            <label className="field-label">Observación para la orden (opcional)
+              <input className="large-input" value={orderNote} onChange={(event) => setOrderNote(event.target.value)} placeholder="Cliente, fecha de entrega o indicación de taller…" />
+            </label>
+            <button className="button primary" onClick={createProductionOrderDraft} disabled={!activeProduct || plan.unresolved.length > 0 || plan.rows.some((row) => row.missingSizes.length > 0) || !Object.values(planCounts).some((value) => Number(value) > 0)}>Crear borrador de producción</button>
+            <p className="production-muted">El borrador guarda las cantidades y consumos calculados. Después podrás reservar el stock; solo al completar la orden se registrarán los descuentos.</p>
+          </div>
+
         </>;
       })()}
       {!activeProduct && data.productModels.filter((x) => x.active).length === 0 && <div className="empty">Primero crea un modelo configurado a partir de un patrón base.</div>}
@@ -1624,6 +1686,7 @@ export function ProductionModule({
       <button className={view === 'modelos-producto' ? 'active' : ''} onClick={() => onNavigate('modelos-producto')} role="tab" aria-selected={view === 'modelos-producto'}>Modelos</button>
       <button className={view === 'recetas' ? 'active' : ''} onClick={() => onNavigate('recetas')} role="tab" aria-selected={view === 'recetas'}>Recetas</button>
       <button className={view === 'planificacion' ? 'active' : ''} onClick={() => onNavigate('planificacion')} role="tab" aria-selected={view === 'planificacion'}>Planificar</button>
+      <button className={view === 'ordenes' ? 'active' : ''} onClick={() => onNavigate('ordenes')} role="tab" aria-selected={view === 'ordenes'}>Órdenes</button>
     </div>
     {notice && <div className={'notice ' + notice.kind}><span>{notice.text}</span><button onClick={() => setNotice(null)} aria-label="Cerrar">×</button></div>}
     {mainPanel}
