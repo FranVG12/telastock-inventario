@@ -534,6 +534,25 @@ export default function Home() {
     if (movements.some((movement) => movement.sizeId === size.id)) {
       setNoticeMessage(`No se puede borrar la talla ${size.label} porque tiene movimientos históricos. Renómbrala o déjala sin usar para conservar la trazabilidad.`, 'error'); return;
     }
+    const orders = productionOrdersSnapshot();
+    if (!orders) { setNoticeMessage('No se pudo verificar las órdenes guardadas. Exporta un respaldo válido antes de borrar tallas.', 'error'); return; }
+    const referencedByOrder = orders.some((order) =>
+      Boolean(order.basePieces?.some((line) => line.sizeId === size.id)) ||
+      false
+    );
+    const productionRaw = localStorage.getItem('telastock-production-orders-v1');
+    let orderSnapshots: Array<{ quantities?: Record<string, number>; materials?: Array<{ sizeId?: string | null }>; componentPieces?: Array<{ sizeId?: string }> }> = [];
+    try { orderSnapshots = productionRaw ? JSON.parse(productionRaw) as typeof orderSnapshots : []; } catch {
+      setNoticeMessage('No se pudo verificar las órdenes guardadas. Exporta un respaldo válido antes de borrar tallas.', 'error'); return;
+    }
+    const referencedInProduction = orderSnapshots.some((order) =>
+      Boolean(order.quantities?.[size.id]) ||
+      order.materials?.some((line) => line.sizeId === size.id) ||
+      order.componentPieces?.some((line) => line.sizeId === size.id)
+    );
+    if (referencedByOrder || referencedInProduction) {
+      setNoticeMessage(`No se puede borrar la talla ${size.label}: está referenciada por una orden de producción. Renómbrala o déjala sin usar para conservar la trazabilidad.`, 'error'); return;
+    }
     setSizes((previous) => previous.filter((item) => item.id !== size.id));
     setNoticeMessage(`Talla ${size.label} eliminada.`);
   }
