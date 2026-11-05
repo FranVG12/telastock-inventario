@@ -177,3 +177,11 @@ No se debe sumar KG con metros ni inferir metros a partir de KG sin un rendimien
 El respaldo completo evoluciona a schemaVersion 4 e incluye insumos, variantes, movimientos, componentes, recetas y modelos configurados. Se mantienen importables los respaldos completos de versiones 1, 2 y 3; al restaurar uno antiguo, las nuevas colecciones se inicializan vacías.
 
 La migración 202611060001_supplies_components_product_models.sql define el esquema relacional futuro. **No se ejecuta automáticamente** y no conecta la aplicación con Supabase. Las tablas nuevas mantienen RLS habilitado sin políticas permisivas, igual que el resto del esquema pendiente de configuración de autenticación y acceso.
+
+### Compras de insumos y avíos
+
+El módulo de compras de avíos permite registrar fecha, proveedor (reutiliza el catálogo existente), tipo y número de comprobante, observación y varios detalles por documento. Cada detalle conserva la variante, la talla cuando el insumo controla stock por talla, la cantidad comprada, la presentación, la equivalencia declarada a la unidad base, el precio histórico y el importe.
+
+Al guardar un comprobante, TelaStock registra una entrada por cada detalle en el ledger de stock de avíos. Para una presentación configurada, por ejemplo una docena con equivalencia de 12 unidades, la compra de 3 docenas ingresa 36 unidades al inventario. Cuando no hay presentación configurada, la cantidad se compra directamente en la unidad base del insumo. No se convierten unidades incompatibles ni se estima equivalencia.
+
+Las compras de telas permanecen en el módulo existente de rollos y no se duplican en compras de avíos. Las compras vinculadas a proveedor conservan su referencia aunque el proveedor luego deje de estar disponible en el catálogo local.
