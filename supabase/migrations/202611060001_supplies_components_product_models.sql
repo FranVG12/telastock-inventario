@@ -221,3 +221,177 @@ drop trigger if exists supply_stock_movement_guard on public.supply_stock_moveme
 create trigger supply_stock_movement_guard
 before insert on public.supply_stock_movements
 for each row execute function public.validate_supply_stock_movement();
+
+
+-- Purchase documents for non-textile supplies. Textile rolls continue to use
+-- public.compras/public.detalle_compra and their existing roll-specific workflow.
+create table if not exists public.supply_purchases (
+  id uuid primary key default gen_random_uuid(),
+  supplier_id uuid null references public.proveedores(id_proveedor) on delete set null,
+  purchase_date date not null,
+  document_type text not null default '',
+  document_number text not null default '',
+  note text not null default '',
+  total numeric(14,2) not null default 0 check (total >= 0),
+  created_at timestamptz not null default now()
+);
+create index if not exists supply_purchases_date_idx
+  on public.supply_purchases(purchase_date desc, created_at desc);
+create index if not exists supply_purchases_supplier_idx
+  on public.supply_purchases(supplier_id, purchase_date desc);
+
+create table if not exists public.supply_purchase_details (
+  id uuid primary key default gen_random_uuid(),
+  purchase_id uuid not null references public.supply_purchases(id) on delete restrict,
+  variant_id uuid not null references public.supply_variants(id) on delete restrict,
+  size_id uuid null references public.sizes(id) on delete restrict,
+  purchase_quantity numeric(14,5) not null check (purchase_quantity > 0),
+  purchase_unit_label text not null,
+  base_quantity_per_pack numeric(14,5) not null check (base_quantity_per_pack > 0),
+  inventory_quantity numeric(14,5) generated always as
+    (round(purchase_quantity * base_quantity_per_pack, 5)) stored,
+  unit_price numeric(14,4) not null check (unit_price >= 0),
+  line_total numeric(14,2) generated always as
+    (round(purchase_quantity * unit_price, 2)) stored,
+  created_at timestamptz not null default now()
+);
+create index if not exists supply_purchase_details_purchase_idx
+  on public.supply_purchase_details(purchase_id);
+create index if not exists supply_purchase_details_variant_idx
+  on public.supply_purchase_details(variant_id, size_id);
+
+create or replace function public.validate_supply_purchase_detail()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_stock_mode text;
+  v_textile_id uuid;
+begin
+  select s.stock_mode, v.textile_id
+    into v_stock_mode, v_textile_id
+  from public.supply_variants v
+  join public.supply_catalog s on s.id = v.supply_id
+  where v.id = new.variant_id;
+
+  if v_stock_mode is null then
+    raise exception 'La variante de avío no existe.';
+  end if;
+  if v_textile_id is not null then
+    raise exception 'Las variantes vinculadas a tela se compran desde el inventario de rollos.';
+  end if;
+  if (v_stock_mode = 'total' and new.size_id is not null)
+     or (v_stock_mode = 'talla' and new.size_id is null) then
+    raise exception 'La talla del detalle no coincide con el control de stock del insumo.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists supply_purchase_detail_guard on public.supply_purchase_details;
+create trigger supply_purchase_detail_guard
+before insert or update on public.supply_purchase_details
+for each row execute function public.validate_supply_purchase_detail();
+
+create or replace function public.refresh_supply_purchase_total()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_purchase_id uuid;
+begin
+  v_purchase_id := coalesce(new.purchase_id, old.purchase_id);
+  update public.supply_purchases p
+  set total = coalesce((
+    select sum(d.line_total) from public.supply_purchase_details d
+    where d.purchase_id = v_purchase_id
+  ), 0)
+  where p.id = v_purchase_id;
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists supply_purchase_total_after_detail on public.supply_purchase_details;
+create trigger supply_purchase_total_after_detail
+after insert or update or delete on public.supply_purchase_details
+for each row execute function public.refresh_supply_purchase_total();
+
+alter table public.supply_stock_movements
+  add column if not exists source_purchase_detail_id uuid null
+  references public.supply_purchase_details(id) on delete restrict;
+create unique index if not exists supply_stock_movement_purchase_detail_uidx
+  on public.supply_stock_movements(source_purchase_detail_id)
+  where source_purchase_detail_id is not null;
+
+-- A purchase detail can create exactly one positive stock entry for the same
+-- variant, size and converted base quantity. The unique index prevents reposting.
+create or replace function public.validate_supply_stock_movement()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_mode text;
+  v_balance numeric(18,4);
+  v_lock_key bigint;
+  v_detail_variant uuid;
+  v_detail_size uuid;
+  v_detail_quantity numeric(14,5);
+begin
+  select s.stock_mode into v_mode
+  from public.supply_variants v
+  join public.supply_catalog s on s.id = v.supply_id
+  where v.id = new.variant_id;
+
+  if v_mode is null then
+    raise exception 'La variante de insumo no existe.';
+  end if;
+
+  if (v_mode = 'total' and new.size_id is not null)
+     or (v_mode = 'talla' and new.size_id is null) then
+    raise exception 'La talla indicada no coincide con la modalidad de stock del insumo.';
+  end if;
+
+  if (new.movement_type = 'entrada' and new.delta_quantity <= 0)
+     or (new.movement_type = 'salida' and new.delta_quantity >= 0) then
+    raise exception 'El signo de la cantidad no coincide con el tipo de movimiento.';
+  end if;
+
+  if new.source_purchase_detail_id is not null then
+    select d.variant_id, d.size_id, d.inventory_quantity
+      into v_detail_variant, v_detail_size, v_detail_quantity
+    from public.supply_purchase_details d
+    where d.id = new.source_purchase_detail_id;
+    if not found
+       or new.movement_type <> 'entrada'
+       or new.variant_id <> v_detail_variant
+       or new.size_id is distinct from v_detail_size
+       or new.delta_quantity <> v_detail_quantity then
+      raise exception 'El movimiento no coincide con el detalle de compra asociado.';
+    end if;
+  end if;
+
+  v_lock_key := hashtextextended(new.variant_id::text || ':' || coalesce(new.size_id::text, 'total'), 0);
+  perform pg_advisory_xact_lock(v_lock_key);
+
+  select coalesce(sum(delta_quantity), 0)
+    into v_balance
+  from public.supply_stock_movements
+  where variant_id = new.variant_id
+    and size_id is not distinct from new.size_id;
+
+  if v_balance + new.delta_quantity < 0 then
+    raise exception 'Stock insuficiente para registrar la salida.';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists supply_stock_movement_guard on public.supply_stock_movements;
+create trigger supply_stock_movement_guard
+before insert on public.supply_stock_movements
+for each row execute function public.validate_supply_stock_movement();
+
+alter table public.supply_purchases enable row level security;
+alter table public.supply_purchase_details enable row level security;
+
+comment on table public.supply_purchases is
+  'Comprobantes de compra de insumos y avíos. No incluye compras de rollos textiles.';
+comment on table public.supply_purchase_details is
+  'Líneas de compra con cantidad, precio histórico, presentación y equivalencia declarada en unidad base.';
+comment on column public.supply_stock_movements.source_purchase_detail_id is
+  'Detalle que originó la entrada de stock, si el movimiento proviene de una compra.';
