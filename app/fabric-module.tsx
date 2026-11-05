@@ -369,11 +369,11 @@ export function FabricModule({ view }: { view: FabricView }) {
     if (data.telas.some((x) => x.nombreTela.toLocaleLowerCase('es') === name.toLocaleLowerCase('es') && x.id !== telaForm.id)) return tell('Ya existe una tela con ese nombre.', 'error');
     const now = new Date().toISOString();
     const row: Textile = { id: telaForm.id ?? id(), nombreTela: name, unidadVenta: telaForm.unidadVenta, anchoNominalM: width, descripcion: telaForm.descripcion.trim(), activo: telaForm.activo, createdAt: telaForm.id ? (telaById.get(telaForm.id)?.createdAt ?? now) : now, updatedAt: now };
-    persist({ ...data, telas: telaForm.id ? data.telas.map((x) => x.id === row.id ? row : x) : [...data.telas, row] });
+    if (!persist({ ...data, telas: telaForm.id ? data.telas.map((x) => x.id === row.id ? row : x) : [...data.telas, row] })) return;
     setShowTelaForm(false); tell(telaForm.id ? 'Tela actualizada. Los rollos y compras anteriores se conservaron.' : 'Tela creada y activada según el checklist.');
   }
   function toggleTela(tela: Textile) {
-    persist({ ...data, telas: data.telas.map((x) => x.id === tela.id ? { ...x, activo: !x.activo, updatedAt: new Date().toISOString() } : x) });
+    if (!persist({ ...data, telas: data.telas.map((x) => x.id === tela.id ? { ...x, activo: !x.activo, updatedAt: new Date().toISOString() } : x) })) return;
     tell(tela.activo ? 'Tela desactivada. Su inventario e historial permanecen.' : 'Tela activada.');
   }
   function openRollo(roll?: FabricRoll) {
@@ -421,11 +421,11 @@ export function FabricModule({ view }: { view: FabricView }) {
       addMeasurement('KG', previous.pesoKg, row.pesoKg);
       addMeasurement('M', previous.metros, row.metros);
     }
-    persist({
+    if (!persist({
       ...data,
       rollos: previous ? data.rollos.map((x) => x.id === row.id ? row : x) : [...data.rollos, row],
       rolloMovimientos: [...data.rolloMovimientos, ...movementRows],
-    });
+    })) return;
     setShowRolloForm(false); tell(rolloForm.id ? 'Rollo actualizado. Las compras históricas no se modificaron.' : 'Rollo registrado en el inventario.');
   }
 
@@ -448,14 +448,14 @@ export function FabricModule({ view }: { view: FabricView }) {
       ...roll,
       pesoKg: rollMovementForm.unidad === 'KG' ? next : roll.pesoKg,
       metros: rollMovementForm.unidad === 'M' ? next : roll.metros,
-      estado: next === 0 ? 'agotado' : roll.estado,
+      estado: (rollMovementForm.unidad === 'KG' ? next : roll.pesoKg ?? 0) === 0 && (rollMovementForm.unidad === 'M' ? next : roll.metros ?? 0) === 0 ? 'agotado' : roll.estado,
       updatedAt: now,
     };
     const movement: RollMovement = {
       id: id(), idRollo: roll.id, fecha: now, tipo: 'consumo', unidad: rollMovementForm.unidad,
       delta: -quantity, cantidadAnterior: current, cantidadNueva: next, nota: rollMovementForm.nota.trim() || 'Consumo de tela',
     };
-    persist({ ...data, rollos: data.rollos.map((x) => x.id === roll.id ? updated : x), rolloMovimientos: [...data.rolloMovimientos, movement] });
+    if (!persist({ ...data, rollos: data.rollos.map((x) => x.id === roll.id ? updated : x), rolloMovimientos: [...data.rolloMovimientos, movement] })) return;
     setShowRollMovement(false);
     setRollMovementForm({ unidad: updated.unidadIngreso, cantidad: '', nota: 'Consumo para corte' });
     tell(`Consumo registrado. Saldo real: ${nfmt.format(next)} ${movement.unidad}.`);
@@ -477,12 +477,12 @@ export function FabricModule({ view }: { view: FabricView }) {
     const row: Supplier = { id: supplierForm.id ?? id(), nombre: name, contacto: supplierForm.contacto.trim(), direccion: supplierForm.direccion.trim(), nota: supplierForm.nota.trim(), createdAt: supplierForm.id ? (supplierById.get(supplierForm.id)?.createdAt ?? now) : now, updatedAt: now };
     const phoneRows = phones.map((x) => ({ ...x, idProveedor: row.id, numero: x.numero.trim(), etiqueta: x.etiqueta.trim() || 'Teléfono' }));
     const categoryRows = supplierForm.categorias.map((categoria) => ({ id: id(), idProveedor: row.id, categoria }));
-    persist({
+    if (!persist({
       ...data,
       proveedores: supplierForm.id ? data.proveedores.map((x) => x.id === row.id ? row : x) : [...data.proveedores, row],
       proveedorTelefonos: [...data.proveedorTelefonos.filter((x) => x.idProveedor !== row.id), ...phoneRows],
       proveedorCategorias: [...data.proveedorCategorias.filter((x) => x.idProveedor !== row.id), ...categoryRows],
-    });
+    })) return;
     setShowSupplierForm(false); tell(supplierForm.id ? 'Proveedor actualizado.' : 'Proveedor registrado.');
   }
 
@@ -556,7 +556,7 @@ export function FabricModule({ view }: { view: FabricView }) {
       ? data.compras.map((x) => x.id === purchaseId ? purchase : x)
       : [...data.compras, purchase];
     const rollRows = [...data.rollos.filter((roll) => !newRolls.some((x) => x.id === roll.id)), ...newRolls];
-    persist({ ...data, compras: purchaseRows, rollos: rollRows, detalleCompra: details, rolloMovimientos: [...data.rolloMovimientos, ...newRollMovements] });
+    if (!persist({ ...data, compras: purchaseRows, rollos: rollRows, detalleCompra: details, rolloMovimientos: [...data.rolloMovimientos, ...newRollMovements] })) return;
     setShowPurchaseForm(false);
     tell(`${oldPurchase ? 'Compra actualizada' : 'Compra registrada'}: ${lines.length} rollos por ${money.format(details.filter((x) => x.idCompra === purchaseId).reduce((sum, x) => sum + x.importeTotal, 0))}.`);
   }
@@ -864,7 +864,7 @@ export function FabricModule({ view }: { view: FabricView }) {
       </form> : <form onSubmit={savePurchase} className="fabric-purchase-form">
         <div className="fabric-form-grid">
           <div className="fabric-provider-inline fabric-span-2"><label className="field-label">Proveedor<select className="large-input" value={purchaseForm.idProveedor} onChange={(e) => setPurchaseForm((x) => ({ ...x, idProveedor: e.target.value }))}><option value="">Sin proveedor identificado</option>{data.proveedores.map((x) => <option key={x.id} value={x.id}>{x.nombre}</option>)}</select></label><button type="button" className="button secondary" onClick={() => setShowInlineSupplier((x) => !x)}>＋ Proveedor</button></div>
-          {showInlineSupplier && <div className="inline-supplier fabric-span-2"><input className="large-input" value={inlineSupplierName} onChange={(e) => setInlineSupplierName(e.target.value)} placeholder="Nombre comercial del nuevo proveedor" /><button type="button" className="button secondary" onClick={() => { const name = inlineSupplierName.trim(); if (!name) return tell('Escribe el nombre del proveedor.', 'error'); const supplier: Supplier = { id: id(), nombre: name, contacto: '', direccion: '', nota: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }; persist({ ...data, proveedores: [...data.proveedores, supplier], proveedorCategorias: [...data.proveedorCategorias, { id: id(), idProveedor: supplier.id, categoria: 'Telas' }] }); setPurchaseForm((x) => ({ ...x, idProveedor: supplier.id })); setInlineSupplierName(''); setShowInlineSupplier(false); tell('Proveedor añadido sin salir de la compra. Completa sus teléfonos y rubros luego en Proveedores.'); }}>Guardar proveedor</button></div>}
+          {showInlineSupplier && <div className="inline-supplier fabric-span-2"><input className="large-input" value={inlineSupplierName} onChange={(e) => setInlineSupplierName(e.target.value)} placeholder="Nombre comercial del nuevo proveedor" /><button type="button" className="button secondary" onClick={() => { const name = inlineSupplierName.trim(); if (!name) return tell('Escribe el nombre del proveedor.', 'error'); const supplier: Supplier = { id: id(), nombre: name, contacto: '', direccion: '', nota: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }; if (!persist({ ...data, proveedores: [...data.proveedores, supplier], proveedorCategorias: [...data.proveedorCategorias, { id: id(), idProveedor: supplier.id, categoria: 'Telas' }] })) return; setPurchaseForm((x) => ({ ...x, idProveedor: supplier.id })); setInlineSupplierName(''); setShowInlineSupplier(false); tell('Proveedor añadido sin salir de la compra. Completa sus teléfonos y rubros luego en Proveedores.'); }}>Guardar proveedor</button></div>}
           <label className="field-label">Fecha de compra<input className="large-input" type="date" required value={purchaseForm.fechaCompra} onChange={(e) => setPurchaseForm((x) => ({ ...x, fechaCompra: e.target.value }))} /></label>
           <label className="field-label">Comprobante<select className="large-input" value={purchaseForm.tipoComprobante} onChange={(e) => setPurchaseForm((x) => ({ ...x, tipoComprobante: e.target.value }))}>{['Factura','Boleta','Ticket','Guía','Sin comprobante','Otro'].map((x) => <option key={x}>{x}</option>)}</select></label>
           <label className="field-label fabric-span-2">Número de comprobante<input className="large-input" value={purchaseForm.numeroComprobante} onChange={(e) => setPurchaseForm((x) => ({ ...x, numeroComprobante: e.target.value }))} placeholder="Serie y número (opcional)" /></label>
