@@ -316,6 +316,29 @@ export default function Home() {
   }
 
   // Symmetric molds use pairs by default. Each parity writes one left and one right movement.
+  function reservedBasePieceQuantity(pieceId: string, sizeId: string, side: StockSide | null): number {
+    try {
+      const raw = localStorage.getItem('telastock-production-orders-v1');
+      const orders = raw ? JSON.parse(raw) as Array<{ status?: string; basePieces?: Array<{ pieceId?: string; sizeId?: string; side?: StockSide | null; quantity?: number }> }> : [];
+      if (!Array.isArray(orders)) return 0;
+      return orders.filter((order) => order.status === 'reservada' || order.status === 'en_proceso').reduce((sum, order) =>
+        sum + (Array.isArray(order.basePieces) ? order.basePieces.filter((line) =>
+          line.pieceId === pieceId && line.sizeId === sizeId && (line.side ?? null) === side
+        ).reduce((total, line) => total + (Number(line.quantity) || 0), 0) : 0), 0);
+    } catch { return 0; }
+  }
+
+  function replaceBaseMovements(next: PieceMovement[]): boolean {
+    try {
+      localStorage.setItem(STORAGE.movements, JSON.stringify(next));
+      setMovements(next);
+      return true;
+    } catch {
+      setNoticeMessage('No se pudo guardar el consumo de moldes base en el navegador.', 'error');
+      return false;
+    }
+  }
+
   function addStock(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!currentStockModel || selectedSizeIds.length === 0) {
@@ -339,7 +362,7 @@ export default function Home() {
           if (mode === 'paridad') {
             const quantity = readAmount(sizeId, piece.id, 'paridad');
             if (!validateQuantity(quantity, piece.name, sizeId)) return;
-            if (stockOperation === 'salida' && quantity > 0 && (quantity > current.left || quantity > current.right)) {
+            if (stockOperation === 'salida' && quantity > 0 && (quantity > current.left - reservedBasePieceQuantity(piece.id, sizeId, 'izquierda') || quantity > current.right - reservedBasePieceQuantity(piece.id, sizeId, 'derecha'))) {
               setNoticeMessage(`No puedes retirar ${fmt(quantity)} paridades de ${piece.name}, talla ${sizes.find((item) => item.id === sizeId)?.label ?? '—'}: hay ${fmt(current.left)} izquierda y ${fmt(current.right)} derecha.`, 'error');
               return;
             }
@@ -349,10 +372,10 @@ export default function Home() {
             const leftQuantity = readAmount(sizeId, piece.id, 'izquierda');
             const rightQuantity = readAmount(sizeId, piece.id, 'derecha');
             if (!validateQuantity(leftQuantity, piece.name, sizeId, 'izquierda') || !validateQuantity(rightQuantity, piece.name, sizeId, 'derecha')) return;
-            if (stockOperation === 'salida' && leftQuantity > current.left) {
+            if (stockOperation === 'salida' && leftQuantity > current.left - reservedBasePieceQuantity(piece.id, sizeId, 'izquierda')) {
               setNoticeMessage(`No puedes retirar ${fmt(leftQuantity)} piezas del lado izquierdo de ${piece.name}: solo hay ${fmt(current.left)}.`, 'error'); return;
             }
-            if (stockOperation === 'salida' && rightQuantity > current.right) {
+            if (stockOperation === 'salida' && rightQuantity > current.right - reservedBasePieceQuantity(piece.id, sizeId, 'derecha')) {
               setNoticeMessage(`No puedes retirar ${fmt(rightQuantity)} piezas del lado derecho de ${piece.name}: solo hay ${fmt(current.right)}.`, 'error'); return;
             }
             pushMovement(piece, sizeId, leftQuantity, 'izquierda');
@@ -363,7 +386,7 @@ export default function Home() {
 
         const quantity = readAmount(sizeId, piece.id);
         if (!validateQuantity(quantity, piece.name, sizeId)) return;
-        if (stockOperation === 'salida' && quantity > stockForPiece(piece.id, sizeId)) {
+        if (stockOperation === 'salida' && quantity > stockForPiece(piece.id, sizeId) - reservedBasePieceQuantity(piece.id, sizeId, null)) {
           setNoticeMessage(`No puedes retirar ${quantity} de ${piece.name} talla ${sizes.find((size) => size.id === sizeId)?.label}: solo hay ${stockForPiece(piece.id, sizeId)}.`, 'error');
           return;
         }
@@ -585,7 +608,7 @@ export default function Home() {
       const payload = {
         app: 'TelaStock',
         backupType: 'full',
-        schemaVersion: 4,
+        schemaVersion: 5,
         exportedAt: new Date().toISOString(),
         data: {
           sizeGroups, sizes, models, pieces, movements, fabricInventory,
@@ -616,7 +639,7 @@ export default function Home() {
       const raw = JSON.parse(await file.text()) as unknown;
       const isRecord = (value: unknown): value is Record<string, unknown> =>
         Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-      if (!isRecord(raw) || raw.app !== 'TelaStock' || raw.backupType !== 'full' || ![1, 2, 3, 4].includes(Number(raw.schemaVersion)) || !isRecord(raw.data)) {
+      if (!isRecord(raw) || raw.app !== 'TelaStock' || raw.backupType !== 'full' || ![1, 2, 3, 4, 5].includes(Number(raw.schemaVersion)) || !isRecord(raw.data)) {
         throw new Error('Este no es un respaldo completo de TelaStock compatible.');
       }
       const data = raw.data;
@@ -718,7 +741,7 @@ export default function Home() {
       (Object.keys(emptyProductionBackupData()) as (keyof ReturnType<typeof emptyProductionBackupData>)[]).forEach((key) => {
         localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(importedProduction[key]));
       });
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '1');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '2');
       window.dispatchEvent(new Event('telastock-production-data-restored'));
       window.dispatchEvent(new Event('telastock-fabric-data-updated'));
       window.dispatchEvent(new Event('telastock-fabric-data-restored'));
