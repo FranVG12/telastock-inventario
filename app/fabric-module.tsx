@@ -81,7 +81,7 @@ export function validateFabricBackupData(value: unknown): FabricBackupData {
     (output as unknown as Record<string, unknown>)[key] = rows;
   }
   const supplierRucs = output.proveedores.map((x) => x.ruc ?? '').filter(Boolean);
-  if (output.proveedores.some((x) => x.ruc != null && (typeof x.ruc !== 'string' || !/^\\d{11}$/.test(x.ruc))) || new Set(supplierRucs).size !== supplierRucs.length) {
+  if (output.proveedores.some((x) => x.ruc != null && (typeof x.ruc !== 'string' || !/^\d{11}$/.test(x.ruc))) || new Set(supplierRucs).size !== supplierRucs.length) {
     throw new Error('Hay proveedores con RUC inválido o duplicado. El RUC debe contener exactamente 11 dígitos.');
   }
   const telaIds = new Set(output.telas.map((x) => x.id));
@@ -700,7 +700,7 @@ export function FabricModule({ view }: { view: FabricView }) {
     const name = supplierForm.nombre.trim();
     const phones = supplierForm.telefonos.filter((x) => x.numero.trim());
     const ruc = supplierForm.ruc.trim();
-    if (ruc && !/^\\d{11}$/.test(ruc)) return tell('El RUC debe contener exactamente 11 dígitos o quedar vacío.', 'error');
+    if (ruc && !/^\d{11}$/.test(ruc)) return tell('El RUC debe contener exactamente 11 dígitos o quedar vacío.', 'error');
     if (ruc && data.proveedores.some((x) => x.id !== supplierForm.id && (x.ruc ?? '') === ruc)) return tell('Ese RUC ya está registrado en otro proveedor.', 'error');
     if (!name) return tell('Escribe el nombre comercial del proveedor.', 'error');
     if (new Set(phones.map((x) => x.numero.replace(/\s+/g, '').toLowerCase())).size !== phones.length) return tell('Hay números telefónicos duplicados.', 'error');
@@ -919,8 +919,8 @@ export function FabricModule({ view }: { view: FabricView }) {
             const existing = map.get(field(row, 'id_proveedor', 'id')) ?? [...map.values()].find((x) => x.nombre.toLocaleLowerCase('es') === name.toLocaleLowerCase('es'));
             const hasRucColumn = Object.prototype.hasOwnProperty.call(row, 'ruc');
             const rawRuc = field(row, 'ruc');
-            const ruc = hasRucColumn ? rawRuc.replace(/\\D/g, '') : (existing?.ruc ?? '');
-            if (ruc && !/^\\d{11}$/.test(ruc)) throw new Error('ruc debe contener exactamente 11 dígitos o quedar vacío.');
+            const ruc = hasRucColumn ? rawRuc.replace(/\D/g, '') : (existing?.ruc ?? '');
+            if (ruc && !/^\d{11}$/.test(ruc)) throw new Error('ruc debe contener exactamente 11 dígitos o quedar vacío.');
             const duplicateRuc = ruc && [...map.values()].some((x) => x.id !== existing?.id && (x.ruc ?? '') === ruc);
             if (duplicateRuc) throw new Error('El RUC ya está registrado en otro proveedor.');
             const now = new Date().toISOString();
@@ -1181,7 +1181,7 @@ export function FabricModule({ view }: { view: FabricView }) {
       <div className="modal-heading"><div><div className="eyebrow">DIRECTORIO COMERCIAL</div><h2 id="fabric-supplier-title">{supplierForm.id ? 'Editar proveedor' : 'Nuevo proveedor'}</h2><p>Los teléfonos y rubros se guardan como registros relacionados, no como listas dentro del proveedor.</p></div><button className="icon-button" onClick={() => setShowSupplierForm(false)}>×</button></div>
       <form onSubmit={saveSupplier} className="fabric-form-grid">
         <label className="field-label fabric-span-2">Nombre comercial *<input className="large-input" required value={supplierForm.nombre} onChange={(e) => setSupplierForm((x) => ({ ...x, nombre: e.target.value }))} /></label>
-        <label className="field-label">RUC (opcional)<input className="large-input" type="text" inputMode="numeric" autoComplete="off" maxLength={11} value={supplierForm.ruc} onChange={(e) => setSupplierForm((x) => ({ ...x, ruc: e.target.value.replace(/\\D/g, '').slice(0, 11) }))} placeholder="11 dígitos" /><small>Déjalo vacío si el proveedor no tiene RUC registrado.</small></label>
+        <label className="field-label">RUC (opcional)<input className="large-input" type="text" inputMode="numeric" autoComplete="off" maxLength={11} value={supplierForm.ruc} onChange={(e) => setSupplierForm((x) => ({ ...x, ruc: e.target.value.replace(/\D/g, '').slice(0, 11) }))} placeholder="11 dígitos" /><small>Déjalo vacío si el proveedor no tiene RUC registrado.</small></label>
         <label className="field-label">Contacto<input className="large-input" value={supplierForm.contacto} onChange={(e) => setSupplierForm((x) => ({ ...x, contacto: e.target.value }))} /></label>
         <label className="field-label">Dirección / referencia<input className="large-input" value={supplierForm.direccion} onChange={(e) => setSupplierForm((x) => ({ ...x, direccion: e.target.value }))} /></label>
         <div className="fabric-span-2"><div className="fabric-subheading"><strong>Teléfonos</strong><button type="button" className="text-action" onClick={() => setSupplierForm((x) => ({ ...x, telefonos: [...x.telefonos, { id: id(), numero: '', etiqueta: 'Teléfono' }] }))}>＋ Añadir número</button></div>
