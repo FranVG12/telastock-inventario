@@ -591,8 +591,7 @@ export function FabricModule({ view }: { view: FabricView }) {
       if (!storageSafe) throw new Error('No se puede importar mientras el almacenamiento local esté dañado. Restaura primero un respaldo JSON válido.');
       const csvText = await file.text();
       const rows = parseCsvTable(csvText);
-      const csvFingerprint = await stableCsvId(csvText);
-      const generatedRollIds = await Promise.all(rows.map((_, index) => stableCsvId(csvFingerprint + ':' + (index + 2))));
+      const generatedRollIds = await Promise.all(rows.map((row, index) => stableCsvId(JSON.stringify(row) + ':' + (index + 2))));
       const field = (row: Record<string, string>, ...names: string[]) => {
         for (const name of names) {
           const value = row[normalizeCsvHeader(name)];
