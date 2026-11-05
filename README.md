@@ -185,3 +185,13 @@ El módulo de compras de avíos permite registrar fecha, proveedor (reutiliza el
 Al guardar un comprobante, TelaStock registra una entrada por cada detalle en el ledger de stock de avíos. Para una presentación configurada, por ejemplo una docena con equivalencia de 12 unidades, la compra de 3 docenas ingresa 36 unidades al inventario. Cuando no hay presentación configurada, la cantidad se compra directamente en la unidad base del insumo. No se convierten unidades incompatibles ni se estima equivalencia.
 
 Las compras de telas permanecen en el módulo existente de rollos y no se duplican en compras de avíos. Las compras vinculadas a proveedor conservan su referencia aunque el proveedor luego deje de estar disponible en el catálogo local.
+
+### Inventario independiente de piezas auxiliares
+
+Cada pieza de un componente puede tener movimientos de entrada, salida o merma por talla. Este ledger se mantiene separado de model_pieces y piece_stock_movements, por lo que las existencias de un cuello, bolsillo o puño no se mezclan con las piezas del patrón base.
+
+- Las piezas normales se controlan por unidades físicas.
+- Las piezas simétricas permiten registrar una cantidad en paridades (un lado izquierdo y uno derecho) o registrar un lado específico.
+- No se permite retirar más stock del disponible en cualquiera de los lados.
+- Una pieza auxiliar que ya tiene movimientos no se puede eliminar ni cambiar de lateralidad desde su ficha; se conserva la referencia histórica.
+- La planificación de una prenda combina la capacidad del patrón base con la capacidad de cada pieza auxiliar seleccionada y muestra el recurso limitante por talla.
