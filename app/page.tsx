@@ -679,7 +679,10 @@ export default function Home() {
       localStorage.setItem(FABRIC_STORAGE_KEYS.proveedorCategorias, JSON.stringify(importedFabric.proveedorCategorias));
       localStorage.setItem(FABRIC_STORAGE_KEYS.compras, JSON.stringify(importedFabric.compras));
       localStorage.setItem(FABRIC_STORAGE_KEYS.detalleCompra, JSON.stringify(importedFabric.detalleCompra));
-      localStorage.setItem(FABRIC_STORAGE_KEYS.version, '1');
+      localStorage.setItem(FABRIC_STORAGE_KEYS.colores, JSON.stringify(importedFabric.colores));
+      localStorage.setItem(FABRIC_STORAGE_KEYS.telaColores, JSON.stringify(importedFabric.telaColores));
+      localStorage.setItem(FABRIC_STORAGE_KEYS.version, '2');
+      window.dispatchEvent(new Event('telastock-fabric-data-updated'));
       window.dispatchEvent(new Event('telastock-fabric-data-restored'));
       setExpandedModels(importedModels.slice(0, 1).map((model) => model.id));
       setSelectedModelId(importedModels[0]?.id ?? '');
