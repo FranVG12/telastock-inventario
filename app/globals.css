@@ -628,3 +628,33 @@
 .production-component-movement-row>div:last-child{text-align:right}
 .production-component-movement-row strong{font-size:11px;color:#43546f}
 .production-component-movement-row small{font-size:9px;color:#8994a5;line-height:1.4;overflow-wrap:anywhere}
+
+
+/* Production orders: lightweight workshop queue, stock reservation and closeout */
+.production-order-create{display:grid;gap:12px;padding:14px;border:1px solid #e2e9f3;border-radius:11px;background:#f8faff;margin-top:16px}
+.production-order-create>.button{justify-self:start}
+.production-order-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(94px,1fr));gap:8px;margin:14px 0}
+.production-order-summary>div{display:grid;gap:3px;padding:11px;border:1px solid #e8edf4;border-radius:10px;background:#fff}
+.production-order-summary strong{font-size:19px;color:#344b70;font-variant-numeric:tabular-nums}
+.production-order-summary small{font-size:10px;color:#8490a3}
+.production-order-card{display:grid;gap:12px}
+.production-order-status{flex:0 0 auto;padding:6px 9px;border-radius:20px;font-size:10px;font-weight:700;background:#f0f3f8;color:#61718a}
+.production-order-status.reserved{background:#eaf1ff;color:#44649c}
+.production-order-status.progress{background:#fff4df;color:#966a27}
+.production-order-status.done{background:#eaf6ef;color:#397b58}
+.production-order-status.cancelled{background:#f5eeee;color:#9b6666}
+.production-order-details{display:grid;gap:8px;padding:11px;border-radius:9px;background:#f8f9fc}
+.production-order-details>div{display:grid;gap:3px}
+.production-order-details strong{font-size:10px;color:#566781}
+.production-order-details small{font-size:10px;color:#8792a3;line-height:1.55;overflow-wrap:anywhere}
+.production-order-cost{font-size:11px;color:#687891}
+.production-order-cost strong{color:#30496e}
+.production-order-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.production-order-actions .button{min-height:36px}
+@media(max-width:720px){
+ .production-order-create{padding:11px}
+ .production-order-card .production-card-heading{flex-direction:column}
+ .production-order-actions{display:grid;grid-template-columns:1fr}
+ .production-order-actions .button{width:100%}
+ .production-order-details{padding:9px}
+}
