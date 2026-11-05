@@ -1072,6 +1072,20 @@ export function ProductionModule({
           </div>
         </article>)}
         {selectedStockComponent.pieces.length === 0 && <div className="empty">Este componente todavía no tiene piezas de patronaje.</div>}
+        <div className="production-subheading"><strong>Últimos movimientos</strong><span className="count-badge">{data.componentPieceMovements.filter((movement) => movement.componentId === selectedStockComponent.id).length}</span></div>
+        <div className="production-component-movement-history">
+          {[...data.componentPieceMovements].filter((movement) => movement.componentId === selectedStockComponent.id).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 25).map((movement) => {
+            const piece = selectedStockComponent.pieces.find((item) => item.id === movement.pieceId);
+            const size = sizes.find((item) => item.id === movement.sizeId);
+            const side = movement.side ? ' · ' + movement.side : '';
+            return <div className="production-component-movement-row" key={movement.id}>
+              <span className={'movement-icon ' + (movement.delta < 0 ? 'movement-out' : '')}>{movement.delta < 0 ? '−' : '＋'}</span>
+              <div><strong>{piece?.name ?? 'Pieza auxiliar'}</strong><small>{size ? sizeDisplay(size) : 'Talla no disponible'}{side} · {movement.kind.toLocaleUpperCase('es')} · {movement.note}</small></div>
+              <div><strong>{movement.delta > 0 ? '+' : ''}{format(movement.delta)}</strong><small>{new Date(movement.date).toLocaleDateString('es-PE')}</small></div>
+            </div>;
+          })}
+          {data.componentPieceMovements.every((movement) => movement.componentId !== selectedStockComponent.id) && <small className="production-muted">Todavía no hay movimientos para este componente.</small>}
+        </div>
       </section>}
       {data.components.length === 0 && <div className="empty">Crea tu primer cuello, bolsillo o acabado reutilizable.</div>}
     </section>;
