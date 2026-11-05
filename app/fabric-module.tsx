@@ -80,6 +80,10 @@ export function validateFabricBackupData(value: unknown): FabricBackupData {
     if (new Set(ids).size !== ids.length) throw new Error(`Hay identificadores duplicados en "${key}".`);
     (output as unknown as Record<string, unknown>)[key] = rows;
   }
+  const supplierRucs = output.proveedores.map((x) => x.ruc ?? '').filter(Boolean);
+  if (output.proveedores.some((x) => x.ruc != null && (typeof x.ruc !== 'string' || !/^\\d{11}$/.test(x.ruc))) || new Set(supplierRucs).size !== supplierRucs.length) {
+    throw new Error('Hay proveedores con RUC inválido o duplicado. El RUC debe contener exactamente 11 dígitos.');
+  }
   const telaIds = new Set(output.telas.map((x) => x.id));
   const proveedorIds = new Set(output.proveedores.map((x) => x.id));
   const rolloIds = new Set(output.rollos.map((x) => x.id));
@@ -913,8 +917,14 @@ export function FabricModule({ view }: { view: FabricView }) {
             const name = field(row, 'nombre', 'nombre_comercial');
             if (!name) throw new Error('Falta nombre del proveedor.');
             const existing = map.get(field(row, 'id_proveedor', 'id')) ?? [...map.values()].find((x) => x.nombre.toLocaleLowerCase('es') === name.toLocaleLowerCase('es'));
+            const hasRucColumn = Object.prototype.hasOwnProperty.call(row, 'ruc');
+            const rawRuc = field(row, 'ruc');
+            const ruc = hasRucColumn ? rawRuc.replace(/\\D/g, '') : (existing?.ruc ?? '');
+            if (ruc && !/^\\d{11}$/.test(ruc)) throw new Error('ruc debe contener exactamente 11 dígitos o quedar vacío.');
+            const duplicateRuc = ruc && [...map.values()].some((x) => x.id !== existing?.id && (x.ruc ?? '') === ruc);
+            if (duplicateRuc) throw new Error('El RUC ya está registrado en otro proveedor.');
             const now = new Date().toISOString();
-            const item: Supplier = { id: existing?.id ?? uniqueId(field(row, 'id_proveedor', 'id')), nombre: name, contacto: field(row, 'contacto'), direccion: field(row, 'direccion'), nota: field(row, 'nota'), createdAt: existing?.createdAt ?? now, updatedAt: now };
+            const item: Supplier = { id: existing?.id ?? uniqueId(field(row, 'id_proveedor', 'id')), nombre: name, ruc: ruc || null, contacto: field(row, 'contacto'), direccion: field(row, 'direccion'), nota: field(row, 'nota'), createdAt: existing?.createdAt ?? now, updatedAt: now };
             map.set(item.id, item);
             const rawPhones = field(row, 'telefonos', 'telefono').split('|').map((x) => x.trim()).filter(Boolean);
             const parsedPhones = rawPhones.map((entry) => {
@@ -1203,7 +1213,7 @@ export function FabricModule({ view }: { view: FabricView }) {
       </form> : <form onSubmit={savePurchase} className="fabric-purchase-form">
         <div className="fabric-form-grid">
           <div className="fabric-provider-inline fabric-span-2"><label className="field-label">Proveedor<select className="large-input" value={purchaseForm.idProveedor} onChange={(e) => changePurchaseSupplier(e.target.value)}><option value="">Sin proveedor identificado</option>{data.proveedores.map((x) => <option key={x.id} value={x.id}>{x.nombre}</option>)}</select></label><button type="button" className="button secondary" onClick={() => setShowInlineSupplier((x) => !x)}>＋ Proveedor</button></div>
-          {showInlineSupplier && <div className="inline-supplier fabric-span-2"><input className="large-input" value={inlineSupplierName} onChange={(e) => setInlineSupplierName(e.target.value)} placeholder="Nombre comercial del nuevo proveedor" /><button type="button" className="button secondary" onClick={() => { const name = inlineSupplierName.trim(); if (!name) return tell('Escribe el nombre del proveedor.', 'error'); const supplier: Supplier = { id: id(), nombre: name, contacto: '', direccion: '', nota: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }; if (!persist({ ...data, proveedores: [...data.proveedores, supplier], proveedorCategorias: [...data.proveedorCategorias, { id: id(), idProveedor: supplier.id, categoria: 'Telas' }] })) return; setPurchaseForm((x) => ({ ...x, idProveedor: supplier.id, lines: x.lines.map((line) => line.idRollo || !line.precioAutomatico ? line : { ...line, precio: '', precioAutomatico: true }) })); setInlineSupplierName(''); setShowInlineSupplier(false); tell('Proveedor añadido sin salir de la compra. Completa sus teléfonos y rubros luego en Proveedores.'); }}>Guardar proveedor</button></div>}
+          {showInlineSupplier && <div className="inline-supplier fabric-span-2"><input className="large-input" value={inlineSupplierName} onChange={(e) => setInlineSupplierName(e.target.value)} placeholder="Nombre comercial del nuevo proveedor" /><button type="button" className="button secondary" onClick={() => { const name = inlineSupplierName.trim(); if (!name) return tell('Escribe el nombre del proveedor.', 'error'); const supplier: Supplier = { id: id(), nombre: name, ruc: null, contacto: '', direccion: '', nota: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }; if (!persist({ ...data, proveedores: [...data.proveedores, supplier], proveedorCategorias: [...data.proveedorCategorias, { id: id(), idProveedor: supplier.id, categoria: 'Telas' }] })) return; setPurchaseForm((x) => ({ ...x, idProveedor: supplier.id, lines: x.lines.map((line) => line.idRollo || !line.precioAutomatico ? line : { ...line, precio: '', precioAutomatico: true }) })); setInlineSupplierName(''); setShowInlineSupplier(false); tell('Proveedor añadido sin salir de la compra. Completa sus teléfonos y rubros luego en Proveedores.'); }}>Guardar proveedor</button></div>}
           <label className="field-label">Fecha de compra<input className="large-input" type="date" required value={purchaseForm.fechaCompra} onChange={(e) => setPurchaseForm((x) => ({ ...x, fechaCompra: e.target.value }))} /></label>
           <label className="field-label">Comprobante<select className="large-input" value={purchaseForm.tipoComprobante} onChange={(e) => setPurchaseForm((x) => ({ ...x, tipoComprobante: e.target.value }))}>{['Factura','Boleta','Ticket','Guía','Sin comprobante','Otro'].map((x) => <option key={x}>{x}</option>)}</select></label>
           <label className="field-label fabric-span-2">Número de comprobante<input className="large-input" value={purchaseForm.numeroComprobante} onChange={(e) => setPurchaseForm((x) => ({ ...x, numeroComprobante: e.target.value }))} placeholder="Serie y número (opcional)" /></label>
