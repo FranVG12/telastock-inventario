@@ -58,6 +58,10 @@ export function validateFabricBackupData(value: unknown): FabricBackupData {
   const output = {} as FabricBackupData;
   for (const key of keys) {
     const rows = record[key];
+    if (key === 'rolloMovimientos' && rows === undefined) {
+      output.rolloMovimientos = [];
+      continue;
+    }
     if (!Array.isArray(rows) || !rows.every((row) => row && typeof row === 'object' && !Array.isArray(row) && typeof (row as { id?: unknown }).id === 'string')) {
       throw new Error(\`El apartado de telas "\${key}" falta o contiene filas no válidas.\`);
     }
@@ -73,6 +77,7 @@ export function validateFabricBackupData(value: unknown): FabricBackupData {
   if (!output.proveedorTelefonos.every((x) => proveedorIds.has(x.idProveedor) && x.numero.trim())) throw new Error('Hay teléfonos relacionados con proveedores inexistentes.');
   if (!output.proveedorCategorias.every((x) => proveedorIds.has(x.idProveedor) && x.categoria.trim())) throw new Error('Hay categorías relacionadas con proveedores inexistentes.');
   if (!output.rollos.every((x) => telaIds.has(x.idTela) && (x.idProveedor === null || proveedorIds.has(x.idProveedor)) && ['KG', 'M'].includes(x.unidadIngreso) && Number.isFinite(x.cantidadIngreso) && x.cantidadIngreso > 0 && ['disponible', 'reservado', 'agotado', 'defectuoso'].includes(x.estado) && (x.pesoKg === null || (Number.isFinite(x.pesoKg) && x.pesoKg >= 0)) && (x.metros === null || (Number.isFinite(x.metros) && x.metros >= 0)))) throw new Error('Hay rollos con tela, medición o proveedor inválido.');
+  if (!output.rollos.every((x) => x.unidadIngreso === 'KG' ? x.pesoKg !== null : x.metros !== null)) throw new Error('Cada rollo debe conservar la medición real de su unidad de ingreso.');
   if (!output.compras.every((x) => x.idProveedor === null || proveedorIds.has(x.idProveedor))) throw new Error('Hay compras relacionadas con proveedores inexistentes.');
   if (!output.detalleCompra.every((x) => {
     const roll = output.rollos.find((r) => r.id === x.idRollo);
@@ -186,7 +191,7 @@ export function FabricModule({ view }: { view: FabricView }) {
     if (!ready) return;
     try {
       for (const [key, field] of [
-        [FABRIC_STORAGE_KEYS.telas, 'telas'], [FABRIC_STORAGE_KEYS.rollos, 'rollos'],
+        [FABRIC_STORAGE_KEYS.telas, 'telas'], [FABRIC_STORAGE_KEYS.rollos, 'rollos'], [FABRIC_STORAGE_KEYS.rolloMovimientos, 'rolloMovimientos'],
         [FABRIC_STORAGE_KEYS.proveedores, 'proveedores'], [FABRIC_STORAGE_KEYS.proveedorTelefonos, 'proveedorTelefonos'],
         [FABRIC_STORAGE_KEYS.proveedorCategorias, 'proveedorCategorias'], [FABRIC_STORAGE_KEYS.compras, 'compras'],
         [FABRIC_STORAGE_KEYS.detalleCompra, 'detalleCompra'],
@@ -577,7 +582,7 @@ export function FabricModule({ view }: { view: FabricView }) {
         <div className="fabric-purchase-lines-heading"><strong>Detalles de la compra</strong><button type="button" className="text-action" onClick={addPurchaseLine}>＋ Añadir rollo</button></div>
         <div className="fabric-purchase-edit-lines">{purchaseForm.lines.map((line, index) => <div className="fabric-purchase-input-line" key={line.idDetalle ?? `new-${index}`}>
           <div className="fabric-purchase-line-head"><strong>{line.idRollo ? `Rollo ${line.idRollo.slice(0,8)} · ${telaById.get(line.idTela)?.nombreTela ?? 'Tela'}` : `Nuevo rollo ${index + 1}`}</strong>{!line.idRollo && <button type="button" className="remove-piece" onClick={() => setPurchaseForm((x) => ({ ...x, lines: x.lines.filter((_,i) => i !== index) }))}>Quitar</button>}</div>
-          {line.idRollo ? <div className="fabric-form-grid nested"><label className="field-label">Cantidad comprada<input className="large-input" type="number" min="0.001" step="0.001" value={line.cantidad} onChange={(e) => updatePurchaseLine(index, { cantidad: e.target.value })} /></label><label className="field-label">Unidad / precio por {line.unidad}<input className="large-input" value={line.precio} onChange={(e) => updatePurchaseLine(index, { precio: e.target.value })} /></label><div className="fabric-span-2 purchase-edit-line">Unidad original: {line.unidad}. La medición actual del rollo no se reemplaza al corregir la cantidad histórica.</div></div>
+          {line.idRollo ? <div className="fabric-form-grid nested"><label className="field-label">Cantidad comprada<input className="large-input" type="number" min="0.001" step="0.001" value={line.cantidad} onChange={(e) => updatePurchaseLine(index, { cantidad: e.target.value })} /></label><label className="field-label">Precio por {line.unidad}<input className="large-input" type="number" min="0" step="0.01" value={line.precio} onChange={(e) => updatePurchaseLine(index, { precio: e.target.value })} /></label><div className="fabric-span-2 purchase-edit-line">Unidad original: {line.unidad}. La medición actual del rollo no se reemplaza al corregir la cantidad histórica.</div></div>
           : <div className="fabric-form-grid nested"><label className="field-label">Tela<select className="large-input" required value={line.idTela} onChange={(e) => updatePurchaseLine(index, { idTela: e.target.value, unidad: telaById.get(e.target.value)?.unidadVenta ?? line.unidad })}><option value="">Seleccionar</option>{data.telas.filter((x) => x.activo).map((x) => <option key={x.id} value={x.id}>{x.nombreTela}</option>)}</select></label><label className="field-label">Unidad<select className="large-input" value={line.unidad} onChange={(e) => updatePurchaseLine(index, { unidad: e.target.value as FabricUnit })}><option value="KG">KG</option><option value="M">M</option></select></label><label className="field-label">Cantidad<input className="large-input" type="number" min="0.001" step="0.001" value={line.cantidad} onChange={(e) => updatePurchaseLine(index, { cantidad: e.target.value })} /></label><label className="field-label">Precio por {line.unidad}<input className="large-input" type="number" min="0" step="0.01" value={line.precio} onChange={(e) => updatePurchaseLine(index, { precio: e.target.value })} /></label><label className="field-label">Color<input className="large-input" value={line.color} onChange={(e) => updatePurchaseLine(index, { color: e.target.value })} /></label><label className="field-label">Partida<input className="large-input" value={line.idLote} onChange={(e) => updatePurchaseLine(index, { idLote: e.target.value })} /></label></div>}
           <div className="fabric-line-total"><span>Importe de línea</span><strong>{money.format((Number(line.cantidad)||0)*(Number(line.precio)||0))}</strong></div>
         </div>)}</div>
