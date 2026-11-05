@@ -1733,7 +1733,8 @@ export function ProductionModule({
             const size = sizes.find((item) => item.id === sizeId);
             return (size?.label ?? 'Talla') + ': ' + quantity;
           }).join(' · ');
-          const materialText = order.materials.map((line) => {
+          const orderMaterialsToShow = order.actualConsumption?.materials ?? order.materials;
+          const materialText = orderMaterialsToShow.map((line) => {
             const variant = variantsBySupply.get(line.variantId) ?? data.variants.find((item) => item.id === line.variantId);
             const supply = variant ? supplies.find((item) => item.id === variant.supplyId) : undefined;
             const size = sizes.find((item) => item.id === line.sizeId);
