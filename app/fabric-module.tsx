@@ -101,12 +101,12 @@ type RolloForm = {
   ubicacion: string; estado: RollStatus; nota: string;
 };
 type SupplierForm = { id: string | null; nombre: string; contacto: string; direccion: string; nota: string; telefonos: { id: string; numero: string; etiqueta: string }[]; categorias: string[] };
-type PurchaseLineForm = { idRollo: string | null; idTela: string; unidad: FabricUnit; cantidad: string; precio: string; color: string; pesoKg: string; metros: string; idLote: string };
+type PurchaseLineForm = { idRollo: string | null; idDetalle?: string | null; idTela: string; unidad: FabricUnit; cantidad: string; precio: string; color: string; pesoKg: string; metros: string; idLote: string };
 type PurchaseForm = { id: string | null; idProveedor: string; fechaCompra: string; tipoComprobante: string; numeroComprobante: string; observacion: string; lines: PurchaseLineForm[] };
 
 function blankTela(): TelaForm { return { id: null, nombreTela: '', unidadVenta: 'KG', anchoNominalM: '', descripcion: '', activo: true }; }
 function blankRollo(telas: Textile[]): RolloForm { return { id: null, idTela: telas.find((x) => x.activo)?.id ?? '', unidadIngreso: telas.find((x) => x.activo)?.unidadVenta ?? 'KG', cantidadIngreso: '', fechaIngreso: today(), color: '', pesoKg: '', metros: '', idLote: '', idProveedor: '', ubicacion: '', estado: 'disponible', nota: '' }; }
-function blankLine(telas: Textile[]): PurchaseLineForm { return { idRollo: null, idTela: telas.find((x) => x.activo)?.id ?? '', unidad: telas.find((x) => x.activo)?.unidadVenta ?? 'KG', cantidad: '', precio: '', color: '', pesoKg: '', metros: '', idLote: '' }; }
+function blankLine(telas: Textile[]): PurchaseLineForm { return { idRollo: null, idDetalle: null, idTela: telas.find((x) => x.activo)?.id ?? '', unidad: telas.find((x) => x.activo)?.unidadVenta ?? 'KG', cantidad: '', precio: '', color: '', pesoKg: '', metros: '', idLote: '' }; }
 function blankPurchase(telas: Textile[]): PurchaseForm { return { id: null, idProveedor: '', fechaCompra: today(), tipoComprobante: 'Factura', numeroComprobante: '', observacion: '', lines: [blankLine(telas)] }; }
 
 export function FabricModule({ view }: { view: FabricView }) {
@@ -305,7 +305,7 @@ export function FabricModule({ view }: { view: FabricView }) {
     } else {
       const lines = (detailByPurchase.get(purchase.id) ?? []).map((detail) => {
         const roll = rollById.get(detail.idRollo);
-        return { idRollo: detail.idRollo, idTela: roll?.idTela ?? '', unidad: detail.unidadPrecio, cantidad: String(detail.cantidadComprada), precio: String(detail.precioUnitario), color: roll?.color ?? '', pesoKg: inputNumber(roll?.pesoKg ?? null), metros: inputNumber(roll?.metros ?? null), idLote: roll?.idLote ?? '' };
+        return { idRollo: detail.idRollo, idDetalle: detail.id, idTela: roll?.idTela ?? '', unidad: detail.unidadPrecio, cantidad: String(detail.cantidadComprada), precio: String(detail.precioUnitario), color: roll?.color ?? '', pesoKg: inputNumber(roll?.pesoKg ?? null), metros: inputNumber(roll?.metros ?? null), idLote: roll?.idLote ?? '' };
       });
       setPurchaseForm({ id: purchase.id, idProveedor: purchase.idProveedor ?? '', fechaCompra: purchase.fechaCompra, tipoComprobante: purchase.tipoComprobante, numeroComprobante: purchase.numeroComprobante, observacion: purchase.observacion, lines: lines.length ? lines : [blankLine(data.telas)] });
     }
@@ -313,50 +313,58 @@ export function FabricModule({ view }: { view: FabricView }) {
   }
   function savePurchase(event: FormEvent) {
     event.preventDefault();
-    if (purchaseForm.id) return tell('Las compras registradas conservan sus detalles y costos históricos. En esta versión puedes editar la cabecera desde el botón correspondiente.', 'info');
     if (!purchaseForm.lines.length) return tell('Agrega al menos un rollo a la compra.', 'error');
     if (purchaseForm.idProveedor && !supplierById.has(purchaseForm.idProveedor)) return tell('Selecciona un proveedor válido.', 'error');
     const lines = purchaseForm.lines.map((line) => ({ ...line, quantity: Number(line.cantidad), price: Number(line.precio), tela: telaById.get(line.idTela) }));
     if (lines.some((x) => !x.tela || !validQty(x.quantity) || !Number.isFinite(x.price) || x.price < 0)) return tell('Cada línea necesita una tela, una cantidad mayor que cero y un precio unitario igual o mayor que cero.', 'error');
     if (lines.some((x) => [nullableNumber(x.pesoKg), nullableNumber(x.metros)].some((n) => n !== null && (!Number.isFinite(n) || n < 0)))) return tell('Una medición real es inválida. Deja el campo vacío cuando no conozcas la medida.', 'error');
     const now = new Date().toISOString();
-    const purchaseId = id();
-    const purchase: FabricPurchase = { id: purchaseId, idProveedor: purchaseForm.idProveedor || null, fechaCompra: purchaseForm.fechaCompra, tipoComprobante: purchaseForm.tipoComprobante, numeroComprobante: purchaseForm.numeroComprobante.trim(), observacion: purchaseForm.observacion.trim(), createdAt: now, updatedAt: now };
+    const purchaseId = purchaseForm.id ?? id();
+    const oldPurchase = purchaseForm.id ? data.compras.find((x) => x.id === purchaseForm.id) : undefined;
+    if (purchaseForm.id && !oldPurchase) return tell('No se encontró la compra que intentas editar.', 'error');
+    const purchase: FabricPurchase = {
+      id: purchaseId, idProveedor: purchaseForm.idProveedor || null, fechaCompra: purchaseForm.fechaCompra,
+      tipoComprobante: purchaseForm.tipoComprobante, numeroComprobante: purchaseForm.numeroComprobante.trim(),
+      observacion: purchaseForm.observacion.trim(), createdAt: oldPurchase?.createdAt ?? now, updatedAt: now,
+    };
     const newRolls: FabricRoll[] = [];
-    const details: PurchaseDetail[] = [];
+    let details = [...data.detalleCompra];
     for (const line of lines) {
+      if (line.idRollo) {
+        const existing = details.find((x) => x.idRollo === line.idRollo);
+        const roll = data.rollos.find((x) => x.id === line.idRollo);
+        if (!existing || !roll || existing.idCompra !== purchaseId) return tell('La línea hace referencia a un rollo o detalle que no pertenece a esta compra.', 'error');
+        if (existing.unidadPrecio !== line.unidad) return tell('La unidad de precio de una línea histórica no se puede cambiar; registra otra compra si fue adquirida en otra unidad.', 'error');
+        details = details.map((x) => x.id === existing.id ? { ...x, cantidadComprada: line.quantity, precioUnitario: line.price, importeTotal: Number((line.quantity * line.price).toFixed(2)) } : x);
+        // La cantidad comprada es histórica; la medición actual del rollo se conserva.
+        // Solo se actualiza el dato de ingreso original del rollo.
+        const updatedRoll = { ...roll, cantidadIngreso: line.quantity, updatedAt: now };
+        if (roll.unidadIngreso === 'KG' && roll.pesoKg === existing.cantidadComprada) updatedRoll.pesoKg = line.quantity;
+        if (roll.unidadIngreso === 'M' && roll.metros === existing.cantidadComprada) updatedRoll.metros = line.quantity;
+        newRolls.push(updatedRoll);
+        continue;
+      }
       const tela = line.tela!;
       const rollId = id();
       const kgExtra = nullableNumber(line.pesoKg);
       const mExtra = nullableNumber(line.metros);
-      const roll: FabricRoll = {
+      newRolls.push({
         id: rollId, idTela: tela.id, unidadIngreso: line.unidad, cantidadIngreso: line.quantity,
         pesoKg: line.unidad === 'KG' ? line.quantity : kgExtra, metros: line.unidad === 'M' ? line.quantity : mExtra,
         color: line.color.trim(), idLote: line.idLote.trim(), fechaIngreso: purchaseForm.fechaCompra,
         idProveedor: purchaseForm.idProveedor || null, ubicacion: '', estado: 'disponible', nota: '',
         createdAt: now, updatedAt: now,
-      };
-      const detail: PurchaseDetail = { id: id(), idCompra: purchaseId, idRollo: rollId, cantidadComprada: line.quantity, unidadPrecio: line.unidad, precioUnitario: line.price, importeTotal: Number((line.quantity * line.price).toFixed(2)) };
-      newRolls.push(roll); details.push(detail);
+      });
+      details.push({ id: id(), idCompra: purchaseId, idRollo: rollId, cantidadComprada: line.quantity, unidadPrecio: line.unidad, precioUnitario: line.price, importeTotal: Number((line.quantity * line.price).toFixed(2)) });
     }
-    persist({ ...data, compras: [...data.compras, purchase], rollos: [...data.rollos, ...newRolls], detalleCompra: [...data.detalleCompra, ...details] });
-    setShowPurchaseForm(false); tell(\`Compra registrada: \${lines.length} rollos por \${money.format(details.reduce((sum, x) => sum + x.importeTotal, 0))}.\`);
+    const purchaseRows = oldPurchase
+      ? data.compras.map((x) => x.id === purchaseId ? purchase : x)
+      : [...data.compras, purchase];
+    const rollRows = [...data.rollos.filter((roll) => !newRolls.some((x) => x.id === roll.id)), ...newRolls];
+    persist({ ...data, compras: purchaseRows, rollos: rollRows, detalleCompra: details });
+    setShowPurchaseForm(false);
+    tell(`${oldPurchase ? 'Compra actualizada' : 'Compra registrada'}: ${lines.length} rollos por ${money.format(details.filter((x) => x.idCompra === purchaseId).reduce((sum, x) => sum + x.importeTotal, 0))}.`);
   }
-  function savePurchaseHeader(event: FormEvent) {
-    event.preventDefault();
-    if (!purchaseForm.id) return;
-    const purchase = data.compras.find((x) => x.id === purchaseForm.id);
-    if (!purchase) return;
-    persist({ ...data, compras: data.compras.map((x) => x.id === purchase.id ? { ...x, idProveedor: purchaseForm.idProveedor || null, fechaCompra: purchaseForm.fechaCompra, tipoComprobante: purchaseForm.tipoComprobante, numeroComprobante: purchaseForm.numeroComprobante.trim(), observacion: purchaseForm.observacion.trim(), updatedAt: new Date().toISOString() } : x) });
-    setShowPurchaseForm(false); tell('Cabecera de compra actualizada; los importes, cantidades y precios históricos permanecen intactos.');
-  }
-  function togglePurchaseEdit(purchase: FabricPurchase) {
-    const lines = detailByPurchase.get(purchase.id) ?? [];
-    const lineIds = new Set(lines.map((x) => x.idRollo));
-    if (lines.some((x) => !rollById.has(x.idRollo))) return tell('No se puede editar: la compra tiene un rollo relacionado que no existe.', 'error');
-    openPurchase(purchase);
-  }
-
   function exportCurrentCsv() {
     if (view === 'telas') {
       downloadCsv('catalogo-telas.csv', [['id_tela','nombre_tela','unidad_venta','ancho_nominal_m','descripcion','activo'], ...data.telas.map((x) => [x.id,x.nombreTela,x.unidadVenta,x.anchoNominalM ?? '',x.descripcion,x.activo ? 'TRUE' : 'FALSE'])]);
@@ -456,7 +464,7 @@ export function FabricModule({ view }: { view: FabricView }) {
         <label className="field-label">Unidad de ingreso *<select className="large-input" value={rolloForm.unidadIngreso} onChange={(e) => setRolloForm((x) => ({ ...x, unidadIngreso: e.target.value as FabricUnit }))}><option value="KG">Kilogramos (KG)</option><option value="M">Metros (M)</option></select></label>
         <label className="field-label">Cantidad ingresada *<input className="large-input" type="number" step="0.001" min="0.001" required value={rolloForm.cantidadIngreso} onChange={(e) => setRolloForm((x) => ({ ...x, cantidadIngreso: e.target.value }))} placeholder={rolloForm.unidadIngreso === 'KG' ? 'Ej. 20.5' : 'Ej. 45'} /></label>
         <label className="field-label">Fecha de ingreso *<input className="large-input" type="date" required value={rolloForm.fechaIngreso} onChange={(e) => setRolloForm((x) => ({ ...x, fechaIngreso: e.target.value }))} /></label>
-        <label className="field-label">Color<text><input className="large-input" value={rolloForm.color} onChange={(e) => setRolloForm((x) => ({ ...x, color: e.target.value }))} placeholder="Ej. Negro" /></text></label>
+        <label className="field-label">Color<input className="large-input" value={rolloForm.color} onChange={(e) => setRolloForm((x) => ({ ...x, color: e.target.value }))} placeholder="Ej. Negro" /></label>
         <details className="fabric-more fabric-span-2" open={showMoreRollo} onToggle={(e) => setShowMoreRollo((e.currentTarget as HTMLDetailsElement).open)}><summary>Ver más <span>Mediciones adicionales y trazabilidad</span></summary>
           <div className="fabric-form-grid nested"><label className="field-label">Peso real (KG)<input className="large-input" type="number" min="0" step="0.001" value={rolloForm.unidadIngreso === 'KG' ? rolloForm.cantidadIngreso : rolloForm.pesoKg} onChange={(e) => setRolloForm((x) => ({ ...x, pesoKg: e.target.value }))} disabled={rolloForm.unidadIngreso === 'KG'} placeholder="Vacío = desconocido" /></label>
           <label className="field-label">Metros reales (M)<input className="large-input" type="number" min="0" step="0.001" value={rolloForm.unidadIngreso === 'M' ? rolloForm.cantidadIngreso : rolloForm.metros} onChange={(e) => setRolloForm((x) => ({ ...x, metros: e.target.value }))} disabled={rolloForm.unidadIngreso === 'M'} placeholder="Vacío = desconocido" /></label>
@@ -488,14 +496,21 @@ export function FabricModule({ view }: { view: FabricView }) {
 
     {showPurchaseForm && <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setShowPurchaseForm(false); }}><section className="modal fabric-purchase-modal" role="dialog" aria-modal="true" aria-labelledby="fabric-purchase-title">
       <div className="modal-heading"><div><div className="eyebrow">ADQUISICIÓN DE TELAS</div><h2 id="fabric-purchase-title">{purchaseForm.id ? 'Editar compra' : 'Nueva compra'}</h2><p>{purchaseForm.id ? 'Solo se modifica la cabecera; las cantidades y precios históricos se conservan.' : 'Registra una cabecera y añade uno o varios rollos como detalles.'}</p></div><button className="icon-button" onClick={() => setShowPurchaseForm(false)}>×</button></div>
-      {purchaseForm.id ? <form onSubmit={savePurchaseHeader} className="fabric-form-grid">
+      {purchaseForm.id ? <form onSubmit={savePurchase} className="fabric-purchase-form">
         <label className="field-label fabric-span-2">Proveedor<select className="large-input" value={purchaseForm.idProveedor} onChange={(e) => setPurchaseForm((x) => ({ ...x, idProveedor: e.target.value }))}><option value="">Sin proveedor</option>{data.proveedores.map((x) => <option key={x.id} value={x.id}>{x.nombre}</option>)}</select></label>
         <label className="field-label">Fecha<input className="large-input" type="date" required value={purchaseForm.fechaCompra} onChange={(e) => setPurchaseForm((x) => ({ ...x, fechaCompra: e.target.value }))} /></label>
         <label className="field-label">Comprobante<select className="large-input" value={purchaseForm.tipoComprobante} onChange={(e) => setPurchaseForm((x) => ({ ...x, tipoComprobante: e.target.value }))}>{['Factura','Boleta','Ticket','Guía','Sin comprobante','Otro'].map((x) => <option key={x}>{x}</option>)}</select></label>
         <label className="field-label fabric-span-2">Número<input className="large-input" value={purchaseForm.numeroComprobante} onChange={(e) => setPurchaseForm((x) => ({ ...x, numeroComprobante: e.target.value }))} /></label>
         <label className="field-label fabric-span-2">Observación<input className="large-input" value={purchaseForm.observacion} onChange={(e) => setPurchaseForm((x) => ({ ...x, observacion: e.target.value }))} /></label>
-        <div className="fabric-span-2"><div className="fabric-subheading"><strong>Detalles históricos</strong><small>{(detailByPurchase.get(purchaseForm.id) ?? []).length} rollos · no editables desde esta cabecera</small></div>{(detailByPurchase.get(purchaseForm.id) ?? []).map((x) => <div className="purchase-edit-line" key={x.id}>{rollById.get(x.idRollo)?.id ?? x.idRollo} · {nfmt.format(x.cantidadComprada)} {x.unidadPrecio} × {money.format(x.precioUnitario)} = <strong>{money.format(x.importeTotal)}</strong></div>)}</div>
-        <div className="form-actions fabric-span-2"><button type="button" className="button secondary" onClick={() => setShowPurchaseForm(false)}>Cancelar</button><button className="button primary">Guardar cabecera</button></div>
+        <div className="fabric-purchase-lines-heading"><strong>Detalles de la compra</strong><button type="button" className="text-action" onClick={addPurchaseLine}>＋ Añadir rollo</button></div>
+        <div className="fabric-purchase-edit-lines">{purchaseForm.lines.map((line, index) => <div className="fabric-purchase-input-line" key={line.idDetalle ?? `new-${index}`}>
+          <div className="fabric-purchase-line-head"><strong>{line.idRollo ? `Rollo ${line.idRollo.slice(0,8)} · ${telaById.get(line.idTela)?.nombreTela ?? 'Tela'}` : `Nuevo rollo ${index + 1}`}</strong>{!line.idRollo && <button type="button" className="remove-piece" onClick={() => setPurchaseForm((x) => ({ ...x, lines: x.lines.filter((_,i) => i !== index) }))}>Quitar</button>}</div>
+          {line.idRollo ? <div className="fabric-form-grid nested"><label className="field-label">Cantidad comprada<input className="large-input" type="number" min="0.001" step="0.001" value={line.cantidad} onChange={(e) => updatePurchaseLine(index, { cantidad: e.target.value })} /></label><label className="field-label">Unidad / precio por {line.unidad}<input className="large-input" value={line.precio} onChange={(e) => updatePurchaseLine(index, { precio: e.target.value })} /></label><div className="fabric-span-2 purchase-edit-line">Unidad original: {line.unidad}. La medición actual del rollo no se reemplaza al corregir la cantidad histórica.</div></div>
+          : <div className="fabric-form-grid nested"><label className="field-label">Tela<select className="large-input" required value={line.idTela} onChange={(e) => updatePurchaseLine(index, { idTela: e.target.value, unidad: telaById.get(e.target.value)?.unidadVenta ?? line.unidad })}><option value="">Seleccionar</option>{data.telas.filter((x) => x.activo).map((x) => <option key={x.id} value={x.id}>{x.nombreTela}</option>)}</select></label><label className="field-label">Unidad<select className="large-input" value={line.unidad} onChange={(e) => updatePurchaseLine(index, { unidad: e.target.value as FabricUnit })}><option value="KG">KG</option><option value="M">M</option></select></label><label className="field-label">Cantidad<input className="large-input" type="number" min="0.001" step="0.001" value={line.cantidad} onChange={(e) => updatePurchaseLine(index, { cantidad: e.target.value })} /></label><label className="field-label">Precio por {line.unidad}<input className="large-input" type="number" min="0" step="0.01" value={line.precio} onChange={(e) => updatePurchaseLine(index, { precio: e.target.value })} /></label><label className="field-label">Color<input className="large-input" value={line.color} onChange={(e) => updatePurchaseLine(index, { color: e.target.value })} /></label><label className="field-label">Partida<input className="large-input" value={line.idLote} onChange={(e) => updatePurchaseLine(index, { idLote: e.target.value })} /></label></div>}
+          <div className="fabric-line-total"><span>Importe de línea</span><strong>{money.format((Number(line.cantidad)||0)*(Number(line.precio)||0))}</strong></div>
+        </div>)}</div>
+        <div className="fabric-purchase-summary"><span>Total de la compra</span><strong>{money.format(purchaseForm.lines.reduce((sum,x)=>sum+(Number(x.cantidad)||0)*(Number(x.precio)||0),0))}</strong></div>
+        <div className="form-actions"><button type="button" className="button secondary" onClick={() => setShowPurchaseForm(false)}>Cancelar</button><button className="button primary">Guardar compra y detalles</button></div>
       </form> : <form onSubmit={savePurchase} className="fabric-purchase-form">
         <div className="fabric-form-grid">
           <div className="fabric-provider-inline fabric-span-2"><label className="field-label">Proveedor<select className="large-input" value={purchaseForm.idProveedor} onChange={(e) => setPurchaseForm((x) => ({ ...x, idProveedor: e.target.value }))}><option value="">Sin proveedor identificado</option>{data.proveedores.map((x) => <option key={x.id} value={x.id}>{x.nombre}</option>)}</select></label><button type="button" className="button secondary" onClick={() => setShowInlineSupplier((x) => !x)}>＋ Proveedor</button></div>
