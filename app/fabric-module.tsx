@@ -762,7 +762,37 @@ export function FabricModule({ view }: { view: FabricView }) {
       };
       let next: FabricBackupData = { ...data };
       let imported = 0;
-      if (view === 'telas') {
+      if (view === 'telas' && rows[0] && Object.prototype.hasOwnProperty.call(rows[0], 'id_tela_color')) {
+        const colors = new Map(data.colores.map((x) => [x.id, x]));
+        const variants = new Map(data.telaColores.map((x) => [x.id, x]));
+        const colorByName = new Map(data.colores.map((x) => [x.nombre.toLocaleLowerCase('es'), x]));
+        rows.forEach((row, index) => {
+          try {
+            const telaId = field(row, 'id_tela');
+            if (!data.telas.some((x) => x.id === telaId)) throw new Error('La tela indicada no existe. Importa primero el catálogo de telas.');
+            const name = field(row, 'nombre_color');
+            if (!name) throw new Error('Falta nombre_color.');
+            const rawHex = field(row, 'hexadecimal');
+            const hex = rawHex ? rawHex.toUpperCase() : null;
+            if (hex && !/^#[0-9A-F]{6}$/.test(hex)) throw new Error('hexadecimal debe tener formato #RRGGBB.');
+            const cmyk = ['cmyk_c','cmyk_m','cmyk_y','cmyk_k'].map((key) => parseCsvNullableNumber(field(row, key), key));
+            if (cmyk.some((x) => x !== null && (x > 100 || !Number.isFinite(x)))) throw new Error('Los valores CMYK deben estar entre 0 y 100.');
+            if (cmyk.some((x) => x !== null) && cmyk.some((x) => x === null)) throw new Error('Completa los cuatro valores CMYK o déjalos todos vacíos.');
+            const suppliedColorId = field(row, 'id_color');
+            const existingColor = (suppliedColorId ? colors.get(suppliedColorId) : undefined) ?? colorByName.get(name.toLocaleLowerCase('es'));
+            const color = existingColor ?? { id: uniqueId(suppliedColorId), nombre: name, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+            if (existingColor && existingColor.nombre.toLocaleLowerCase('es') !== name.toLocaleLowerCase('es')) throw new Error('id_color corresponde a otro nombre de color.');
+            colors.set(color.id, color); colorByName.set(name.toLocaleLowerCase('es'), color);
+            const variantId = field(row, 'id_tela_color', 'id') || id();
+            const existingVariant = variants.get(variantId) ?? [...variants.values()].find((x) => x.idTela === telaId && x.idColor === color.id);
+            const activeRaw = field(row, 'activo').toLocaleLowerCase('es');
+            const active = !activeRaw ? true : ['true','1','si','sí','activo','yes'].includes(activeRaw);
+            const variant: TextileColor = { id: existingVariant?.id ?? variantId, idTela: telaId, idColor: color.id, hexadecimal: hex, cmykC: cmyk[0], cmykM: cmyk[1], cmykY: cmyk[2], cmykK: cmyk[3], activo: active, createdAt: existingVariant?.createdAt ?? new Date().toISOString(), updatedAt: new Date().toISOString() };
+            variants.set(variant.id, variant); imported++;
+          } catch (error) { throw new Error('Fila ' + (index + 2) + ': ' + (error instanceof Error ? error.message : 'color inválido')); }
+        });
+        next = { ...data, colores: [...colors.values()], telaColores: [...variants.values()] };
+      } else if (view === 'telas') {
         const map = new Map(data.telas.map((x) => [x.id, x]));
         const byName = new Map(data.telas.map((x) => [x.nombreTela.toLocaleLowerCase('es'), x]));
         rows.forEach((row, index) => {
@@ -772,13 +802,15 @@ export function FabricModule({ view }: { view: FabricView }) {
             if (!name) throw new Error('Falta nombre_tela.');
             if (unit !== 'KG' && unit !== 'M') throw new Error('unidad_venta debe ser KG o M.');
             const width = parseCsvNullableNumber(field(row, 'ancho_nominal_m'), 'ancho_nominal_m');
+            const yieldValue = parseCsvNullableNumber(field(row, 'rendimiento_teorico'), 'rendimiento_teorico');
             if (width !== null && width <= 0) throw new Error('ancho_nominal_m debe ser mayor que cero.');
+            if (yieldValue !== null && yieldValue <= 0) throw new Error('rendimiento_teorico debe ser mayor que cero.');
             const existing = map.get(field(row, 'id_tela', 'id')) ?? byName.get(name.toLocaleLowerCase('es'));
             const activeRaw = field(row, 'activo').toLocaleLowerCase('es');
             const active = !activeRaw ? true : ['true','1','si','sí','activo','yes'].includes(activeRaw);
             if (activeRaw && !['true','1','si','sí','activo','yes','false','0','no','inactivo'].includes(activeRaw)) throw new Error('activo debe ser TRUE/FALSE.');
             const now = new Date().toISOString();
-            const item: Textile = { id: existing?.id ?? uniqueId(field(row, 'id_tela', 'id')), nombreTela: name, unidadVenta: unit, anchoNominalM: width, descripcion: field(row, 'descripcion'), activo: active, createdAt: existing?.createdAt ?? now, updatedAt: now };
+            const item: Textile = { id: existing?.id ?? uniqueId(field(row, 'id_tela', 'id')), nombreTela: name, unidadVenta: unit, anchoNominalM: width, rendimientoTeorico: yieldValue, descripcion: field(row, 'descripcion'), activo: active, createdAt: existing?.createdAt ?? now, updatedAt: now };
             map.set(item.id, item); byName.set(name.toLocaleLowerCase('es'), item); imported++;
           } catch (error) { throw new Error('Fila ' + (index + 2) + ': ' + (error instanceof Error ? error.message : 'dato inválido')); }
         });
@@ -823,6 +855,11 @@ export function FabricModule({ view }: { view: FabricView }) {
             if (!validQty(quantity)) throw new Error('cantidad_ingresada debe ser mayor que cero.');
             const date = csvDate(field(row, 'fecha_ingreso', 'fecha'));
             const supplierId = resolveSupplier(row);
+            const colorId = field(row, 'id_tela_color');
+            const colorName = field(row, 'color');
+            const colorVariant = colorId ? data.telaColores.find((x) => x.id === colorId && x.idTela === tela.id) : data.telaColores.find((x) => x.idTela === tela.id && colorById.get(x.idColor)?.nombre.toLocaleLowerCase('es') === colorName.toLocaleLowerCase('es'));
+            if (colorId && !colorVariant) throw new Error('id_tela_color no pertenece a la tela seleccionada.');
+            if (colorName && !colorVariant) throw new Error('El color "' + colorName + '" no está configurado para esta tela. Regístralo en el catálogo antes de importar.');
             const suppliedId = field(row, 'id_rollo', 'id');
             const idRollo = suppliedId || generatedRollIds[index];
             const existing = map.get(idRollo);
@@ -832,7 +869,7 @@ export function FabricModule({ view }: { view: FabricView }) {
             const stateRaw = (field(row, 'estado') || 'disponible').toLocaleLowerCase('es');
             if (!['disponible','reservado','agotado','defectuoso'].includes(stateRaw)) throw new Error('estado debe ser disponible, reservado, agotado o defectuoso.');
             const now = new Date().toISOString();
-            const item: FabricRoll = { id: existing?.id ?? uniqueId(idRollo), idTela: tela.id, unidadIngreso: unit, cantidadIngreso: quantity, pesoKg: kg, metros, color: field(row, 'color'), idLote: field(row, 'id_lote', 'lote'), fechaIngreso: date, idProveedor: supplierId, ubicacion: field(row, 'ubicacion'), estado: stateRaw as RollStatus, nota: field(row, 'nota'), createdAt: existing?.createdAt ?? now, updatedAt: now };
+            const item: FabricRoll = { id: existing?.id ?? uniqueId(idRollo), idTela: tela.id, unidadIngreso: unit, cantidadIngreso: quantity, pesoKg: kg, metros, color: colorVariant ? colorById.get(colorVariant.idColor)?.nombre ?? colorName : colorName, idTelaColor: colorVariant?.id ?? null, idLote: field(row, 'id_lote', 'lote'), fechaIngreso: date, idProveedor: supplierId, ubicacion: field(row, 'ubicacion'), estado: stateRaw as RollStatus, nota: field(row, 'nota'), createdAt: existing?.createdAt ?? now, updatedAt: now };
             map.set(item.id, item);
             if (!existing) {
               movements.push({ id: id(), idRollo: item.id, fecha: now, tipo: 'ingreso', unidad: unit, delta: quantity, cantidadAnterior: null, cantidadNueva: quantity, nota: 'Ingreso importado desde CSV' });
@@ -871,6 +908,10 @@ export function FabricModule({ view }: { view: FabricView }) {
             const sourceTelaId = field(row, 'id_tela');
             if (sourceTelaId && sourceTelaId !== roll.idTela) throw new Error('id_tela no coincide con la tela del rollo relacionado.');
             const supplierId = resolveSupplier(row);
+            const sourceColorId = field(row, 'id_tela_color');
+            if (sourceColorId && roll.idTelaColor !== sourceColorId) throw new Error('id_tela_color no coincide con el color asociado al rollo.');
+            const importedColor = field(row, 'color');
+            if (importedColor && importedColor.toLocaleLowerCase('es') !== roll.color.toLocaleLowerCase('es')) throw new Error('El color del CSV no coincide con el color del rollo relacionado.');
             const date = csvDate(field(row, 'fecha_compra'));
             const unit = field(row, 'unidad_precio').toUpperCase();
             if (unit !== 'KG' && unit !== 'M') throw new Error('unidad_precio debe ser KG o M.');
