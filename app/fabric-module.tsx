@@ -63,10 +63,10 @@ export function validateFabricBackupData(value: unknown): FabricBackupData {
       continue;
     }
     if (!Array.isArray(rows) || !rows.every((row) => row && typeof row === 'object' && !Array.isArray(row) && typeof (row as { id?: unknown }).id === 'string')) {
-      throw new Error(\`El apartado de telas "\${key}" falta o contiene filas no válidas.\`);
+      throw new Error(`El apartado de telas "${key}" falta o contiene filas no válidas.`);
     }
     const ids = rows.map((row) => (row as { id: string }).id);
-    if (new Set(ids).size !== ids.length) throw new Error(\`Hay identificadores duplicados en "\${key}".\`);
+    if (new Set(ids).size !== ids.length) throw new Error(`Hay identificadores duplicados en "${key}".`);
     (output as unknown as Record<string, unknown>)[key] = rows;
   }
   const telaIds = new Set(output.telas.map((x) => x.id));
@@ -90,18 +90,18 @@ export function validateFabricBackupData(value: unknown): FabricBackupData {
 
 const today = () => {
   const date = new Date();
-  return \`\${date.getFullYear()}-\${String(date.getMonth() + 1).padStart(2, '0')}-\${String(date.getDate()).padStart(2, '0')}\`;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 };
-const id = () => typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : \`fabric-\${Date.now()}-\${Math.random().toString(36).slice(2)}\`;
+const id = () => typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `fabric-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const nfmt = new Intl.NumberFormat('es-PE', { maximumFractionDigits: 2 });
 const money = new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN', minimumFractionDigits: 2 });
 const nullableNumber = (value: string): number | null => value.trim() === '' ? null : Number(value);
 const validQty = (value: number) => Number.isFinite(value) && value > 0;
 const categories = ['Telas', 'Cierres', 'Bolsas', 'Elásticos', 'Hilos', 'Avíos', 'Sublimado', 'Otros'];
 const statusLabel: Record<RollStatus, string> = { disponible: 'Disponible', reservado: 'Reservado', agotado: 'Agotado', defectuoso: 'Defectuoso' };
-const csvCell = (value: unknown) => \`"\${String(value ?? '').replaceAll('"', '""')}"\`;
+const csvCell = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`;
 function downloadCsv(filename: string, rows: unknown[][]) {
-  const csv = '\\uFEFF' + rows.map((row) => row.map(csvCell).join(';')).join('\\r\\n');
+  const csv = '\uFEFF' + rows.map((row) => row.map(csvCell).join(';')).join('\r\n');
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
   const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; document.body.appendChild(anchor); anchor.click(); anchor.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -238,12 +238,12 @@ export function FabricModule({ view }: { view: FabricView }) {
   }, [data.detalleCompra]);
 
   const tell = (text: string, kind: 'success' | 'error' | 'info' = 'success') => setNotice({ text, kind });
-  const telaRows = useMemo(() => data.telas.filter((x) => !telaSearch || \`\${x.nombreTela} \${x.descripcion}\`.toLocaleLowerCase('es').includes(telaSearch.toLocaleLowerCase('es'))).sort((a,b) => a.nombreTela.localeCompare(b.nombreTela, 'es')), [data.telas, telaSearch]);
+  const telaRows = useMemo(() => data.telas.filter((x) => !telaSearch || `${x.nombreTela} ${x.descripcion}`.toLocaleLowerCase('es').includes(telaSearch.toLocaleLowerCase('es'))).sort((a,b) => a.nombreTela.localeCompare(b.nombreTela, 'es')), [data.telas, telaSearch]);
   const availableColors = useMemo(() => [...new Set(data.rollos.map((x) => x.color).filter(Boolean))].sort(), [data.rollos]);
   const rollRows = useMemo(() => data.rollos.filter((roll) => {
     const tela = telaById.get(roll.idTela)?.nombreTela ?? '';
     const supplier = roll.idProveedor ? supplierById.get(roll.idProveedor)?.nombre ?? '' : '';
-    const text = \`\${tela} \${roll.color} \${roll.idLote} \${roll.ubicacion} \${supplier} \${roll.id}\`.toLocaleLowerCase('es');
+    const text = `${tela} ${roll.color} ${roll.idLote} ${roll.ubicacion} ${supplier} ${roll.id}`.toLocaleLowerCase('es');
     return (!rollSearch || text.includes(rollSearch.toLocaleLowerCase('es'))) &&
       (rollTelaFilter === 'all' || roll.idTela === rollTelaFilter) &&
       (rollStatusFilter === 'all' || roll.estado === rollStatusFilter) &&
@@ -253,13 +253,13 @@ export function FabricModule({ view }: { view: FabricView }) {
   const purchaseRows = useMemo(() => data.compras.filter((x) => {
     const supplier = x.idProveedor ? supplierById.get(x.idProveedor)?.nombre ?? '' : '';
     const details = detailByPurchase.get(x.id) ?? [];
-    const haystack = \`\${supplier} \${x.numeroComprobante} \${x.tipoComprobante} \${details.map((d) => \`\${telaById.get(rollById.get(d.idRollo)?.idTela ?? '')?.nombreTela ?? ''} \${d.idRollo}\`).join(' ')}\`.toLocaleLowerCase('es');
+    const haystack = `${supplier} ${x.numeroComprobante} ${x.tipoComprobante} ${details.map((d) => `${telaById.get(rollById.get(d.idRollo)?.idTela ?? '')?.nombreTela ?? ''} ${d.idRollo}`).join(' ')}`.toLocaleLowerCase('es');
     return !purchaseSearch || haystack.includes(purchaseSearch.toLocaleLowerCase('es'));
   }).sort((a,b) => b.fechaCompra.localeCompare(a.fechaCompra)), [data.compras, data.detalleCompra, supplierById, detailByPurchase, telaById, rollById, purchaseSearch]);
   const supplierRows = useMemo(() => data.proveedores.filter((supplier) => {
     const phones = data.proveedorTelefonos.filter((x) => x.idProveedor === supplier.id).map((x) => x.numero).join(' ');
     const cats = data.proveedorCategorias.filter((x) => x.idProveedor === supplier.id).map((x) => x.categoria).join(' ');
-    return (!supplierSearch || \`\${supplier.nombre} \${supplier.contacto} \${supplier.direccion} \${phones} \${cats}\`.toLocaleLowerCase('es').includes(supplierSearch.toLocaleLowerCase('es'))) &&
+    return (!supplierSearch || `${supplier.nombre} ${supplier.contacto} ${supplier.direccion} ${phones} ${cats}`.toLocaleLowerCase('es').includes(supplierSearch.toLocaleLowerCase('es'))) &&
       (supplierCategoryFilter === 'all' || data.proveedorCategorias.some((x) => x.idProveedor === supplier.id && x.categoria === supplierCategoryFilter));
   }).sort((a,b) => a.nombre.localeCompare(b.nombre, 'es')), [data.proveedores, data.proveedorTelefonos, data.proveedorCategorias, supplierSearch, supplierCategoryFilter]);
 
@@ -494,7 +494,7 @@ export function FabricModule({ view }: { view: FabricView }) {
   const selectedRoll = selectedRolloId ? rollById.get(selectedRolloId) : undefined;
 
   return <div className="fabric-module">
-    {notice && <div className={\`notice \${notice.kind}\`} role="status"><span>{notice.text}</span><button onClick={() => setNotice(null)} aria-label="Cerrar aviso">×</button></div>}
+    {notice && <div className={`notice ${notice.kind}`} role="status"><span>{notice.text}</span><button onClick={() => setNotice(null)} aria-label="Cerrar aviso">×</button></div>}
     <div className="fabric-toolbar">
       <div className="fabric-search-wrap">
         {view === 'telas' && <label className="search-box"><span>⌕</span><input value={telaSearch} onChange={(e) => setTelaSearch(e.target.value)} placeholder="Buscar tela…" /></label>}
@@ -514,7 +514,7 @@ export function FabricModule({ view }: { view: FabricView }) {
     {view === 'telas' && <section className="panel">
       <div className="panel-heading"><div><h2>Catálogo de telas</h2><p>Tipos de tela, unidad habitual y ancho nominal. Desactivar no elimina rollos ni compras.</p></div><span className="count-badge">{data.telas.length} telas</span></div>
       <div className="fabric-table-wrap"><table className="fabric-table"><thead><tr><th>Tela</th><th>Unidad</th><th>Ancho</th><th>Rollos</th><th>Estado</th><th></th></tr></thead><tbody>
-        {telaRows.map((tela) => <tr key={tela.id}><td><strong>{tela.nombreTela}</strong>{tela.descripcion && <small>{tela.descripcion}</small>}</td><td>{tela.unidadVenta}</td><td>{tela.anchoNominalM === null ? '—' : \`\${nfmt.format(tela.anchoNominalM)} m\`}</td><td>{telaRollCount(tela.id)}</td><td><span className={\`fabric-status \${tela.activo ? 'on' : 'off'}\`}>{tela.activo ? 'Activa' : 'Inactiva'}</span></td><td className="fabric-row-actions"><button className="text-action" onClick={() => openTela(tela)}>Editar</button><button className="text-action" onClick={() => toggleTela(tela)}>{tela.activo ? 'Desactivar' : 'Activar'}</button></td></tr>)}
+        {telaRows.map((tela) => <tr key={tela.id}><td><strong>{tela.nombreTela}</strong>{tela.descripcion && <small>{tela.descripcion}</small>}</td><td>{tela.unidadVenta}</td><td>{tela.anchoNominalM === null ? '—' : `${nfmt.format(tela.anchoNominalM)} m`}</td><td>{telaRollCount(tela.id)}</td><td><span className={`fabric-status ${tela.activo ? 'on' : 'off'}`}>{tela.activo ? 'Activa' : 'Inactiva'}</span></td><td className="fabric-row-actions"><button className="text-action" onClick={() => openTela(tela)}>Editar</button><button className="text-action" onClick={() => toggleTela(tela)}>{tela.activo ? 'Desactivar' : 'Activar'}</button></td></tr>)}
         {telaRows.length === 0 && <tr><td colSpan={6}><div className="empty">No hay telas registradas. Crea el primer tipo de tela.</div></td></tr>}
       </tbody></table></div>
     </section>}
@@ -529,7 +529,7 @@ export function FabricModule({ view }: { view: FabricView }) {
       </div>
       <div className="fabric-roll-list">{rollRows.map((roll) => {
         const tela = telaById.get(roll.idTela);
-        return <article className="fabric-roll-row" key={roll.id}><div className="fabric-roll-main"><strong>{tela?.nombreTela ?? 'Tela no disponible'}</strong><span>{roll.color || 'Color sin indicar'} · {roll.idLote || 'Sin lote'}</span><small>{roll.idProveedor ? supplierById.get(roll.idProveedor)?.nombre ?? 'Proveedor no disponible' : 'Sin proveedor'} · Ingreso {roll.fechaIngreso}</small></div><div className="fabric-roll-measures"><strong>{roll.metros === null ? '—' : \`\${nfmt.format(roll.metros)} m\`}</strong><span>{roll.pesoKg === null ? '—' : \`\${nfmt.format(roll.pesoKg)} kg\`}</span><small>Mediciones reales</small></div><span className={\`fabric-status \${roll.estado}\`}>{statusLabel[roll.estado]}</span><div className="fabric-row-actions"><button className="text-action" onClick={() => { setSelectedRolloId(roll.id); setShowRolloDetail(true); }}>Detalle</button><button className="text-action" onClick={() => openRollo(roll)}>Editar</button></div></article>;
+        return <article className="fabric-roll-row" key={roll.id}><div className="fabric-roll-main"><strong>{tela?.nombreTela ?? 'Tela no disponible'}</strong><span>{roll.color || 'Color sin indicar'} · {roll.idLote || 'Sin lote'}</span><small>{roll.idProveedor ? supplierById.get(roll.idProveedor)?.nombre ?? 'Proveedor no disponible' : 'Sin proveedor'} · Ingreso {roll.fechaIngreso}</small></div><div className="fabric-roll-measures"><strong>{roll.metros === null ? '—' : `${nfmt.format(roll.metros)} m`}</strong><span>{roll.pesoKg === null ? '—' : `${nfmt.format(roll.pesoKg)} kg`}</span><small>Mediciones reales</small></div><span className={`fabric-status ${roll.estado}`}>{statusLabel[roll.estado]}</span><div className="fabric-row-actions"><button className="text-action" onClick={() => { setSelectedRolloId(roll.id); setShowRolloDetail(true); }}>Detalle</button><button className="text-action" onClick={() => openRollo(roll)}>Editar</button></div></article>;
       })}{rollRows.length === 0 && <div className="empty">No se encontraron rollos. Registra un rollo o cambia los filtros.</div>}</div>
     </section>}
 
@@ -548,7 +548,7 @@ export function FabricModule({ view }: { view: FabricView }) {
       <div className="fabric-supplier-list">{supplierRows.map((supplier) => {
         const phones = data.proveedorTelefonos.filter((x) => x.idProveedor === supplier.id);
         const cats = data.proveedorCategorias.filter((x) => x.idProveedor === supplier.id).map((x) => x.categoria);
-        return <article className="fabric-supplier-row" key={supplier.id}><div><strong>{supplier.nombre}</strong><span>{supplier.contacto || 'Sin contacto'} · {supplier.direccion || 'Sin dirección'}</span><small>{phones.length ? phones.map((x) => \`\${x.etiqueta}: \${x.numero}\`).join(' · ') : 'Sin teléfonos'} </small><div className="fabric-category-tags">{cats.map((x) => <span key={x}>{x}</span>)}</div></div><button className="button secondary edit-model" onClick={() => openSupplier(supplier)}>Editar</button></article>;
+        return <article className="fabric-supplier-row" key={supplier.id}><div><strong>{supplier.nombre}</strong><span>{supplier.contacto || 'Sin contacto'} · {supplier.direccion || 'Sin dirección'}</span><small>{phones.length ? phones.map((x) => `${x.etiqueta}: ${x.numero}`).join(' · ') : 'Sin teléfonos'} </small><div className="fabric-category-tags">{cats.map((x) => <span key={x}>{x}</span>)}</div></div><button className="button secondary edit-model" onClick={() => openSupplier(supplier)}>Editar</button></article>;
       })}{supplierRows.length === 0 && <div className="empty">No hay proveedores registrados o no coinciden con el filtro.</div>}</div>
     </section>}
 
@@ -645,7 +645,7 @@ export function FabricModule({ view }: { view: FabricView }) {
 
     {showRolloDetail && selectedRoll && <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setShowRolloDetail(false); }}><section className="modal fabric-form-modal" role="dialog" aria-modal="true" aria-labelledby="roll-detail-title">
       <div className="modal-heading"><div><div className="eyebrow">FICHA DEL ROLLO</div><h2 id="roll-detail-title">{telaById.get(selectedRoll.idTela)?.nombreTela ?? 'Tela'} · {selectedRoll.color || 'Sin color'}</h2><p>Identificador {selectedRoll.id}</p></div><button className="icon-button" onClick={() => setShowRolloDetail(false)}>×</button></div>
-      <div className="roll-detail-grid"><div><small>Metros reales</small><strong>{selectedRoll.metros === null ? 'No medidos' : \`\${nfmt.format(selectedRoll.metros)} m\`}</strong></div><div><small>Peso real</small><strong>{selectedRoll.pesoKg === null ? 'No medido' : \`\${nfmt.format(selectedRoll.pesoKg)} kg\`}</strong></div><div><small>Estado</small><strong>{statusLabel[selectedRoll.estado]}</strong></div><div><small>Ingreso</small><strong>{selectedRoll.fechaIngreso}</strong></div><div><small>Partida</small><strong>{selectedRoll.idLote || '—'}</strong></div><div><small>Ubicación</small><strong>{selectedRoll.ubicacion || '—'}</strong></div></div>
+      <div className="roll-detail-grid"><div><small>Metros reales</small><strong>{selectedRoll.metros === null ? 'No medidos' : `${nfmt.format(selectedRoll.metros)} m`}</strong></div><div><small>Peso real</small><strong>{selectedRoll.pesoKg === null ? 'No medido' : `${nfmt.format(selectedRoll.pesoKg)} kg`}</strong></div><div><small>Estado</small><strong>{statusLabel[selectedRoll.estado]}</strong></div><div><small>Ingreso</small><strong>{selectedRoll.fechaIngreso}</strong></div><div><small>Partida</small><strong>{selectedRoll.idLote || '—'}</strong></div><div><small>Ubicación</small><strong>{selectedRoll.ubicacion || '—'}</strong></div></div>
       {(() => { const detail = rollPurchaseDetail(selectedRoll.id); const purchase = detail ? data.compras.find((x) => x.id === detail.idCompra) : undefined; return <div className="roll-origin-panel"><strong>Compra de origen</strong>{detail && purchase ? <><span>{purchase.fechaCompra} · {purchase.tipoComprobante} {purchase.numeroComprobante}</span><span>{nfmt.format(detail.cantidadComprada)} {detail.unidadPrecio} × {money.format(detail.precioUnitario)} = <strong>{money.format(detail.importeTotal)}</strong></span><span>{purchase.idProveedor ? supplierById.get(purchase.idProveedor)?.nombre ?? 'Proveedor' : 'Proveedor no indicado'}</span></> : <span>Este rollo no está vinculado a una compra registrada.</span>}</div>; })()}
       <div className="roll-movement-history"><div className="fabric-subheading"><strong>Movimientos del rollo</strong><button className="text-action" onClick={() => openRollMovement(selectedRoll)}>Registrar consumo</button></div>{data.rolloMovimientos.filter((x) => x.idRollo === selectedRoll.id).sort((a,b) => b.fecha.localeCompare(a.fecha)).map((movement) => <div className="roll-movement-row" key={movement.id}><span>{movement.tipo.toLocaleUpperCase('es')} · {movement.unidad}</span><strong>{movement.delta === null ? (movement.cantidadNueva === null ? 'Medición retirada' : `Medición: ${nfmt.format(movement.cantidadNueva)}`) : `${movement.delta > 0 ? '+' : ''}${nfmt.format(movement.delta)}`}</strong><small>{movement.nota} · {new Date(movement.fecha).toLocaleString('es-PE')}</small></div>)}{data.rolloMovimientos.filter((x) => x.idRollo === selectedRoll.id).length === 0 && <small>Sin movimientos registrados.</small>}</div>
       {showRollMovement && <form className="roll-consumption-form" onSubmit={saveRollMovement}><strong>Registrar consumo del rollo</strong><label className="field-label">Medida real<select className="large-input" value={rollMovementForm.unidad} onChange={(e) => setRollMovementForm((x) => ({ ...x, unidad: e.target.value as FabricUnit }))}><option value="KG">KG · {selectedRoll.pesoKg === null ? 'No medido' : `${nfmt.format(selectedRoll.pesoKg)} disponibles`}</option><option value="M">M · {selectedRoll.metros === null ? 'No medido' : `${nfmt.format(selectedRoll.metros)} disponibles`}</option></select></label><label className="field-label">Cantidad a consumir<input className="large-input" type="number" step="0.001" min="0.001" required value={rollMovementForm.cantidad} onChange={(e) => setRollMovementForm((x) => ({ ...x, cantidad: e.target.value }))} /></label><label className="field-label">Motivo<input className="large-input" value={rollMovementForm.nota} onChange={(e) => setRollMovementForm((x) => ({ ...x, nota: e.target.value }))} /></label><div className="form-actions"><button type="button" className="button secondary" onClick={() => setShowRollMovement(false)}>Cancelar</button><button className="button primary">Guardar consumo</button></div></form>}
