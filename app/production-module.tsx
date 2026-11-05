@@ -747,6 +747,104 @@ export function ProductionModule({
       })}</div>
     </section>;
 
+    if (view === 'compras-avios') return <section className="panel production-panel">
+      <div className="panel-heading">
+        <div><h2>Compras de avíos</h2><p>Registra comprobantes y agrega automáticamente las cantidades compradas al inventario.</p></div>
+        <button className="button primary" onClick={() => setShowPurchaseForm((current) => !current)}>＋ Nueva compra</button>
+      </div>
+      {showPurchaseForm && <form className="production-form" onSubmit={saveSupplyPurchase}>
+        <div className="production-form-grid">
+          <label className="field-label">Fecha de compra<input className="large-input" type="date" value={purchaseDate} onChange={(event) => setPurchaseDate(event.target.value)} required /></label>
+          <label className="field-label">Proveedor (opcional)
+            <select className="large-input" value={purchaseSupplierId} onChange={(event) => setPurchaseSupplierId(event.target.value)}>
+              <option value="">Sin proveedor vinculado</option>
+              {textileContext.proveedores.map((supplier) => <option value={supplier.id} key={supplier.id}>{supplier.nombre}{supplier.ruc ? ' · RUC ' + supplier.ruc : ''}</option>)}
+            </select>
+          </label>
+          <label className="field-label">Comprobante
+            <select className="large-input" value={purchaseDocumentType} onChange={(event) => setPurchaseDocumentType(event.target.value)}>
+              <option>Factura</option><option>Boleta</option><option>Ticket</option><option>Nota de venta</option><option>Otro</option>
+            </select>
+          </label>
+          <label className="field-label">Número de comprobante<input className="large-input" value={purchaseDocumentNumber} onChange={(event) => setPurchaseDocumentNumber(event.target.value)} placeholder="Serie y correlativo (opcional)" /></label>
+        </div>
+        <div className="production-subheading"><strong>Detalle de compra</strong><button type="button" className="text-action" disabled={purchasableVariants.length === 0} onClick={addPurchaseLine}>＋ Agregar avío</button></div>
+        {purchasableVariants.length === 0 && <div className="notice info">Primero registra un insumo y una variante que no esté vinculada a tela. Las telas se siguen comprando desde el módulo de rollos.</div>}
+        {purchaseLines.map((line, index) => {
+          const variant = variantsBySupply.get(line.variantId);
+          const supply = variant ? supplies.find((item) => item.id === variant.supplyId) : undefined;
+          const packFactor = variant?.purchasePackQuantity ?? 1;
+          const purchaseUnit = variant?.purchasePackQuantity ? (variant.purchasePackLabel.trim() || 'paquete') : (supply ? unitLabel[supply.baseUnit] : 'unidad');
+          const stockQuantity = Number(line.quantity) * packFactor;
+          return <div className="production-purchase-line" key={line.id}>
+            <div className="production-purchase-line-heading"><strong>Artículo {index + 1}</strong><button type="button" className="text-action danger-action" disabled={purchaseLines.length === 1} onClick={() => setPurchaseLines((current) => current.filter((item) => item.id !== line.id))}>Quitar</button></div>
+            <label className="field-label">Insumo / variante
+              <select className="large-input" value={line.variantId} onChange={(event) => updatePurchaseLine(line.id, { variantId: event.target.value, sizeId: '' })} required>
+                <option value="">Seleccionar variante</option>
+                {purchasableVariants.map((option) => {
+                  const optionSupply = supplies.find((item) => item.id === option.supplyId);
+                  return <option value={option.id} key={option.id}>{optionSupply?.name ?? 'Insumo'} · {option.name}</option>;
+                })}
+              </select>
+            </label>
+            {supply?.stockMode === 'talla' && <label className="field-label">Talla donde ingresará el stock
+              <select className="large-input" value={line.sizeId} onChange={(event) => updatePurchaseLine(line.id, { sizeId: event.target.value })} required>
+                <option value="">Seleccionar talla</option>
+                {sizes.map((size) => <option value={size.id} key={size.id}>{size.label}</option>)}
+              </select>
+            </label>}
+            {variant && supply && <div className="production-purchase-meta">
+              <span>Presentación de compra: <strong>{purchaseUnit}</strong></span>
+              <span>Equivale a <strong>{format(packFactor)} {unitLabel[supply.baseUnit]}</strong> por {purchaseUnit}</span>
+            </div>}
+            <div className="production-form-grid">
+              <label className="field-label">Cantidad ({purchaseUnit})
+                <input className="large-input" type="number" min="0.001" step="0.001" value={line.quantity} onChange={(event) => updatePurchaseLine(line.id, { quantity: event.target.value })} required />
+              </label>
+              <label className="field-label">Precio por {purchaseUnit} (S/)
+                <input className="large-input" type="number" min="0" step="0.01" value={line.unitPrice} onChange={(event) => updatePurchaseLine(line.id, { unitPrice: event.target.value })} required />
+              </label>
+            </div>
+            <div className="production-purchase-line-total">
+              <span>Ingreso a inventario: <strong>{variant && supply && Number.isFinite(stockQuantity) ? format(stockQuantity) + ' ' + unitLabel[supply.baseUnit] : '—'}</strong></span>
+              <strong>{money(purchaseLineTotal(line))}</strong>
+            </div>
+          </div>;
+        })}
+        <label className="field-label">Observación (opcional)<textarea className="large-input" rows={2} value={purchaseNote} onChange={(event) => setPurchaseNote(event.target.value)} placeholder="Condición, lote o detalle de la compra…" /></label>
+        <div className="production-purchase-total"><span>Total de compra</span><strong>{money(purchaseTotalDraft)}</strong></div>
+        <div className="form-actions"><button type="button" className="button secondary" onClick={() => setShowPurchaseForm(false)}>Cancelar</button><button className="button primary" disabled={purchasableVariants.length === 0}>Registrar compra e ingresar stock</button></div>
+        <p className="production-muted">El precio queda guardado en este comprobante como dato histórico. La entrada al inventario usa la equivalencia de presentación declarada para cada variante; no convierte unidades de forma estimada.</p>
+      </form>}
+      <div className="production-subheading"><strong>Historial de compras</strong><span className="count-badge">{data.supplyPurchases.length} compras</span></div>
+      <div className="production-list">
+        {[...data.supplyPurchases].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)).map((purchase) => {
+          const details = data.supplyPurchaseDetails.filter((detail) => detail.purchaseId === purchase.id);
+          const supplier = textileContext.proveedores.find((item) => item.id === purchase.supplierId);
+          return <article className="production-card" key={purchase.id}>
+            <div className="production-card-heading">
+              <div><strong>{purchase.documentType}{purchase.documentNumber ? ' · ' + purchase.documentNumber : ''}</strong><span>{purchase.date} · {supplier?.nombre ?? (purchase.supplierId ? 'Proveedor no disponible' : 'Sin proveedor')}</span></div>
+              <strong className="production-purchase-history-total">{money(purchase.total)}</strong>
+            </div>
+            {purchase.note && <p className="production-muted">{purchase.note}</p>}
+            <div className="production-purchase-history-details">
+              {details.map((detail) => {
+                const variant = variantsBySupply.get(detail.variantId) ?? data.variants.find((item) => item.id === detail.variantId);
+                const supply = variant ? supplies.find((item) => item.id === variant.supplyId) : undefined;
+                const size = sizes.find((item) => item.id === detail.sizeId);
+                return <div className="production-purchase-history-line" key={detail.id}>
+                  <div><strong>{supply?.name ?? 'Insumo'} · {variant?.name ?? 'Variante'}</strong><small>{format(detail.purchaseQuantity)} {detail.purchaseUnitLabel} · {format(detail.inventoryQuantity)} {supply ? unitLabel[supply.baseUnit] : 'unid.'}{size ? ' · Talla ' + size.label : ''}</small></div>
+                  <div><strong>{money(detail.lineTotal)}</strong><small>{money(detail.unitPrice)} / {detail.purchaseUnitLabel}</small></div>
+                </div>;
+              })}
+              {details.length === 0 && <small className="production-muted">Compra sin detalles visibles.</small>}
+            </div>
+          </article>;
+        })}
+        {data.supplyPurchases.length === 0 && <div className="empty">Todavía no hay compras de avíos registradas.</div>}
+      </div>
+    </section>;
+
     if (view === 'componentes') return <section className="panel production-panel">
       <div className="panel-heading"><div><h2>Biblioteca de componentes</h2><p>Configura una vez los acabados que podrás reutilizar en distintos modelos.</p></div><button className="button primary" onClick={newComponent}>＋ Nuevo componente</button></div>
       {componentDraft && <form className="production-form" onSubmit={saveComponent}>
@@ -852,6 +950,7 @@ export function ProductionModule({
   return <div className="production-module">
     <div className="production-tabs" role="tablist" aria-label="Gestión de producción">
       <button className={view === 'insumos' ? 'active' : ''} onClick={() => onNavigate('insumos')} role="tab" aria-selected={view === 'insumos'}>Insumos</button>
+      <button className={view === 'compras-avios' ? 'active' : ''} onClick={() => onNavigate('compras-avios')} role="tab" aria-selected={view === 'compras-avios'}>Compras</button>
       <button className={view === 'componentes' ? 'active' : ''} onClick={() => onNavigate('componentes')} role="tab" aria-selected={view === 'componentes'}>Componentes</button>
       <button className={view === 'modelos-producto' ? 'active' : ''} onClick={() => onNavigate('modelos-producto')} role="tab" aria-selected={view === 'modelos-producto'}>Modelos</button>
       <button className={view === 'recetas' ? 'active' : ''} onClick={() => onNavigate('recetas')} role="tab" aria-selected={view === 'recetas'}>Recetas</button>
