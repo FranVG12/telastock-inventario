@@ -83,7 +83,7 @@ create table if not exists public.production_order_roll_allocations (
   unit text not null check (unit in ('KG','M')),
   reserved_quantity numeric(14,5) not null check (reserved_quantity > 0),
   created_at timestamptz not null default now(),
-  unique (production_order_id, roll_id, unit)
+  unique (production_order_id, variant_id, roll_id, unit)
 );
 create index if not exists production_order_roll_reservation_idx
   on public.production_order_roll_allocations(roll_id, unit, production_order_id);
@@ -143,7 +143,7 @@ before insert or update on public.production_order_component_piece_requirements
 for each row execute function public.validate_production_order_requirement();
 
 create or replace function public.validate_production_order_roll_allocation()
-returns trigger language plpgsql security definer set search_path = public as $$
+returns trigger language plpgsql security definer set search_path = public as $
 declare
   v_textile_id uuid;
   v_variant_color uuid;
@@ -151,13 +151,17 @@ declare
   v_roll_textile uuid;
   v_roll_color uuid;
   v_status text;
+  v_physical numeric(14,5);
+  v_reserved numeric(14,5);
 begin
   select v.textile_id, v.textile_color_id, s.base_unit
     into v_textile_id, v_variant_color, v_supply_unit
   from public.supply_variants v
   join public.supply_catalog s on s.id = v.supply_id
   where v.id = new.variant_id;
-  select id_tela, id_tela_color into v_roll_textile, v_roll_color
+  select id_tela, id_tela_color,
+         case when new.unit = 'KG' then peso_kg else metros end
+    into v_roll_textile, v_roll_color, v_physical
   from public.rollos where id_rollo = new.roll_id;
   select status into v_status from public.production_orders where id = new.production_order_id;
 
@@ -173,9 +177,24 @@ begin
   if v_status not in ('borrador','reservada','en_proceso') then
     raise exception 'No se pueden asignar rollos a una orden cerrada.';
   end if;
+  if v_physical is null then
+    raise exception 'El rollo no tiene una medición real en %.', new.unit;
+  end if;
+
+  perform pg_advisory_xact_lock(hashtextextended(new.roll_id::text || ':' || new.unit, 0));
+  select coalesce(sum(a.reserved_quantity),0) into v_reserved
+  from public.production_order_roll_allocations a
+  join public.production_orders o on o.id = a.production_order_id
+  where a.roll_id = new.roll_id and a.unit = new.unit
+    and o.status in ('reservada','en_proceso')
+    and not (a.production_order_id = new.production_order_id
+             and a.variant_id = new.variant_id);
+  if v_physical - v_reserved + 0.00001 < new.reserved_quantity then
+    raise exception 'La asignación supera la medición real disponible del rollo después de reservas.';
+  end if;
   return new;
 end;
-$$;
+$;
 
 drop trigger if exists production_order_roll_allocation_guard on public.production_order_roll_allocations;
 create trigger production_order_roll_allocation_guard
@@ -424,3 +443,132 @@ comment on column public.piece_stock_movements.source_production_order_id is
   'Orden que originó la salida de piezas del patrón base.';
 comment on column public.rollo_movimientos.source_production_order_id is
   'Orden que originó el consumo real de tela de un rollo.';
+
+
+-- Enforce the reservation check at the moment an order changes from draft to reserved.
+-- Advisory locks serialize concurrent reservations for each inventory key.
+create or replace function public.validate_production_order_reservation()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  r record;
+  v_balance numeric(18,5);
+  v_reserved numeric(18,5);
+  v_laterality text;
+  v_side_balance numeric(18,5);
+  v_roll_quantity numeric(14,5);
+begin
+  if old.status <> 'borrador' or new.status <> 'reservada' then return new; end if;
+
+  for r in
+    select variant_id, size_id, sum(required_quantity) as required_quantity
+    from public.production_order_materials
+    where production_order_id = new.id
+    group by variant_id, size_id
+  loop
+    perform pg_advisory_xact_lock(hashtextextended(r.variant_id::text || ':' || coalesce(r.size_id::text,'total'),0));
+    select coalesce(sum(m.delta_quantity),0) into v_balance
+    from public.supply_stock_movements m
+    where m.variant_id = r.variant_id and m.size_id is not distinct from r.size_id;
+    select coalesce(sum(other.required_quantity),0) into v_reserved
+    from public.production_order_materials other
+    join public.production_orders o on o.id = other.production_order_id
+    where other.variant_id = r.variant_id and other.size_id is not distinct from r.size_id
+      and o.status in ('reservada','en_proceso') and o.id <> new.id;
+    if v_balance - v_reserved + 0.00001 < r.required_quantity then
+      raise exception 'Stock insuficiente para reservar el material %. Faltan % unidades.',
+        r.variant_id, r.required_quantity - greatest(0, v_balance - v_reserved);
+    end if;
+  end loop;
+
+  for r in
+    select model_piece_id, size_id, side, sum(required_quantity) as required_quantity
+    from public.production_order_base_piece_requirements
+    where production_order_id = new.id
+    group by model_piece_id, size_id, side
+  loop
+    perform pg_advisory_xact_lock(hashtextextended(r.model_piece_id::text || ':' || r.size_id::text || ':' || coalesce(r.side,''),0));
+    select laterality into v_laterality from public.model_pieces where id = r.model_piece_id;
+    if v_laterality = 'simetrica' then
+      select floor(greatest(coalesce(sum(delta_quantity) filter (where side is null),0),0)::numeric / 2)
+        + coalesce(sum(delta_quantity) filter (where side = r.side),0)
+        into v_side_balance
+      from public.piece_stock_movements
+      where model_piece_id = r.model_piece_id and size_id = r.size_id;
+    else
+      select coalesce(sum(delta_quantity),0) into v_side_balance
+      from public.piece_stock_movements
+      where model_piece_id = r.model_piece_id and size_id = r.size_id;
+    end if;
+    select coalesce(sum(other.required_quantity),0) into v_reserved
+    from public.production_order_base_piece_requirements other
+    join public.production_orders o on o.id = other.production_order_id
+    where other.model_piece_id = r.model_piece_id and other.size_id = r.size_id
+      and other.side is not distinct from r.side and o.status in ('reservada','en_proceso') and o.id <> new.id;
+    if v_side_balance - v_reserved < r.required_quantity then
+      raise exception 'Stock insuficiente para reservar la pieza de molde % talla % lado %.',
+        r.model_piece_id, r.size_id, r.side;
+    end if;
+  end loop;
+
+  for r in
+    select component_piece_id, size_id, side, sum(required_quantity) as required_quantity
+    from public.production_order_component_piece_requirements
+    where production_order_id = new.id
+    group by component_piece_id, size_id, side
+  loop
+    perform pg_advisory_xact_lock(hashtextextended(r.component_piece_id::text || ':' || r.size_id::text || ':' || coalesce(r.side,''),0));
+    select laterality into v_laterality from public.component_pattern_pieces where id = r.component_piece_id;
+    if v_laterality = 'simetrica' then
+      select floor(greatest(coalesce(sum(delta_quantity) filter (where side is null),0),0)::numeric / 2)
+        + coalesce(sum(delta_quantity) filter (where side = r.side),0)
+        into v_side_balance
+      from public.component_piece_stock_movements
+      where component_piece_id = r.component_piece_id and size_id = r.size_id;
+    else
+      select coalesce(sum(delta_quantity),0) into v_side_balance
+      from public.component_piece_stock_movements
+      where component_piece_id = r.component_piece_id and size_id = r.size_id;
+    end if;
+    select coalesce(sum(other.required_quantity),0) into v_reserved
+    from public.production_order_component_piece_requirements other
+    join public.production_orders o on o.id = other.production_order_id
+    where other.component_piece_id = r.component_piece_id and other.size_id = r.size_id
+      and other.side is not distinct from r.side and o.status in ('reservada','en_proceso') and o.id <> new.id;
+    if v_side_balance - v_reserved < r.required_quantity then
+      raise exception 'Stock insuficiente para reservar la pieza auxiliar % talla % lado %.',
+        r.component_piece_id, r.size_id, r.side;
+    end if;
+  end loop;
+
+  for r in
+    select variant_id, roll_id, unit, sum(reserved_quantity) as required_quantity
+    from public.production_order_roll_allocations
+    where production_order_id = new.id
+    group by variant_id, roll_id, unit
+  loop
+    select case when r.unit = 'KG' then peso_kg else metros end
+      into v_roll_quantity from public.rollos where id_rollo = r.roll_id;
+    select coalesce(sum(other.reserved_quantity),0) into v_reserved
+    from public.production_order_roll_allocations other
+    join public.production_orders o on o.id = other.production_order_id
+    where other.roll_id = r.roll_id and other.unit = r.unit
+      and o.status in ('reservada','en_proceso') and o.id <> new.id;
+    if v_roll_quantity is null or v_roll_quantity - v_reserved + 0.00001 < r.required_quantity then
+      raise exception 'La medición física del rollo % no alcanza para completar la reserva.', r.roll_id;
+    end if;
+  end loop;
+
+  new.reserved_at := coalesce(new.reserved_at, now());
+  return new;
+end;
+$$;
+
+drop trigger if exists production_order_reservation_guard on public.production_orders;
+create trigger production_order_reservation_guard
+before update of status on public.production_orders
+for each row execute function public.validate_production_order_reservation();
+
+create unique index if not exists production_order_base_piece_requirement_uidx
+  on public.production_order_base_piece_requirements(production_order_id, model_piece_id, size_id, coalesce(side,''));
+create unique index if not exists production_order_component_piece_requirement_uidx
+  on public.production_order_component_piece_requirements(production_order_id, component_piece_id, size_id, coalesce(side,''));
