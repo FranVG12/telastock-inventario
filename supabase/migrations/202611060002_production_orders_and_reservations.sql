@@ -408,7 +408,7 @@ begin
     new.started_at := coalesce(new.started_at, now());
   elsif old.status = 'en_proceso' and new.status = 'completada' then
     new.completed_at := coalesce(new.completed_at, now());
-  elsif old.status in ('reservada','en_proceso') and new.status = 'cancelada' then
+  elsif old.status in ('borrador','reservada','en_proceso') and new.status = 'cancelada' then
     new.cancelled_at := coalesce(new.cancelled_at, now());
   else
     raise exception 'Transición de estado de orden no permitida: % -> %.', old.status, new.status;
