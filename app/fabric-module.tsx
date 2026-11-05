@@ -405,7 +405,7 @@ export function FabricModule({ view }: { view: FabricView }) {
     const metres = rolloForm.id ? metresExtra : rolloForm.unidadIngreso === 'M' ? quantity : metresExtra;
     const row: FabricRoll = {
       id: rolloForm.id ?? id(), idTela: tela.id, unidadIngreso: rolloForm.unidadIngreso, cantidadIngreso: quantity,
-      pesoKg: weight, metros, color: rolloForm.color.trim(), idLote: rolloForm.idLote.trim(), fechaIngreso: rolloForm.fechaIngreso,
+      pesoKg: weight, metros: metres, color: rolloForm.color.trim(), idLote: rolloForm.idLote.trim(), fechaIngreso: rolloForm.fechaIngreso,
       idProveedor: rolloForm.idProveedor || null, ubicacion: rolloForm.ubicacion.trim(), estado: rolloForm.estado, nota: rolloForm.nota.trim(),
       createdAt: rolloForm.id ? (rollById.get(rolloForm.id)?.createdAt ?? now) : now, updatedAt: now,
     };
