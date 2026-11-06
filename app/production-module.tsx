@@ -2402,7 +2402,9 @@ export function ProductionModule({
             const variant = variantsBySupply.get(line.variantId) ?? data.variants.find((item) => item.id === line.variantId);
             const supply = variant ? supplies.find((item) => item.id === variant.supplyId) : undefined;
             const size = sizes.find((item) => item.id === line.sizeId);
-            return (supply?.name ?? 'Material') + ' ' + (variant?.name ?? '') + ': ' + format(line.quantity) + ' ' + unitLabel[line.unit] + (size ? ' (' + size.label + ')' : '');
+            const variantLabelText = supply?.stockMode === 'none' ? '' : ' ' + (variant?.name ?? '');
+            const specificationText = line.specificationValue ? ' · ' + line.specificationValue : '';
+            return (supply?.name ?? 'Material') + variantLabelText + ': ' + format(line.quantity) + ' ' + unitLabel[line.unit] + (size ? ' (' + size.label + ')' : '') + specificationText;
           });
           return <article className="production-card production-order-card" key={order.id}>
             <div className="production-card-heading">
@@ -2584,7 +2586,7 @@ export function ProductionModule({
               const supply = variant ? supplies.find((item) => item.id === variant.supplyId) : undefined;
               const size = sizes.find((item) => item.id === line.sizeId);
               return <label className="production-completion-line" key={line.id}>
-                <span><strong>{supply?.name ?? 'Material'} · {variant?.name ?? 'Variante'}{size ? ' · ' + size.label : ''}</strong><small>Reservado: {format(line.quantity)} {unitLabel[line.unit]}</small></span>
+                <span><strong>{supply?.name ?? 'Material'}{supply?.stockMode === 'none' ? '' : ' · ' + (variant?.name ?? 'Variante')}{size ? ' · ' + size.label : ''}</strong><small>{line.specificationValue ? line.specificationValue + ' · ' : ''}{supply?.stockMode === 'none' ? 'Consumo previsto' : 'Reservado'}: {format(line.quantity)} {unitLabel[line.unit]}</small></span>
                 <input className="large-input" type="number" min="0" max={line.quantity} step={line.unit === 'und' ? 1 : 0.001}
                   value={completionDraft.materialQuantities[line.id] ?? String(line.quantity)}
                   onChange={(event) => setCompletionDraft((current) => current ? { ...current, materialQuantities: { ...current.materialQuantities, [line.id]: event.target.value } } : current)}
