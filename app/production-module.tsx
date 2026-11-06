@@ -904,11 +904,6 @@ export function ProductionModule({
     }
   }
 
-  function openQuickColor(pieceId: string) {
-    setQuickColorPieceId(pieceId);
-    setQuickColorName('');
-  }
-
   function openQuickVariantColor() {
     if (!variantTextileId) return tell('Selecciona primero una tela.', 'error');
     setQuickVariantColorTextileId(variantTextileId);
@@ -927,24 +922,6 @@ export function ProductionModule({
       tell('Color creado y asociado a la tela seleccionada.');
     } catch (error) {
       tell(error instanceof Error ? error.message : 'No se pudo asociar el color a la tela.', 'error');
-    }
-  }
-
-  function saveQuickColor(event: FormEvent) {
-    event.preventDefault();
-    if (!quickColorPieceId) return;
-    try {
-      const color = createGlobalColorQuickly(quickColorName);
-      refreshTextiles();
-      setComponentDraft((current) => current ? {
-        ...current,
-        pieces: current.pieces.map((piece) => piece.id === quickColorPieceId ? { ...piece, colorId: color.id } : piece),
-      } : current);
-      setQuickColorPieceId('');
-      setQuickColorName('');
-      tell('Color creado y seleccionado.');
-    } catch (error) {
-      tell(error instanceof Error ? error.message : 'No se pudo crear el color.', 'error');
     }
   }
 
@@ -2324,22 +2301,26 @@ export function ProductionModule({
         </div>
         <label className="field-label">Fotografía de referencia (URL opcional)<input className="large-input" value={componentDraft.imageUrl} onChange={(e) => setComponentDraft({ ...componentDraft, imageUrl: e.target.value })} placeholder="https://…" /></label>
         <label className="field-label">Descripción<textarea className="large-input" rows={2} value={componentDraft.description} onChange={(e) => setComponentDraft({ ...componentDraft, description: e.target.value })} /></label>
-        <div className="production-subheading"><strong>Piezas auxiliares de patronaje</strong><button type="button" className="text-action" onClick={() => setComponentDraft({ ...componentDraft, pieces: [...componentDraft.pieces, { id: id(), name: '', unitsPerGarment: 1, laterality: 'ninguna', fabricSlot: 'principal', textileId: null, colorId: null }] })}>＋ Agregar pieza</button></div>
+        <div className="production-subheading"><strong>Piezas auxiliares de patronaje</strong><button type="button" className="text-action" onClick={() => setComponentDraft({ ...componentDraft, pieces: [...componentDraft.pieces, { id: id(), name: '', unitsPerGarment: 1, laterality: 'ninguna', fabricSlot: 'cualquiera', textileId: null, colorSlot: 'cualquiera', colorId: null }] })}>＋ Agregar pieza</button></div>
         {componentDraft.pieces.map((piece, index) => {
           const secondaryIndex = secondaryFabricSlotIndex(piece.fabricSlot);
-          const fabricKind = piece.fabricSlot === 'principal' ? 'principal' : secondaryIndex > 0 ? 'secundaria' : 'ninguna';
+          const fabricKind = piece.fabricSlot === 'cualquiera' ? 'cualquiera' : piece.fabricSlot === 'principal' ? 'principal' : secondaryIndex > 0 ? 'secundaria' : 'ninguna';
+          const colorSlot = normalizeComponentColorSlot(piece.colorSlot, piece.colorId);
+          const colorIndex = secondaryColorSlotIndex(colorSlot);
+          const colorKind = colorSlot === 'cualquiera' ? 'cualquiera' : colorSlot === 'principal' ? 'principal' : colorIndex > 0 ? 'secundaria' : 'ninguna';
           return <div className="production-piece-row" key={piece.id}>
             <label className="field-label">Nombre de pieza<input className="large-input" value={piece.name} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, name: e.target.value } : x) })} placeholder="Ej. Pechera" /></label>
-            <label className="field-label">Posición de tela (opcional)
+            <label className="field-label">Posición de tela
               <select className="large-input" value={fabricKind} onChange={(e) => {
                 const nextKind = e.target.value;
                 setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? {
                   ...x,
-                  fabricSlot: (nextKind === 'principal' ? 'principal' : nextKind === 'secundaria' ? (secondaryFabricSlotIndex(x.fabricSlot) > 0 ? x.fabricSlot : 'secundaria_1') : 'ninguna') as ComponentFabricSlot,
+                  fabricSlot: (nextKind === 'principal' ? 'principal' : nextKind === 'cualquiera' ? 'cualquiera' : nextKind === 'secundaria' ? (secondaryFabricSlotIndex(x.fabricSlot) > 0 ? x.fabricSlot : 'secundaria_1') : 'ninguna') as ComponentFabricSlot,
                   textileId: null,
                 } : x) });
               }}>
                 <option value="ninguna">Sin tela vinculada</option>
+                <option value="cualquiera">Cualquier tela</option>
                 <option value="principal">Tela principal 1</option>
                 <option value="secundaria">Tela secundaria</option>
               </select>
@@ -2351,9 +2332,31 @@ export function ProductionModule({
                   setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, fabricSlot: ('secundaria_' + slotIndex) as ComponentFabricSlot } : x) });
                 }} />
               </span>}
-              <small>Al crear cada modelo de prenda, esta pieza heredará la tela asignada a esta posición. Ej.: «Tela principal 1» usará la misma tela principal que el patrón base.</small>
+              <small>Una posición numerada hereda la tela del modelo. «Cualquier tela» deja la elección abierta para cada modelo comercial.</small>
             </label>
-            <label className="field-label">Color<select className="large-input" value={piece.colorId ?? ''} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, colorId: e.target.value || null } : x) })}><option value="">Sin color</option>{textileContext.colores.slice().sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')).map((color) => <option value={color.id} key={color.id}>{color.nombre}</option>)}{piece.colorId && !textileContext.colores.some((color) => color.id === piece.colorId) && <option value={piece.colorId}>{componentColorName(piece.colorId)} · no disponible</option>}</select><button type="button" className="text-action" onClick={() => openQuickColor(piece.id)}>＋ Crear color</button><small>El color se vincula por ID al catálogo global de colores.</small></label>
+            <label className="field-label">Posición de color
+              <select className="large-input" value={colorKind} onChange={(e) => {
+                const nextKind = e.target.value;
+                setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? {
+                  ...x,
+                  colorSlot: (nextKind === 'principal' ? 'principal' : nextKind === 'cualquiera' ? 'cualquiera' : nextKind === 'secundaria' ? (secondaryColorSlotIndex(normalizeComponentColorSlot(x.colorSlot, x.colorId)) > 0 ? normalizeComponentColorSlot(x.colorSlot, x.colorId) : 'secundaria_1') : 'ninguna') as ComponentColorSlot,
+                } : x) });
+              }}>
+                <option value="ninguna">Sin color vinculado</option>
+                <option value="cualquiera">Cualquier color</option>
+                <option value="principal">Color principal 1</option>
+                <option value="secundaria">Color secundario</option>
+              </select>
+              {colorIndex > 0 && <span className="component-piece-secondary-index">
+                <span>N.º de color secundario</span>
+                <input className="large-input" type="number" min="1" step="1" aria-label="Número de color secundario" value={colorIndex} onChange={(e) => {
+                  const slotIndex = Number(e.target.value);
+                  if (!Number.isInteger(slotIndex) || slotIndex < 1) return;
+                  setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, colorSlot: ('secundaria_' + slotIndex) as ComponentColorSlot } : x) });
+                }} />
+              </span>}
+              <small>Una posición numerada hereda el color del modelo. «Cualquier color» permite decidirlo para cada modelo comercial.</small>
+            </label>
             <label className="field-label">Piezas por prenda<input className="large-input" type="number" min="1" step="1" value={piece.unitsPerGarment} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, unitsPerGarment: Number(e.target.value) } : x) })} /></label>
             <label className="field-label">Lateralidad<select className="large-input" value={piece.laterality} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, laterality: e.target.value as ComponentPiece['laterality'] } : x) })}><option value="ninguna">Sin lado</option><option value="simetrica">Simétrica</option><option value="izquierda">Izquierda</option><option value="derecha">Derecha</option></select></label>
             <button type="button" className="text-action danger-action" onClick={() => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.filter((_, i) => i !== index) })}>Quitar</button>
@@ -2367,7 +2370,7 @@ export function ProductionModule({
           {component.imageUrl && <img className="production-component-image" src={component.imageUrl} alt="" />}
           <div className="production-card-heading"><div><strong>{component.name}</strong><span>{component.type} · {component.pieces.length} piezas de patronaje · {component.materials.length} materiales</span></div><button className="button secondary" onClick={() => openComponent(component)}>Editar</button></div>
           {component.description && <p className="production-muted">{component.description}</p>}
-          <div className="production-attributes">{component.pieces.map((x) => <span key={x.id}>{x.name} ×{x.unitsPerGarment}{x.fabricSlot !== 'ninguna' ? ' · ' + componentFabricSlotLabel(x.fabricSlot) : ''}{x.colorId ? ' · Color: ' + componentColorName(x.colorId) : ''}</span>)}</div>
+          <div className="production-attributes">{component.pieces.map((x) => <span key={x.id}>{x.name} ×{x.unitsPerGarment}{x.fabricSlot !== 'ninguna' ? ' · ' + componentFabricSlotLabel(x.fabricSlot) : ''}{' · ' + componentColorSlotLabel(x.colorSlot ?? (x.colorId ? 'principal' : 'cualquiera'))}</span>)}</div>
           <small className="production-muted">Molde auxiliar reutilizable. El inventario se crea dentro de cada modelo de prenda.</small>
         </article>)}
       </div>
@@ -2755,16 +2758,6 @@ export function ProductionModule({
           <label className="field-label">Descripción<input className="large-input" value={quickTextileDraft.description} onChange={(event) => setQuickTextileDraft((current) => current ? { ...current, description: event.target.value } : current)} placeholder="Composición, acabado o uso (opcional)" /></label>
           <div className="notice info">La tela se crea activa. Los colores se agregan después desde el catálogo, sin inventar variantes.</div>
           <div className="form-actions"><button type="button" className="button secondary" onClick={() => setQuickTextileDraft(null)}>Cancelar</button><button className="button primary">Crear y seleccionar</button></div>
-        </form>
-      </section>
-    </div>}
-    {quickColorPieceId && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setQuickColorPieceId(''); }}>
-      <section className="modal production-modal product-fabrics-modal" role="dialog" aria-modal="true" aria-labelledby="quick-color-title">
-        <div className="modal-heading"><div><h2 id="quick-color-title">Nuevo color</h2><p>Se añadirá al catálogo global y quedará seleccionado en esta pieza.</p></div><button className="icon-button" type="button" onClick={() => setQuickColorPieceId('')}>×</button></div>
-        <form className="production-form" onSubmit={saveQuickColor}>
-          <label className="field-label">Nombre del color *<input className="large-input" value={quickColorName} onChange={(event) => setQuickColorName(event.target.value)} placeholder="Ej. Azul noche" required autoFocus /></label>
-          <small>Si el color ya existe, se reutilizará el registro existente.</small>
-          <div className="form-actions"><button type="button" className="button secondary" onClick={() => setQuickColorPieceId('')}>Cancelar</button><button className="button primary">Crear y seleccionar</button></div>
         </form>
       </section>
     </div>}
