@@ -1,9 +1,9 @@
-export type ComponentFabricSlot = 'ninguna' | 'principal' | `secundaria_${number}`;
+export type ComponentFabricSlot = 'ninguna' | 'cualquiera' | 'principal' | `secundaria_${number}`;
 
 const SECONDARY_FABRIC_SLOT_PATTERN = /^secundaria_([1-9][0-9]*)$/;
 
 export function isComponentFabricSlot(value: unknown): value is ComponentFabricSlot {
-  return value === 'ninguna' || value === 'principal' ||
+  return value === 'ninguna' || value === 'cualquiera' || value === 'principal' ||
     (typeof value === 'string' && SECONDARY_FABRIC_SLOT_PATTERN.test(value));
 }
 
@@ -28,6 +28,7 @@ export function isComponentFabricSlotAvailableForModel(slot: string, secondarySl
 
 export function componentFabricSlotLabel(slot: string): string {
   if (slot === 'ninguna') return 'Sin tela vinculada';
+  if (slot === 'cualquiera') return 'Cualquier tela';
   if (slot === 'principal') return 'Tela principal 1';
   const index = secondaryFabricSlotIndex(slot);
   return index > 0 ? 'Tela secundaria ' + index : 'Posición de tela inválida';
@@ -47,7 +48,7 @@ export function resolveComponentPieceTextileId(
   fabricSlot: string,
   assignments: ProductFabricAssignmentLike[],
 ): string | null {
-  if (!isComponentFabricSlot(fabricSlot) || fabricSlot === 'ninguna') return null;
+  if (!isComponentFabricSlot(fabricSlot) || fabricSlot === 'ninguna' || fabricSlot === 'cualquiera') return null;
   return assignments.find((assignment) =>
     assignment.productModelId === productModelId && assignment.fabricSlot === fabricSlot
   )?.textileId ?? null;
