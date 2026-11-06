@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { getCompleteUnits, getPieceStock, getSymmetricStock, type PieceMovement as DomainPieceMovement, type ManufacturingModel, type ModelPiece, type Size, type SizeGroup } from '@/lib/inventory-domain';
 import { FABRIC_STORAGE_KEYS, createGlobalColorQuickly, createTextileColorQuickly, createTextileQuickly, type RollMovement as FabricRollMovement } from '@/app/fabric-module';
 import { componentFabricSlotLabel, isComponentFabricSlot, isComponentFabricSlotAvailableForModel, normalizeComponentFabricSlot, resolveComponentPieceTextileId, secondaryFabricSlotIndex, type ComponentFabricSlot } from '@/lib/component-fabric-slots';
+import { mapSizeSpecificationRules, validateSizeSpecification, type SizeSpecification, type SizeSpecificationRule } from '@/lib/material-size-specifications';
 
 export type ProductionView = 'insumos' | 'compras-avios' | 'componentes' | 'modelos-producto' | 'recetas' | 'planificacion' | 'ordenes';
 export type StockUnit = 'und' | 'm' | 'cm' | 'g' | 'kg' | 'l' | 'ml';
@@ -17,7 +18,7 @@ export type Supply = {
   name: string;
   category: SupplyCategory;
   baseUnit: StockUnit;
-  stockMode: 'total' | 'talla';
+  stockMode: 'none' | 'total' | 'talla';
   description: string;
   attributes: Record<string, string>;
   active: boolean;
@@ -106,6 +107,8 @@ export type MaterialRequirement = {
   fixedQuantity: number | null;
   bySize: Record<string, number>;
   wastePercent: number;
+  /** Optional characteristic (e.g. Longitud, Ancho, Grosor) configured by talla on each commercial model. */
+  specificationLabel?: string;
 };
 
 export type GarmentComponent = {
@@ -136,6 +139,7 @@ export type ProductComponentSelection = {
   quantity: number;
   location: string;
   variantOverrides: Record<string, string>;
+  materialSpecifications?: Record<string, SizeSpecification>;
 };
 
 export type ProductCollection = {
@@ -172,6 +176,7 @@ export type ProductionOrderStatus = 'borrador' | 'reservada' | 'en_proceso' | 'c
 export type ProductionOrderMaterial = {
   id: string; variantId: string; sizeId: string | null; quantity: number; unit: StockUnit;
   unitCost: number | null; lineCost: number | null;
+  specificationLabel?: string | null; specificationValue?: string | null;
 };
 export type ProductionOrderPieceRequirement = { id: string; pieceId: string; sizeId: string; side: 'izquierda' | 'derecha' | null; quantity: number };
 export type ProductionOrderComponentPieceRequirement = ProductionOrderPieceRequirement & { componentId: string; productModelId: string };
@@ -183,6 +188,7 @@ export type ProductionOrderActualConsumption = {
   missingCostLines: number;
   recordedAt: string;
 };
+type ProductMaterialSpecDraft = { label: string; rules: Array<SizeSpecificationRule & { id: string }> };
 type ProductionOrderCompletionDraft = {
   orderId: string;
   materialQuantities: Record<string, string>;
@@ -476,7 +482,7 @@ type QuickMaterialDraft = {
   supplyName: string;
   category: SupplyCategory;
   baseUnit: StockUnit;
-  stockMode: 'total' | 'talla';
+  stockMode: 'none' | 'total' | 'talla';
   variantName: string;
 };
 type QuickMaterialCreated = { supply: Supply; variant: SupplyVariant };
@@ -638,7 +644,7 @@ export function ProductionModule({
   const [supplyName, setSupplyName] = useState('');
   const [supplyCategory, setSupplyCategory] = useState<SupplyCategory>('Hilos');
   const [supplyUnit, setSupplyUnit] = useState<StockUnit>('g');
-  const [stockMode, setStockMode] = useState<'total' | 'talla'>('total');
+  const [stockMode, setStockMode] = useState<'none' | 'total' | 'talla'>('none');
   const [supplyDescription, setSupplyDescription] = useState('');
   const [supplyAttributes, setSupplyAttributes] = useState('');
   const [showSupplyForm, setShowSupplyForm] = useState(false);
@@ -671,6 +677,7 @@ export function ProductionModule({
   const [editingProductFabricAssignments, setEditingProductFabricAssignments] = useState<Record<string, string>>({});
   const [productDescription, setProductDescription] = useState('');
   const [productComponentIds, setProductComponentIds] = useState<string[]>([]);
+  const [productMaterialSpecsDraft, setProductMaterialSpecsDraft] = useState<Record<string, ProductMaterialSpecDraft>>({});
   const [selectedProductId, setSelectedProductId] = useState('');
   const [planCounts, setPlanCounts] = useState<Record<string, string>>({});
   const [orderNote, setOrderNote] = useState('');
