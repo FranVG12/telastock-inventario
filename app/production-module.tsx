@@ -1920,7 +1920,7 @@ export function ProductionModule({
           <label className="field-label">Número de comprobante<input className="large-input" value={purchaseDocumentNumber} onChange={(event) => setPurchaseDocumentNumber(event.target.value)} placeholder="Serie y correlativo (opcional)" /></label>
         </div>
         <div className="production-subheading"><strong>Detalle de compra</strong><button type="button" className="text-action" disabled={purchasableVariants.length === 0} onClick={addPurchaseLine}>＋ Agregar avío</button></div>
-        {purchasableVariants.length === 0 && <div className="notice info">Primero registra un insumo y una variante que no esté vinculada a tela. Las telas se siguen comprando desde el módulo de rollos.</div>}
+        {purchasableVariants.length === 0 && <div className="notice info production-empty-catalog"><span>Necesitas una variante de avío para registrar esta compra. Las telas se siguen comprando desde el módulo de rollos.</span><div className="production-empty-catalog-actions"><select className="large-input" value={purchaseQuickSupplyId} onChange={(event) => setPurchaseQuickSupplyId(event.target.value)}><option value="">Crear un insumo nuevo</option>{supplies.filter((item) => item.active).map((item) => <option key={item.id} value={item.id}>Agregar variante a: {item.name}</option>)}</select><button type="button" className="button secondary" onClick={() => { setSupplyReturnToPurchase(true); if (purchaseQuickSupplyId) { setShowPurchaseForm(true); openVariant(purchaseQuickSupplyId); } else startSupplyCreationForPurchase(); }}>{purchaseQuickSupplyId ? '＋ Crear variante y volver' : '＋ Crear insumo y variante'}</button></div></div>}
         {purchaseLines.map((line, index) => {
           const variant = variantsBySupply.get(line.variantId);
           const supply = variant ? supplies.find((item) => item.id === variant.supplyId) : undefined;
@@ -2057,7 +2057,7 @@ export function ProductionModule({
         </section>}
         <label className="field-label">Descripción (opcional)<input className="large-input" value={productDescription} onChange={(e) => setProductDescription(e.target.value)} placeholder="Color, temporada, cliente…" /></label>
         <div className="production-subheading"><strong>Componentes y acabados</strong><span className="production-muted">Selecciona los que lleva esta prenda</span></div>
-        {data.components.filter((x) => x.active).length === 0 && <p className="production-muted">Primero registra componentes en la biblioteca.</p>}
+        {data.components.filter((x) => x.active).length === 0 && <div className="notice info"><span>Esta prenda todavía no tiene componentes. Puedes continuar sin ellos o crear uno ahora.</span><button type="button" className="button secondary" onClick={createComponentFromProduct}>＋ Crear componente y volver</button></div>}
         <div className="production-check-list">{data.components.filter((x) => x.active).map((component) => <label key={component.id}>
           <input type="checkbox" checked={productComponentIds.includes(component.id)} onChange={(e) => setProductComponentIds((current) => e.target.checked ? [...current, component.id] : current.filter((x) => x !== component.id))} />
           <span><strong>{component.name}</strong><small>{component.type} · {component.materials.length} materiales asociados</small></span>
@@ -2342,7 +2342,7 @@ export function ProductionModule({
         </section>
       </div>;
     })()}
-    {showVariantForm && <div className="modal-backdrop"><section className="modal production-modal" role="dialog" aria-modal="true"><div className="modal-heading"><div><h2>Nueva variante</h2><p>Registra color, ancho u otra característica.</p></div><button className="icon-button" onClick={() => setShowVariantForm(false)}>×</button></div>
+    {showVariantForm && <div className="modal-backdrop"><section className="modal production-modal" role="dialog" aria-modal="true"><div className="modal-heading"><div><h2>Nueva variante</h2><p>Registra color, ancho u otra característica.</p></div><button className="icon-button" onClick={cancelVariantCreation}>×</button></div>
       <form className="production-form" onSubmit={saveVariant}>
         <label className="field-label">Nombre de variante<input className="large-input" value={variantName} onChange={(e) => setVariantName(e.target.value)} placeholder="Ej. Negro · 3.5 cm" required /></label>
         <div className="production-form-grid"><label className="field-label">Cantidad por presentación<input className="large-input" type="number" min="0.001" step="0.001" value={variantPackQuantity} onChange={(e) => setVariantPackQuantity(e.target.value)} placeholder="Ej. 40" /></label><label className="field-label">Presentación<input className="large-input" value={variantPackLabel} onChange={(e) => setVariantPackLabel(e.target.value)} placeholder="Rollo, cono, docena…" /></label></div>
@@ -2350,7 +2350,7 @@ export function ProductionModule({
         {textileContext.telas.length > 0 && <div className="production-link-textile"><strong>Vincular con una tela existente (opcional)</strong><label className="field-label">Tela<select className="large-input" value={variantTextileId} onChange={(e) => { setVariantTextileId(e.target.value); setVariantTextileColorId(''); }}><option value="">Sin vincular</option>{textileContext.telas.map((x) => <option key={x.id} value={x.id}>{x.nombreTela}</option>)}</select></label>
           {variantTextileId && <label className="field-label">Color de esa tela<select className="large-input" value={variantTextileColorId} onChange={(e) => setVariantTextileColorId(e.target.value)}><option value="">Seleccionar color</option>{textileColorOptions.map((x) => <option key={x.id} value={x.id}>{textileContext.colores.find((c) => c.id === x.idColor)?.nombre ?? 'Color'}</option>)}</select></label>}
         </div>}
-        <div className="form-actions"><button type="button" className="button secondary" onClick={() => setShowVariantForm(false)}>Cancelar</button><button className="button primary">Guardar variante</button></div>
+        <div className="form-actions"><button type="button" className="button secondary" onClick={cancelVariantCreation}>Cancelar</button><button className="button primary">Guardar variante</button></div>
       </form></section></div>}
     {showComponentPieceMovement && selectedStockProductModel && selectedStockComponent && selectedComponentStockPiece && <div className="modal-backdrop">
       <section className="modal production-modal" role="dialog" aria-modal="true" aria-labelledby="component-piece-stock-title">
