@@ -946,6 +946,8 @@ export function ProductionModule({
   }
 
   function openVariant(supplyId: string) {
+    const targetSupply = supplies.find((item) => item.id === supplyId);
+    if (targetSupply?.stockMode === 'none') return tell('Este insumo se configura por talla en cada modelo; no necesita variantes ni inventario.', 'info');
     setVariantSupplyId(supplyId); setVariantName(''); setVariantPackQuantity(''); setVariantPackLabel(''); setVariantAttributes('');
     setVariantTextileId(''); setVariantTextileColorId(''); setShowVariantForm(true);
   }
@@ -953,6 +955,7 @@ export function ProductionModule({
     event.preventDefault();
     const supply = supplies.find((x) => x.id === variantSupplyId);
     if (!supply || !variantName.trim()) return tell('Selecciona el insumo y escribe el nombre de la variante.', 'error');
+    if (supply.stockMode === 'none') return tell('Este insumo no maneja variantes de inventario. Define su medida por talla al crear el modelo.', 'error');
     const packQuantity = numberOrNull(variantPackQuantity);
     if (variantPackQuantity.trim() && (packQuantity === null || !Number.isFinite(packQuantity) || packQuantity <= 0 || (supply.baseUnit === 'und' && !Number.isInteger(packQuantity)))) return tell(supply.baseUnit === 'und' ? 'La equivalencia para unidades debe ser un entero.' : 'La equivalencia del paquete debe ser mayor que cero.', 'error');
     if (variantTextileId && supply.stockMode === 'talla') return tell('Las telas vinculadas a rollos se controlan por rollo, no por talla. Selecciona control de existencias total.', 'error');
@@ -2088,7 +2091,7 @@ export function ProductionModule({
           <label className="field-label">Número de comprobante<input className="large-input" value={purchaseDocumentNumber} onChange={(event) => setPurchaseDocumentNumber(event.target.value)} placeholder="Serie y correlativo (opcional)" /></label>
         </div>
         <div className="production-subheading"><strong>Detalle de compra</strong><button type="button" className="text-action" disabled={purchasableVariants.length === 0} onClick={addPurchaseLine}>＋ Agregar avío</button></div>
-        {purchasableVariants.length === 0 && <div className="notice info production-empty-catalog"><span>Necesitas una variante de avío para registrar esta compra. Las telas se siguen comprando desde el módulo de rollos.</span><div className="production-empty-catalog-actions"><select className="large-input" value={purchaseQuickSupplyId} onChange={(event) => setPurchaseQuickSupplyId(event.target.value)}><option value="">Crear un insumo nuevo</option>{supplies.filter((item) => item.active).map((item) => <option key={item.id} value={item.id}>Agregar variante a: {item.name}</option>)}</select><button type="button" className="button secondary" onClick={() => { setSupplyReturnToPurchase(true); if (purchaseQuickSupplyId) { setShowPurchaseForm(true); openVariant(purchaseQuickSupplyId); } else startSupplyCreationForPurchase(); }}>{purchaseQuickSupplyId ? '＋ Crear variante y volver' : '＋ Crear insumo y variante'}</button></div></div>}
+        {purchasableVariants.length === 0 && <div className="notice info production-empty-catalog"><span>Necesitas una variante de avío para registrar esta compra. Las telas se siguen comprando desde el módulo de rollos.</span><div className="production-empty-catalog-actions"><select className="large-input" value={purchaseQuickSupplyId} onChange={(event) => setPurchaseQuickSupplyId(event.target.value)}><option value="">Crear un insumo nuevo</option>{supplies.filter((item) => item.active && item.stockMode !== 'none').map((item) => <option key={item.id} value={item.id}>Agregar variante a: {item.name}</option>)}</select><button type="button" className="button secondary" onClick={() => { setSupplyReturnToPurchase(true); if (purchaseQuickSupplyId) { setShowPurchaseForm(true); openVariant(purchaseQuickSupplyId); } else startSupplyCreationForPurchase(); }}>{purchaseQuickSupplyId ? '＋ Crear variante y volver' : '＋ Crear insumo y variante'}</button></div></div>}
         {purchaseLines.map((line, index) => {
           const variant = variantsBySupply.get(line.variantId);
           const supply = variant ? supplies.find((item) => item.id === variant.supplyId) : undefined;
