@@ -520,6 +520,18 @@
 .product-fabric-slots .field-label{min-width:0}
 .production-product-fabric-summary{display:block;margin-top:7px;color:#7d899d;font-size:10px;line-height:1.5;overflow-wrap:anywhere}
 .product-fabrics-modal{max-height:min(88vh,720px);overflow-y:auto}
+.product-base-pattern-field{display:grid;gap:5px;min-width:0}
+.product-base-pattern-field>.text-action{justify-self:start}
+.product-base-pattern-field>small{font-size:10px;color:#8b95a7;line-height:1.45}
+.production-material-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:7px}
+.production-quick-material{display:grid;gap:10px;padding:12px;border:1px solid #dfe5f1;border-radius:10px;background:#fff}
+.production-quick-material>strong{font-size:11px;color:#38465d}
+.production-quick-material>small{font-size:10px;line-height:1.45;color:#8994a7}
+.production-quick-material-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:7px}
+.production-empty-catalog{display:grid;gap:10px}
+.production-empty-catalog-actions{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}
+.production-empty-catalog-actions .large-input{min-width:0}
+@media(max-width:560px){.production-material-actions{justify-content:flex-start}.production-quick-material-actions{display:grid;grid-template-columns:1fr 1fr}.production-empty-catalog-actions{grid-template-columns:1fr}.production-empty-catalog-actions .button{width:100%}.product-base-pattern-field>.text-action{font-size:10px}}
 @media(max-width:720px){.product-fabric-slots{grid-template-columns:1fr}.product-inherited-size-tag{padding:7px 9px}.product-inherited-size-tag>span{font-size:9px}.product-inherited-size-tag>strong{font-size:10px}}
 .production-collection-control{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}
 .production-collection-create{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;margin-top:8px;padding:10px;border:1px solid #e8edf4;border-radius:10px;background:#fff}
