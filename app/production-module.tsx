@@ -473,6 +473,8 @@ type QuickMaterialDraft = {
   variantName: string;
 };
 type QuickMaterialCreated = { supply: Supply; variant: SupplyVariant };
+type QuickTextileTarget = { kind: 'product'; slot: string } | { kind: 'component'; pieceId: string };
+type QuickTextileDraft = { target: QuickTextileTarget; name: string; unit: 'KG' | 'M'; width: string; theoreticalYield: string; description: string };
 
 function MaterialEditor({
   materials, onChange, variants, supplies, sizes, title, onCreateSupplyVariant,
@@ -591,7 +593,7 @@ function variantLabel(variant: SupplyVariant, variants: SupplyVariant[], supplie
 }
 
 export function ProductionModule({
-  view, baseModels, baseModelsReady, basePieces, baseMovements, sizes, sizeGroups, onAddBaseMovements, onNavigate,
+  view, baseModels, baseModelsReady, basePieces, baseMovements, sizes, sizeGroups, onAddBaseMovements, onNavigate, onQuickCreateBaseModel,
 }: {
   view: ProductionView;
   baseModels: ManufacturingModel[];
@@ -602,6 +604,7 @@ export function ProductionModule({
   sizeGroups: SizeGroup[];
   onAddBaseMovements: (movements: DomainPieceMovement[]) => boolean;
   onNavigate: (view: ProductionView) => void;
+  onQuickCreateBaseModel: () => void;
 }) {
   const [data, setData] = useState<ProductionBackupData>(emptyProductionBackupData);
   const [ready, setReady] = useState(false);
@@ -662,6 +665,9 @@ export function ProductionModule({
   const [planCounts, setPlanCounts] = useState<Record<string, string>>({});
   const [orderNote, setOrderNote] = useState('');
   const [completionDraft, setCompletionDraft] = useState<ProductionOrderCompletionDraft | null>(null);
+  const [quickTextileDraft, setQuickTextileDraft] = useState<QuickTextileDraft | null>(null);
+  const [quickColorPieceId, setQuickColorPieceId] = useState('');
+  const [quickColorName, setQuickColorName] = useState('');
 
   const refreshTextiles = () => {
     const telas = safeRead<TextileRow[]>(FABRIC_STORAGE_KEYS.telas, []);
@@ -777,6 +783,61 @@ export function ProductionModule({
     setSupplyName(''); setSupplyDescription(''); setSupplyAttributes(''); setShowSupplyForm(false);
     tell('Insumo registrado. Ahora agrega sus variantes comerciales.');
   }
+  function openQuickTextile(target: QuickTextileTarget) {
+    setQuickTextileDraft({ target, name: '', unit: 'KG', width: '', theoreticalYield: '', description: '' });
+  }
+
+  function saveQuickTextile(event: FormEvent) {
+    event.preventDefault();
+    if (!quickTextileDraft) return;
+    const width = numberOrNull(quickTextileDraft.width);
+    const theoreticalYield = numberOrNull(quickTextileDraft.theoreticalYield);
+    if (quickTextileDraft.width.trim() && (width === null || !Number.isFinite(width) || width <= 0)) return tell('El ancho debe ser un número mayor que cero o quedar vacío.', 'error');
+    if (quickTextileDraft.theoreticalYield.trim() && (theoreticalYield === null || !Number.isFinite(theoreticalYield) || theoreticalYield <= 0)) return tell('El rendimiento teórico debe ser mayor que cero o quedar vacío.', 'error');
+    try {
+      const textile = createTextileQuickly({
+        name: quickTextileDraft.name, unit: quickTextileDraft.unit,
+        width, theoreticalYield, description: quickTextileDraft.description,
+      });
+      refreshTextiles();
+      if (quickTextileDraft.target.kind === 'product') {
+        setProductFabricAssignments((current) => ({ ...current, [quickTextileDraft.target.slot]: textile.id }));
+      } else {
+        setComponentDraft((current) => current ? {
+          ...current,
+          pieces: current.pieces.map((piece) => piece.id === quickTextileDraft.target.pieceId ? { ...piece, textileId: textile.id } : piece),
+        } : current);
+      }
+      setQuickTextileDraft(null);
+      tell('Tela creada y seleccionada en el campo que estabas completando.');
+    } catch (error) {
+      tell(error instanceof Error ? error.message : 'No se pudo crear la tela.', 'error');
+    }
+  }
+
+  function openQuickColor(pieceId: string) {
+    setQuickColorPieceId(pieceId);
+    setQuickColorName('');
+  }
+
+  function saveQuickColor(event: FormEvent) {
+    event.preventDefault();
+    if (!quickColorPieceId) return;
+    try {
+      const color = createGlobalColorQuickly(quickColorName);
+      refreshTextiles();
+      setComponentDraft((current) => current ? {
+        ...current,
+        pieces: current.pieces.map((piece) => piece.id === quickColorPieceId ? { ...piece, colorId: color.id } : piece),
+      } : current);
+      setQuickColorPieceId('');
+      setQuickColorName('');
+      tell('Color creado y seleccionado.');
+    } catch (error) {
+      tell(error instanceof Error ? error.message : 'No se pudo crear el color.', 'error');
+    }
+  }
+
   function createSupplyVariantFromMaterial(draft: QuickMaterialDraft): QuickMaterialCreated | null {
     const existing = draft.existingSupplyId ? supplies.find((item) => item.id === draft.existingSupplyId && item.active) : undefined;
     if (draft.existingSupplyId && !existing) { tell('El insumo elegido ya no está disponible. Actualiza el formulario.', 'error'); return null; }
