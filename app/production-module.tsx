@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { getCompleteUnits, getPieceStock, getSymmetricStock, type PieceMovement as DomainPieceMovement, type ManufacturingModel, type ModelPiece, type Size, type SizeGroup } from '@/lib/inventory-domain';
 import { FABRIC_STORAGE_KEYS, createGlobalColorQuickly, createTextileColorQuickly, createTextileQuickly, type RollMovement as FabricRollMovement } from '@/app/fabric-module';
 import { componentFabricSlotLabel, isComponentFabricSlot, isComponentFabricSlotAvailableForModel, normalizeComponentFabricSlot, resolveComponentPieceTextileId, secondaryFabricSlotIndex, type ComponentFabricSlot } from '@/lib/component-fabric-slots';
+import { componentColorSlotLabel, isComponentColorSlot, isComponentColorSlotAvailableForModel, normalizeComponentColorSlot, resolveComponentPieceColorId, secondaryColorSlotIndex, type ComponentColorSlot } from '@/lib/component-color-slots';
 import { mapSizeSpecificationRules, validateSizeSpecification, type SizeSpecification, type SizeSpecificationRule } from '@/lib/material-size-specifications';
 
 export type ProductionView = 'insumos' | 'compras-avios' | 'componentes' | 'modelos-producto' | 'recetas' | 'planificacion' | 'ordenes';
@@ -82,6 +83,8 @@ export type ComponentPiece = {
   fabricSlot: ComponentFabricSlot;
   /** Legacy field from the old fixed-textile selector; normalized to null on load. */
   textileId?: string | null;
+  /** Color position resolved by the commercial product; colorId remains a legacy fallback. */
+  colorSlot?: ComponentColorSlot;
   colorId: string | null;
 };
 
@@ -140,6 +143,8 @@ export type ProductComponentSelection = {
   location: string;
   variantOverrides: Record<string, string>;
   materialSpecifications?: Record<string, SizeSpecification>;
+  /** Per-product concrete choices for wildcard component pieces. */
+  pieceOverrides?: Record<string, { textileId: string | null; colorId: string | null }>;
 };
 
 export type ProductCollection = {
@@ -159,6 +164,17 @@ export type ProductFabricAssignment = {
   updatedAt: string;
 };
 
+export type ProductColorAssignment = {
+  id: string;
+  productModelId: string;
+  colorSlot: string;
+  colorId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProductPieceOverride = { textileId: string | null; colorId: string | null };
+
 export type ConfiguredProductModel = {
   id: string;
   name: string;
@@ -167,6 +183,8 @@ export type ConfiguredProductModel = {
   description: string;
   components: ProductComponentSelection[];
   additionalMaterials: MaterialRequirement[];
+  /** Model-specific concrete choices for wildcard base-pattern pieces. */
+  basePieceOverrides?: Record<string, ProductPieceOverride>;
   active: boolean;
   createdAt: string;
   updatedAt: string;
@@ -218,6 +236,7 @@ export type ProductionBackupData = {
   productCollections: ProductCollection[];
   productModels: ConfiguredProductModel[];
   productFabrics: ProductFabricAssignment[];
+  productColors: ProductColorAssignment[];
 };
 
 export const PRODUCTION_STORAGE_KEYS = {
@@ -234,10 +253,11 @@ export const PRODUCTION_STORAGE_KEYS = {
   productCollections: 'telastock-product-collections-v1',
   productModels: 'telastock-configured-product-models-v1',
   productFabrics: 'telastock-configured-product-fabrics-v1',
+  productColors: 'telastock-configured-product-colors-v1',
 } as const;
 
 export function emptyProductionBackupData(): ProductionBackupData {
-  return { supplies: [], variants: [], supplyMovements: [], supplyPurchases: [], supplyPurchaseDetails: [], componentPieceMovements: [], productionOrders: [], components: [], familyRecipes: [], productCollections: [], productModels: [], productFabrics: [] };
+  return { supplies: [], variants: [], supplyMovements: [], supplyPurchases: [], supplyPurchaseDetails: [], componentPieceMovements: [], productionOrders: [], components: [], familyRecipes: [], productCollections: [], productModels: [], productFabrics: [], productColors: [] };
 }
 
 export function validateProductionBackupData(value: unknown): ProductionBackupData {
@@ -273,6 +293,7 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
       ...piece,
       fabricSlot: normalizeComponentFabricSlot(piece.fabricSlot, piece.textileId),
       textileId: null,
+      colorSlot: normalizeComponentColorSlot(piece.colorSlot, piece.colorId),
       colorId: piece.colorId ?? null,
     })),
   }));
@@ -378,7 +399,7 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
         typeof order.actualConsumption.recordedAt === 'string'
       ));
   })) throw new Error('Hay órdenes de producción con datos o relaciones inválidas.');
-  if (!output.components.every((x) => typeof x.name === 'string' && x.name.trim() && typeof x.type === 'string' && x.type.trim() && Array.isArray(x.pieces) && x.pieces.every((p) => p && typeof p.id === 'string' && p.id.trim() && typeof p.name === 'string' && p.name.trim() && Number.isInteger(p.unitsPerGarment) && p.unitsPerGarment > 0 && ['ninguna', 'simetrica', 'izquierda', 'derecha'].includes(p.laterality) && (p.laterality !== 'simetrica' || p.unitsPerGarment % 2 === 0) && isComponentFabricSlot(p.fabricSlot) && p.textileId === null && (p.colorId === null || typeof p.colorId === 'string')) && validMaterials(x.materials))) {
+  if (!output.components.every((x) => typeof x.name === 'string' && x.name.trim() && typeof x.type === 'string' && x.type.trim() && Array.isArray(x.pieces) && x.pieces.every((p) => p && typeof p.id === 'string' && p.id.trim() && typeof p.name === 'string' && p.name.trim() && Number.isInteger(p.unitsPerGarment) && p.unitsPerGarment > 0 && ['ninguna', 'simetrica', 'izquierda', 'derecha'].includes(p.laterality) && (p.laterality !== 'simetrica' || p.unitsPerGarment % 2 === 0) && isComponentFabricSlot(p.fabricSlot) && isComponentColorSlot(p.colorSlot) && p.textileId === null && (p.colorId === null || typeof p.colorId === 'string')) && validMaterials(x.materials))) {
     throw new Error('Hay componentes con piezas o materiales inválidos.');
   }
   if (!output.componentPieceMovements.every((movement) => {
@@ -420,8 +441,12 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
   }
   const productModelIds = new Set(output.productModels.map((product) => product.id));
   const productFabricKeys = output.productFabrics.map((assignment) => assignment.productModelId + ':' + assignment.fabricSlot);
+  const productColorKeys = output.productColors.map((assignment) => assignment.productModelId + ':' + assignment.colorSlot);
   if (!output.productFabrics.every((assignment) => productModelIds.has(assignment.productModelId) && typeof assignment.fabricSlot === 'string' && assignment.fabricSlot.trim() && typeof assignment.textileId === 'string' && assignment.textileId.trim() && typeof assignment.createdAt === 'string' && typeof assignment.updatedAt === 'string') || new Set(productFabricKeys).size !== productFabricKeys.length) {
     throw new Error('Hay asignaciones de tela duplicadas o vinculadas a modelos inexistentes.');
+  }
+  if (!output.productColors.every((assignment) => productModelIds.has(assignment.productModelId) && typeof assignment.colorSlot === 'string' && assignment.colorSlot.trim() && typeof assignment.colorId === 'string' && assignment.colorId.trim() && typeof assignment.createdAt === 'string' && typeof assignment.updatedAt === 'string') || new Set(productColorKeys).size !== productColorKeys.length) {
+    throw new Error('Hay asignaciones de color duplicadas o vinculadas a modelos inexistentes.');
   }
   if (!output.supplies.every((x) => x.name.trim() && ['none', 'total', 'talla'].includes(x.stockMode) && ['und', 'm', 'cm', 'g', 'kg', 'l', 'ml'].includes(x.baseUnit))) {
     throw new Error('Hay insumos con unidades o modalidad de inventario inválidas.');
@@ -442,6 +467,12 @@ const families = [
   { value: 'otro', label: 'Otro' },
 ];
 const componentTypes = ['Cuello', 'Bolsillo', 'Puño', 'Pretina', 'Tapetera', 'Cierre', 'Terminación', 'Otro'];
+const productColorSlotsForBaseModel = (model: ManufacturingModel) => ['principal', ...Array.from({ length: Math.max(0, Math.floor(model.secondaryColorSlots ?? 0)) }, (_, index) => 'secundaria_' + (index + 1))];
+const productColorSlotLabel = (slot: string) => {
+  if (slot === 'principal') return 'Color principal 1';
+  const match = /^secundaria_(\\d+)$/.exec(slot);
+  return match ? 'Color secundario ' + Number(match[1]) : slot;
+};
 const unitLabel: Record<StockUnit, string> = { und: 'unidades', m: 'm', cm: 'cm', g: 'g', kg: 'kg', l: 'l', ml: 'ml' };
 const id = () => typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : 'prod-' + Date.now() + '-' + Math.random().toString(36).slice(2);
 const productFabricSlotsForBaseModel = (model: ManufacturingModel) => ['principal', ...Array.from({ length: Math.max(0, Math.floor(model.secondaryFabricSlots ?? 0)) }, (_, index) => 'secundaria_' + (index + 1))];
@@ -685,8 +716,14 @@ export function ProductionModule({
   const [newProductCollectionName, setNewProductCollectionName] = useState('');
   const [productBaseId, setProductBaseId] = useState('');
   const [productFabricAssignments, setProductFabricAssignments] = useState<Record<string, string>>({});
+  const [productColorAssignments, setProductColorAssignments] = useState<Record<string, string>>({});
+  const [productPieceOverrides, setProductPieceOverrides] = useState<Record<string, ProductPieceOverride>>({});
   const [editingProductFabricId, setEditingProductFabricId] = useState('');
   const [editingProductFabricAssignments, setEditingProductFabricAssignments] = useState<Record<string, string>>({});
+  const [editingProductColorId, setEditingProductColorId] = useState('');
+  const [editingProductColorAssignments, setEditingProductColorAssignments] = useState<Record<string, string>>({});
+  const [quickProductColorSlot, setQuickProductColorSlot] = useState('');
+  const [quickProductColorName, setQuickProductColorName] = useState('');
   const [productDescription, setProductDescription] = useState('');
   const [productComponentIds, setProductComponentIds] = useState<string[]>([]);
   const [productMaterialSpecsDraft, setProductMaterialSpecsDraft] = useState<Record<string, ProductMaterialSpecDraft>>({});
@@ -695,8 +732,6 @@ export function ProductionModule({
   const [orderNote, setOrderNote] = useState('');
   const [completionDraft, setCompletionDraft] = useState<ProductionOrderCompletionDraft | null>(null);
   const [quickTextileDraft, setQuickTextileDraft] = useState<QuickTextileDraft | null>(null);
-  const [quickColorPieceId, setQuickColorPieceId] = useState('');
-  const [quickColorName, setQuickColorName] = useState('');
   const [quickVariantColorTextileId, setQuickVariantColorTextileId] = useState('');
   const [quickVariantColorName, setQuickVariantColorName] = useState('');
 
@@ -715,7 +750,7 @@ export function ProductionModule({
     let safe = true;
     let warning = '';
     const version = Number(localStorage.getItem(PRODUCTION_STORAGE_KEYS.version) ?? '0');
-    if (version > 8) { safe = false; warning = 'Los datos de insumos fueron creados con una versión más reciente. Se evita sobrescribirlos.'; }
+    if (version > 9) { safe = false; warning = 'Los datos de insumos fueron creados con una versión más reciente. Se evita sobrescribirlos.'; }
     for (const key of Object.keys(empty) as (keyof ProductionBackupData)[]) {
       try {
         const raw = localStorage.getItem(PRODUCTION_STORAGE_KEYS[key]);
@@ -736,7 +771,7 @@ export function ProductionModule({
     const loaded = loadLocal();
     setData(loaded.data);
     setStorageSafe(loaded.safe);
-    if (loaded.safe) localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '8');
+    if (loaded.safe) localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '9');
     else setNotice({ text: loaded.warning, kind: 'error' });
     setReady(true);
     refreshTextiles();
@@ -779,7 +814,7 @@ export function ProductionModule({
     try {
       keys.forEach((key) => previous.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       keys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(data[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '8');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '9');
     } catch {
       previous.forEach((value, key) => {
         try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch { /* rollback best effort */ }
@@ -1701,7 +1736,7 @@ export function ProductionModule({
     try {
       keys.forEach((key) => previous.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       keys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(next[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '8');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '9');
       setData(next);
       return true;
     } catch {
@@ -2004,7 +2039,7 @@ export function ProductionModule({
     try {
       productionKeys.forEach((key) => previousProduction.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       productionKeys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(nextData[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '8');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '9');
       localStorage.setItem(FABRIC_STORAGE_KEYS.rollos, JSON.stringify(updatedRolls));
       localStorage.setItem(FABRIC_STORAGE_KEYS.rolloMovimientos, JSON.stringify(nextRollMovements));
       const nextBase = [...baseMovements, ...baseEntries];
