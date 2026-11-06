@@ -2052,6 +2052,34 @@ export function ProductionModule({
     </div>
     {notice && <div className={'notice ' + notice.kind}><span>{notice.text}</span><button onClick={() => setNotice(null)} aria-label="Cerrar">×</button></div>}
     {mainPanel}
+    {editingProductFabricId && editingFabricProduct && editingFabricBasePattern && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) { setEditingProductFabricId(''); setEditingProductFabricAssignments({}); } }}>
+      <section className="modal production-modal product-fabrics-modal" role="dialog" aria-modal="true" aria-labelledby="product-fabrics-title">
+        <div className="modal-heading">
+          <div><h2 id="product-fabrics-title">Telas · {editingFabricProduct.name}</h2><p>Asigna la tela que corresponde a cada posición del patrón base.</p></div>
+          <button className="icon-button" onClick={() => { setEditingProductFabricId(''); setEditingProductFabricAssignments({}); }}>×</button>
+        </div>
+        <form className="production-form" onSubmit={saveProductFabricEditor}>
+          <div className="product-inherited-size-tag"><span>Tabla de tallas heredada</span><strong>{sizeGroups.find((group) => group.id === editingFabricBasePattern.sizeGroupId)?.name ?? 'No disponible'}</strong></div>
+          <div className="product-fabric-slots">{editingFabricSlots.map((slot) => {
+            const selectedTextileId = editingProductFabricAssignments[slot] ?? '';
+            const archivedTextile = selectedTextileId ? textileContext.telas.find((textile) => textile.id === selectedTextileId && textile.activo === false) : undefined;
+            return <label className="field-label" key={slot}>
+              <span>{productFabricSlotLabel(slot)}</span>
+              <select className="large-input" value={selectedTextileId} onChange={(event) => setEditingProductFabricAssignments((current) => ({ ...current, [slot]: event.target.value }))} required>
+                <option value="">Seleccionar tela del catálogo</option>
+                {activeTextiles.map((textile) => <option key={textile.id} value={textile.id}>{textile.nombreTela}</option>)}
+                {archivedTextile && <option value={archivedTextile.id} disabled>{archivedTextile.nombreTela} · archivada</option>}
+              </select>
+            </label>;
+          })}</div>
+          {activeTextiles.length === 0 && <div className="notice info">No hay telas activas. Activa una tela en el catálogo antes de guardar.</div>}
+          <div className="form-actions">
+            <button type="button" className="button secondary" onClick={() => { setEditingProductFabricId(''); setEditingProductFabricAssignments({}); }}>Cancelar</button>
+            <button className="button primary" disabled={activeTextiles.length === 0}>Guardar telas</button>
+          </div>
+        </form>
+      </section>
+    </div>}
     {completionDraft && (() => {
       const order = data.productionOrders.find((item) => item.id === completionDraft.orderId);
       if (!order) return null;
