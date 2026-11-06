@@ -625,7 +625,7 @@ export function ProductionModule({
     let safe = true;
     let warning = '';
     const version = Number(localStorage.getItem(PRODUCTION_STORAGE_KEYS.version) ?? '0');
-    if (version > 5) { safe = false; warning = 'Los datos de insumos fueron creados con una versión más reciente. Se evita sobrescribirlos.'; }
+    if (version > 6) { safe = false; warning = 'Los datos de insumos fueron creados con una versión más reciente. Se evita sobrescribirlos.'; }
     for (const key of Object.keys(empty) as (keyof ProductionBackupData)[]) {
       try {
         const raw = localStorage.getItem(PRODUCTION_STORAGE_KEYS[key]);
@@ -646,7 +646,7 @@ export function ProductionModule({
     const loaded = loadLocal();
     setData(loaded.data);
     setStorageSafe(loaded.safe);
-    if (loaded.safe) localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '5');
+    if (loaded.safe) localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '6');
     else setNotice({ text: loaded.warning, kind: 'error' });
     setReady(true);
     refreshTextiles();
@@ -689,7 +689,7 @@ export function ProductionModule({
     try {
       keys.forEach((key) => previous.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       keys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(data[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '5');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '6');
     } catch {
       previous.forEach((value, key) => {
         try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch { /* rollback best effort */ }
@@ -1358,7 +1358,7 @@ export function ProductionModule({
     try {
       keys.forEach((key) => previous.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       keys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(next[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '5');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '6');
       setData(next);
       return true;
     } catch {
@@ -1659,7 +1659,7 @@ export function ProductionModule({
     try {
       productionKeys.forEach((key) => previousProduction.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       productionKeys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(nextData[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '5');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '6');
       localStorage.setItem(FABRIC_STORAGE_KEYS.rollos, JSON.stringify(updatedRolls));
       localStorage.setItem(FABRIC_STORAGE_KEYS.rolloMovimientos, JSON.stringify(nextRollMovements));
       const nextBase = [...baseMovements, ...baseEntries];
