@@ -2083,14 +2083,40 @@ export function ProductionModule({
         <label className="field-label">Fotografía de referencia (URL opcional)<input className="large-input" value={componentDraft.imageUrl} onChange={(e) => setComponentDraft({ ...componentDraft, imageUrl: e.target.value })} placeholder="https://…" /></label>
         <label className="field-label">Descripción<textarea className="large-input" rows={2} value={componentDraft.description} onChange={(e) => setComponentDraft({ ...componentDraft, description: e.target.value })} /></label>
         <div className="production-subheading"><strong>Piezas auxiliares de patronaje</strong><button type="button" className="text-action" onClick={() => setComponentDraft({ ...componentDraft, pieces: [...componentDraft.pieces, { id: id(), name: '', unitsPerGarment: 1, laterality: 'ninguna', fabricSlot: 'principal', textileId: null, colorId: null }] })}>＋ Agregar pieza</button></div>
-        {componentDraft.pieces.map((piece, index) => <div className="production-piece-row" key={piece.id}>
-          <label className="field-label">Nombre de pieza<input className="large-input" value={piece.name} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, name: e.target.value } : x) })} placeholder="Ej. Pechera" /></label>
-          <label className="field-label">Tela (opcional)<select className="large-input" value={piece.textileId ?? ''} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, textileId: e.target.value || null } : x) })}><option value="">Ninguna</option>{textileContext.telas.filter((textile) => textile.activo !== false).map((textile) => <option value={textile.id} key={textile.id}>{textile.nombreTela}</option>)}{piece.textileId && !textileContext.telas.some((textile) => textile.id === piece.textileId) && <option value={piece.textileId}>{textileName(piece.textileId)} · no disponible</option>}{piece.textileId && textileContext.telas.some((textile) => textile.id === piece.textileId && textile.activo === false) && <option value={piece.textileId}>{textileName(piece.textileId)} · archivada</option>}</select><button type="button" className="text-action" onClick={() => openQuickTextile({ kind: 'component', pieceId: piece.id })}>＋ Crear tela sin salir del componente</button><small>Se toma del catálogo de telas existente; puede quedar sin tela.</small></label>
-          <label className="field-label">Color<select className="large-input" value={piece.colorId ?? ''} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, colorId: e.target.value || null } : x) })}><option value="">Sin color</option>{textileContext.colores.slice().sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')).map((color) => <option value={color.id} key={color.id}>{color.nombre}</option>)}{piece.colorId && !textileContext.colores.some((color) => color.id === piece.colorId) && <option value={piece.colorId}>{componentColorName(piece.colorId)} · no disponible</option>}</select><button type="button" className="text-action" onClick={() => openQuickColor(piece.id)}>＋ Crear color</button><small>El color se vincula por ID al catálogo global de colores.</small></label>
-          <label className="field-label">Piezas por prenda<input className="large-input" type="number" min="1" step="1" value={piece.unitsPerGarment} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, unitsPerGarment: Number(e.target.value) } : x) })} /></label>
-          <label className="field-label">Lateralidad<select className="large-input" value={piece.laterality} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, laterality: e.target.value as ComponentPiece['laterality'] } : x) })}><option value="ninguna">Sin lado</option><option value="simetrica">Simétrica</option><option value="izquierda">Izquierda</option><option value="derecha">Derecha</option></select></label>
-          <button type="button" className="text-action danger-action" onClick={() => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.filter((_, i) => i !== index) })}>Quitar</button>
-        </div>)}
+        {componentDraft.pieces.map((piece, index) => {
+          const secondaryIndex = secondaryFabricSlotIndex(piece.fabricSlot);
+          const fabricKind = piece.fabricSlot === 'principal' ? 'principal' : secondaryIndex > 0 ? 'secundaria' : 'ninguna';
+          return <div className="production-piece-row" key={piece.id}>
+            <label className="field-label">Nombre de pieza<input className="large-input" value={piece.name} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, name: e.target.value } : x) })} placeholder="Ej. Pechera" /></label>
+            <label className="field-label">Posición de tela (opcional)
+              <select className="large-input" value={fabricKind} onChange={(e) => {
+                const nextKind = e.target.value;
+                setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? {
+                  ...x,
+                  fabricSlot: (nextKind === 'principal' ? 'principal' : nextKind === 'secundaria' ? (secondaryFabricSlotIndex(x.fabricSlot) > 0 ? x.fabricSlot : 'secundaria_1') : 'ninguna') as ComponentFabricSlot,
+                  textileId: null,
+                } : x) });
+              }}>
+                <option value="ninguna">Sin tela vinculada</option>
+                <option value="principal">Tela principal 1</option>
+                <option value="secundaria">Tela secundaria</option>
+              </select>
+              {secondaryIndex > 0 && <span className="component-piece-secondary-index">
+                <span>N.º de tela secundaria</span>
+                <input className="large-input" type="number" min="1" step="1" value={secondaryIndex} onChange={(e) => {
+                  const slotIndex = Number(e.target.value);
+                  if (!Number.isInteger(slotIndex) || slotIndex < 1) return;
+                  setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, fabricSlot: ('secundaria_' + slotIndex) as ComponentFabricSlot } : x) });
+                }} />
+              </span>}
+              <small>Al crear cada modelo de prenda, esta pieza heredará la tela asignada a esta posición. Ej.: «Tela principal 1» usará la misma tela principal que el patrón base.</small>
+            </label>
+            <label className="field-label">Color<select className="large-input" value={piece.colorId ?? ''} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, colorId: e.target.value || null } : x) })}><option value="">Sin color</option>{textileContext.colores.slice().sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')).map((color) => <option value={color.id} key={color.id}>{color.nombre}</option>)}{piece.colorId && !textileContext.colores.some((color) => color.id === piece.colorId) && <option value={piece.colorId}>{componentColorName(piece.colorId)} · no disponible</option>}</select><button type="button" className="text-action" onClick={() => openQuickColor(piece.id)}>＋ Crear color</button><small>El color se vincula por ID al catálogo global de colores.</small></label>
+            <label className="field-label">Piezas por prenda<input className="large-input" type="number" min="1" step="1" value={piece.unitsPerGarment} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, unitsPerGarment: Number(e.target.value) } : x) })} /></label>
+            <label className="field-label">Lateralidad<select className="large-input" value={piece.laterality} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, laterality: e.target.value as ComponentPiece['laterality'] } : x) })}><option value="ninguna">Sin lado</option><option value="simetrica">Simétrica</option><option value="izquierda">Izquierda</option><option value="derecha">Derecha</option></select></label>
+            <button type="button" className="text-action danger-action" onClick={() => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.filter((_, i) => i !== index) })}>Quitar</button>
+          </div>;
+        })}
         <MaterialEditor materials={componentDraft.materials} onChange={(materials) => setComponentDraft({ ...componentDraft, materials })} variants={variants} supplies={supplies} sizes={sizes} title="Materiales y consumos del componente" onCreateSupplyVariant={createSupplyVariantFromMaterial} />
         <div className="form-actions"><button type="button" className="button secondary" onClick={cancelComponentDraft}>Cancelar</button><button className="button primary">Guardar componente</button></div>
       </form>}
