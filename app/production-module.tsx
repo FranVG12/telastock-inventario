@@ -84,6 +84,7 @@ export type ComponentPiece = {
 
 export type ComponentPieceMovement = {
   id: string;
+  productModelId?: string | null;
   componentId: string;
   pieceId: string;
   sizeId: string;
@@ -162,7 +163,7 @@ export type ProductionOrderMaterial = {
   unitCost: number | null; lineCost: number | null;
 };
 export type ProductionOrderPieceRequirement = { id: string; pieceId: string; sizeId: string; side: 'izquierda' | 'derecha' | null; quantity: number };
-export type ProductionOrderComponentPieceRequirement = ProductionOrderPieceRequirement & { componentId: string };
+export type ProductionOrderComponentPieceRequirement = ProductionOrderPieceRequirement & { componentId: string; productModelId: string };
 export type ProductionOrderRollAllocation = { id: string; variantId: string; rollId: string; unit: 'KG' | 'M'; quantity: number };
 export type ProductionOrderActualConsumption = {
   materials: ProductionOrderMaterial[];
@@ -234,6 +235,19 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
     if (new Set(ids).size !== ids.length) throw new Error('Hay identificadores duplicados en "' + key + '".');
     (output as unknown as Record<string, unknown>)[key] = rows;
   }
+  output.productionOrders = output.productionOrders.map((order) => ({
+    ...order,
+    componentPieces: order.componentPieces.map((line) => ({ ...line, productModelId: line.productModelId ?? order.productModelId })),
+  }));
+  output.componentPieceMovements = output.componentPieceMovements.map((movement) => {
+    if (movement.productModelId) return movement;
+    const sourceOrder = movement.sourceProductionOrderId
+      ? output.productionOrders.find((order) => order.id === movement.sourceProductionOrderId)
+      : undefined;
+    if (sourceOrder) return { ...movement, productModelId: sourceOrder.productModelId };
+    const compatibleProducts = output.productModels.filter((product) => product.components.some((selection) => selection.componentId === movement.componentId));
+    return { ...movement, productModelId: compatibleProducts.length === 1 ? compatibleProducts[0].id : null };
+  });
   output.components = output.components.map((component) => ({
     ...component,
     pieces: component.pieces.map((piece) => ({ ...piece, textileId: piece.textileId ?? null, colorId: piece.colorId ?? null })),
@@ -310,7 +324,7 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
         (line.lineCost === null || Number.isFinite(line.lineCost) && line.lineCost >= 0)
       ) &&
       Array.isArray(order.basePieces) && order.basePieces.every((line) => typeof line.pieceId === 'string' && typeof line.sizeId === 'string' && Number.isInteger(line.quantity) && line.quantity > 0 && (line.side === null || line.side === 'izquierda' || line.side === 'derecha')) &&
-      Array.isArray(order.componentPieces) && order.componentPieces.every((line) => componentPieceMap.has(line.pieceId) && componentPieceMap.get(line.pieceId)?.componentId === line.componentId && typeof line.sizeId === 'string' && Number.isInteger(line.quantity) && line.quantity > 0 && (line.side === null || line.side === 'izquierda' || line.side === 'derecha')) &&
+      Array.isArray(order.componentPieces) && order.componentPieces.every((line) => line.productModelId === order.productModelId && componentPieceMap.has(line.pieceId) && componentPieceMap.get(line.pieceId)?.componentId === line.componentId && output.productModels.some((product) => product.id === line.productModelId && product.components.some((selection) => selection.componentId === line.componentId)) && typeof line.sizeId === 'string' && Number.isInteger(line.quantity) && line.quantity > 0 && (line.side === null || line.side === 'izquierda' || line.side === 'derecha')) &&
       Array.isArray(order.rollAllocations) && order.rollAllocations.every((allocation) => variantIds.has(allocation.variantId) && typeof allocation.rollId === 'string' && ['KG','M'].includes(allocation.unit) && Number.isFinite(allocation.quantity) && allocation.quantity > 0) &&
       Number.isInteger(order.missingCostLines) && order.missingCostLines >= 0 &&
       (order.estimatedMaterialCost === null || Number.isFinite(order.estimatedMaterialCost) && order.estimatedMaterialCost >= 0) &&
@@ -345,6 +359,7 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
   if (!output.componentPieceMovements.every((movement) => {
     const owner = componentPieceMap.get(movement.pieceId);
     return owner?.componentId === movement.componentId &&
+      (movement.productModelId == null || output.productModels.some((product) => product.id === movement.productModelId && product.components.some((selection) => selection.componentId === movement.componentId))) &&
       typeof movement.sizeId === 'string' && movement.sizeId.length > 0 &&
       Number.isInteger(movement.delta) && movement.delta !== 0 &&
       ['entrada', 'salida', 'ajuste'].includes(movement.kind) &&
@@ -355,9 +370,12 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
   })) throw new Error('Hay movimientos de piezas auxiliares inválidos o desvinculados de su componente.');
   for (const [pieceId, owner] of componentPieceMap) {
     const rows = output.componentPieceMovements.filter((movement) => movement.pieceId === pieceId);
-    const bySize = new Map<string, ComponentPieceMovement[]>();
-    rows.forEach((movement) => bySize.set(movement.sizeId, [...(bySize.get(movement.sizeId) ?? []), movement]));
-    for (const movements of bySize.values()) {
+    const balanceScopes = new Map<string, ComponentPieceMovement[]>();
+    rows.forEach((movement) => {
+      const scope = (movement.productModelId ?? 'legacy-unassigned') + ':' + movement.sizeId;
+      balanceScopes.set(scope, [...(balanceScopes.get(scope) ?? []), movement]);
+    });
+    for (const movements of balanceScopes.values()) {
       if (owner.piece.laterality === 'simetrica') {
         const legacy = movements.filter((movement) => !movement.side).reduce((sum, movement) => sum + movement.delta, 0);
         const pairs = Math.floor(Math.max(0, legacy) / 2);
@@ -516,6 +534,7 @@ export function ProductionModule({
   const [notice, setNotice] = useState<{ text: string; kind: 'success' | 'error' | 'info' } | null>(null);
   const [textileContext, setTextileContext] = useState<TextileContext>({ telas: [], rollos: [], telaColores: [], colores: [], proveedores: [] });
   const [showPurchaseForm, setShowPurchaseForm] = useState(false);
+  const [selectedStockProductModelId, setSelectedStockProductModelId] = useState('');
   const [selectedStockComponentId, setSelectedStockComponentId] = useState('');
   const [showComponentPieceMovement, setShowComponentPieceMovement] = useState(false);
   const [componentStockPieceId, setComponentStockPieceId] = useState('');
