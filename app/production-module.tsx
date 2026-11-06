@@ -2022,7 +2022,7 @@ export function ProductionModule({
 
   const mainPanel = (() => {
     if (view === 'insumos') return <section className="panel production-panel">
-      <div className="panel-heading"><div><h2>Catálogo de insumos</h2><p>Registra cada material una sola vez y agrega sus variantes.</p></div><button className="button primary" onClick={() => setShowSupplyForm((x) => !x)}>＋ Nuevo insumo</button></div>
+      <div className="panel-heading"><div><h2>Catálogo de avíos</h2><p>Registra cada tipo de material una sola vez. Sus medidas por talla se configuran en cada modelo.</p></div><button className="button primary" onClick={() => setShowSupplyForm((x) => !x)}>＋ Nuevo insumo</button></div>
       {showSupplyForm && <form className="production-form" onSubmit={saveSupply}>
         <div className="production-form-grid">
           <label className="field-label">Nombre<input className="large-input" value={supplyName} onChange={(e) => setSupplyName(e.target.value)} placeholder="Ej. Hilo de remalle" required /></label>
@@ -2037,12 +2037,19 @@ export function ProductionModule({
       {supplies.length === 0 && <div className="empty">Todavía no hay insumos. Registra el primero; sus características por talla se definen al crear el modelo.</div>}
       <div className="production-list">{supplies.filter((x) => x.active).map((supply) => {
         const ownVariants = data.variants.filter((x) => x.supplyId === supply.id && x.active);
+        const ownVariantIds = new Set(ownVariants.map((variant) => variant.id));
+        const hasHistory = data.supplyMovements.some((movement) => ownVariantIds.has(movement.variantId)) ||
+          data.supplyPurchaseDetails.some((detail) => ownVariantIds.has(detail.variantId)) ||
+          data.productionOrders.some((order) => order.materials.some((line) => ownVariantIds.has(line.variantId)));
         return <article className="production-card" key={supply.id}>
-          <div className="production-card-heading"><div><strong>{supply.name}</strong><span>{supply.category} · Stock en {unitLabel[supply.baseUnit]} · {supply.stockMode === 'talla' ? 'Por talla' : 'Total'}</span></div><button className="button secondary" onClick={() => openVariant(supply.id)}>＋ Variante</button></div>
+          <div className="production-card-heading"><div><strong>{supply.name}</strong><span>{supply.category} · {supply.stockMode === 'none' ? 'Sin inventario · medidas por modelo' : 'Stock en ' + unitLabel[supply.baseUnit] + ' · ' + (supply.stockMode === 'talla' ? 'Por talla' : 'Total')}</span></div>
+            {supply.stockMode !== 'none' && <button className="button secondary" onClick={() => openVariant(supply.id)}>＋ Variante</button>}
+          </div>
           {supply.description && <p className="production-muted">{supply.description}</p>}
           {Object.entries(supply.attributes).length > 0 && <div className="production-attributes">{Object.entries(supply.attributes).map(([key, value]) => <span key={key}>{key}: {value}</span>)}</div>}
-          {ownVariants.length === 0 && <small className="production-muted">Sin variantes registradas.</small>}
-          {ownVariants.map((variant) => {
+          {supply.stockMode === 'none' && <div className="notice info">No se crean saldos ni variantes de inventario. La característica (longitud, ancho, grosor, etc.) se asigna por grupos de tallas al configurar cada modelo.</div>}
+          {supply.stockMode !== 'none' && ownVariants.length === 0 && <small className="production-muted">Sin variantes registradas.</small>}
+          {supply.stockMode !== 'none' && ownVariants.map((variant) => {
             const stock = supply.stockMode === 'total' ? stockForVariant(variant, null) : sizes.reduce((sum, size) => sum + stockForVariant(variant, size.id), 0);
             return <div className="production-variant" key={variant.id}>
               <div><strong>{variant.name}</strong><small>{variant.textileId ? 'Vinculado a tela: ' + textileName(variant.textileId) : variant.purchasePackQuantity ? 'Paquete: ' + format(variant.purchasePackQuantity) + ' ' + unitLabel[supply.baseUnit] + (variant.purchasePackLabel ? ' · ' + variant.purchasePackLabel : '') : 'Variante de inventario'}</small>{Object.entries(variant.attributes).map(([key, value]) => <small key={key}>{key}: {value}</small>)}</div>
@@ -2050,6 +2057,11 @@ export function ProductionModule({
               {!variant.textileId && <button className="text-action" onClick={() => { setStockVariantId(variant.id); setStockSizeId(''); setStockQuantity(''); setShowStockForm(true); }}>Registrar stock</button>}
             </div>;
           })}
+          {supply.stockMode !== 'none' && !hasHistory && <button type="button" className="text-action" onClick={() => {
+            if (!window.confirm('¿Desactivar el inventario de este insumo? Se conservará el catálogo, pero dejará de solicitar existencias. Las medidas se configurarán en cada modelo.')) return;
+            setData((current) => ({ ...current, supplies: current.supplies.map((item) => item.id === supply.id ? { ...item, stockMode: 'none', updatedAt: now() } : item) }));
+            tell('Insumo convertido a configuración por modelo. No se eliminaron registros.');
+          }}>Usar medidas por talla en los modelos</button>}
         </article>;
       })}</div>
     </section>;
