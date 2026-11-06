@@ -293,7 +293,8 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
     variantIds.has(x.variantId) && ['fixed', 'per_size'].includes(x.mode) &&
     ['und', 'm', 'cm', 'g', 'kg', 'l', 'ml'].includes(x.unit) &&
     (x.mode === 'fixed' ? Number.isFinite(x.fixedQuantity) && (x.fixedQuantity ?? 0) >= 0 : x.bySize && typeof x.bySize === 'object') &&
-    Number.isFinite(x.wastePercent) && x.wastePercent >= 0
+    Number.isFinite(x.wastePercent) && x.wastePercent >= 0 &&
+    (x.specificationLabel === undefined || typeof x.specificationLabel === 'string')
   );
   if (!output.variants.every((x) => {
     const supply = output.supplies.find((item) => item.id === x.supplyId);
@@ -414,7 +415,7 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
   if (!output.familyRecipes.every((x) => x.family.trim() && x.name.trim() && validMaterials(x.materials))) {
     throw new Error('Hay recetas generales con materiales inválidos.');
   }
-  if (!output.productModels.every((x) => x.name.trim() && (x.collectionId === null || x.collectionId === undefined || productCollectionIds.has(x.collectionId)) && typeof x.baseModelId === 'string' && Array.isArray(x.components) && x.components.every((c) => componentIds.has(c.componentId) && Number.isFinite(c.quantity) && c.quantity > 0) && validMaterials(x.additionalMaterials))) {
+  if (!output.productModels.every((x) => x.name.trim() && (x.collectionId === null || x.collectionId === undefined || productCollectionIds.has(x.collectionId)) && typeof x.baseModelId === 'string' && Array.isArray(x.components) && x.components.every((c) => componentIds.has(c.componentId) && Number.isFinite(c.quantity) && c.quantity > 0 && (c.materialSpecifications === undefined || (c.materialSpecifications && typeof c.materialSpecifications === 'object' && Object.entries(c.materialSpecifications).every(([materialId, spec]) => typeof materialId === 'string' && spec && typeof spec.label === 'string' && typeof spec.bySize === 'object' && Object.values(spec.bySize).every((value) => typeof value === 'string' && value.trim().length > 0))))) && validMaterials(x.additionalMaterials))) {
     throw new Error('Hay modelos configurados con componentes o materiales inválidos.');
   }
   const productModelIds = new Set(output.productModels.map((product) => product.id));
@@ -422,7 +423,7 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
   if (!output.productFabrics.every((assignment) => productModelIds.has(assignment.productModelId) && typeof assignment.fabricSlot === 'string' && assignment.fabricSlot.trim() && typeof assignment.textileId === 'string' && assignment.textileId.trim() && typeof assignment.createdAt === 'string' && typeof assignment.updatedAt === 'string') || new Set(productFabricKeys).size !== productFabricKeys.length) {
     throw new Error('Hay asignaciones de tela duplicadas o vinculadas a modelos inexistentes.');
   }
-  if (!output.supplies.every((x) => x.name.trim() && ['total', 'talla'].includes(x.stockMode) && ['und', 'm', 'cm', 'g', 'kg', 'l', 'ml'].includes(x.baseUnit))) {
+  if (!output.supplies.every((x) => x.name.trim() && ['none', 'total', 'talla'].includes(x.stockMode) && ['und', 'm', 'cm', 'g', 'kg', 'l', 'ml'].includes(x.baseUnit))) {
     throw new Error('Hay insumos con unidades o modalidad de inventario inválidas.');
   }
   return output;
@@ -798,10 +799,16 @@ export function ProductionModule({
     if (!name) return tell('Escribe el nombre del insumo.', 'error');
     if (data.supplies.some((x) => x.name.trim().toLocaleLowerCase('es') === name.toLocaleLowerCase('es'))) return tell('Ya existe un insumo con ese nombre.', 'error');
     const row: Supply = { id: id(), name, category: supplyCategory, baseUnit: supplyUnit, stockMode, description: supplyDescription.trim(), attributes: parseAttributes(supplyAttributes), active: true, createdAt: now(), updatedAt: now() };
-    setData((current) => ({ ...current, supplies: [...current.supplies, row] }));
+    if (stockMode === 'none') {
+      const generalVariant: SupplyVariant = { id: id(), supplyId: row.id, name: 'General', attributes: {}, textileId: null, textileColorId: null, purchasePackQuantity: null, purchasePackLabel: '', active: true };
+      setData((current) => ({ ...current, supplies: [...current.supplies, row], variants: [...current.variants, generalVariant] }));
+    } else {
+      setData((current) => ({ ...current, supplies: [...current.supplies, row] }));
+    }
     setSupplyName(''); setSupplyDescription(''); setSupplyAttributes(''); setShowSupplyForm(false);
-    if (supplyReturnToPurchase) { openVariant(row.id); tell('Insumo creado. Ahora registra su variante para volver a la compra.'); return; }
-    tell('Insumo registrado. Ahora agrega sus variantes comerciales.');
+    if (supplyReturnToPurchase) { openVariant(row.id); tell('Insumo creado. Ahora registra su variante con el mismo formulario de variantes.'); return; }
+    if (stockMode !== 'none') { openVariant(row.id); tell('Insumo creado. Completa su primera variante en el mismo formulario que usarás después.'); return; }
+    tell('Insumo registrado. Sus características por talla se definirán al crear cada modelo.');
   }
   function openQuickTextile(target: QuickTextileTarget) {
     const supply = target.kind === 'variant' ? supplies.find((item) => item.id === variantSupplyId) : undefined;
@@ -961,7 +968,7 @@ export function ProductionModule({
   }
   function stockForVariant(variant: SupplyVariant, sizeId: string | null): number {
     const supply = supplies.find((x) => x.id === variant.supplyId);
-    if (!supply) return 0;
+    if (!supply || supply.stockMode === 'none') return 0;
     if (variant.textileId) {
       return textileContext.rollos.filter((roll) => roll.idTela === variant.textileId && (!variant.textileColorId || roll.idTelaColor === variant.textileColorId) && roll.estado === 'disponible')
         .reduce((sum, roll) => sum + (supply.baseUnit === 'm' ? (roll.metros ?? 0) : supply.baseUnit === 'kg' ? (roll.pesoKg ?? 0) : 0), 0);
