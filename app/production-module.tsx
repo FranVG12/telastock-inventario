@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { getCompleteUnits, getPieceStock, getSymmetricStock, type PieceMovement as DomainPieceMovement, type ManufacturingModel, type ModelPiece, type Size, type SizeGroup } from '@/lib/inventory-domain';
 import { FABRIC_STORAGE_KEYS, createGlobalColorQuickly, createTextileColorQuickly, createTextileQuickly, type RollMovement as FabricRollMovement } from '@/app/fabric-module';
+import { componentFabricSlotLabel, isComponentFabricSlot, isComponentFabricSlotAvailableForModel, normalizeComponentFabricSlot, resolveComponentPieceTextileId, secondaryFabricSlotIndex, type ComponentFabricSlot } from '@/lib/component-fabric-slots';
 
 export type ProductionView = 'insumos' | 'compras-avios' | 'componentes' | 'modelos-producto' | 'recetas' | 'planificacion' | 'ordenes';
 export type StockUnit = 'und' | 'm' | 'cm' | 'g' | 'kg' | 'l' | 'ml';
@@ -77,7 +78,8 @@ export type ComponentPiece = {
   name: string;
   unitsPerGarment: number;
   laterality: 'ninguna' | 'simetrica' | 'izquierda' | 'derecha';
-  fabricSlot: string;
+  fabricSlot: ComponentFabricSlot;
+  /** Legacy field from the old fixed-textile selector; normalized to null on load. */
   textileId?: string | null;
   colorId: string | null;
 };
@@ -261,7 +263,12 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
   });
   output.components = output.components.map((component) => ({
     ...component,
-    pieces: component.pieces.map((piece) => ({ ...piece, textileId: piece.textileId ?? null, colorId: piece.colorId ?? null })),
+    pieces: component.pieces.map((piece) => ({
+      ...piece,
+      fabricSlot: normalizeComponentFabricSlot(piece.fabricSlot, piece.textileId),
+      textileId: null,
+      colorId: piece.colorId ?? null,
+    })),
   }));
   const variantIds = new Set(output.variants.map((x) => x.id));
   const componentIds = new Set(output.components.map((x) => x.id));
@@ -364,7 +371,7 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
         typeof order.actualConsumption.recordedAt === 'string'
       ));
   })) throw new Error('Hay órdenes de producción con datos o relaciones inválidas.');
-  if (!output.components.every((x) => typeof x.name === 'string' && x.name.trim() && typeof x.type === 'string' && x.type.trim() && Array.isArray(x.pieces) && x.pieces.every((p) => p && typeof p.id === 'string' && p.id.trim() && typeof p.name === 'string' && p.name.trim() && Number.isInteger(p.unitsPerGarment) && p.unitsPerGarment > 0 && ['ninguna', 'simetrica', 'izquierda', 'derecha'].includes(p.laterality) && (p.laterality !== 'simetrica' || p.unitsPerGarment % 2 === 0) && (p.textileId === null || typeof p.textileId === 'string') && (p.colorId === null || typeof p.colorId === 'string')) && validMaterials(x.materials))) {
+  if (!output.components.every((x) => typeof x.name === 'string' && x.name.trim() && typeof x.type === 'string' && x.type.trim() && Array.isArray(x.pieces) && x.pieces.every((p) => p && typeof p.id === 'string' && p.id.trim() && typeof p.name === 'string' && p.name.trim() && Number.isInteger(p.unitsPerGarment) && p.unitsPerGarment > 0 && ['ninguna', 'simetrica', 'izquierda', 'derecha'].includes(p.laterality) && (p.laterality !== 'simetrica' || p.unitsPerGarment % 2 === 0) && isComponentFabricSlot(p.fabricSlot) && p.textileId === null && (p.colorId === null || typeof p.colorId === 'string')) && validMaterials(x.materials))) {
     throw new Error('Hay componentes con piezas o materiales inválidos.');
   }
   if (!output.componentPieceMovements.every((movement) => {
@@ -689,7 +696,7 @@ export function ProductionModule({
     let safe = true;
     let warning = '';
     const version = Number(localStorage.getItem(PRODUCTION_STORAGE_KEYS.version) ?? '0');
-    if (version > 6) { safe = false; warning = 'Los datos de insumos fueron creados con una versión más reciente. Se evita sobrescribirlos.'; }
+    if (version > 7) { safe = false; warning = 'Los datos de insumos fueron creados con una versión más reciente. Se evita sobrescribirlos.'; }
     for (const key of Object.keys(empty) as (keyof ProductionBackupData)[]) {
       try {
         const raw = localStorage.getItem(PRODUCTION_STORAGE_KEYS[key]);
@@ -710,7 +717,7 @@ export function ProductionModule({
     const loaded = loadLocal();
     setData(loaded.data);
     setStorageSafe(loaded.safe);
-    if (loaded.safe) localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '6');
+    if (loaded.safe) localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '7');
     else setNotice({ text: loaded.warning, kind: 'error' });
     setReady(true);
     refreshTextiles();
@@ -753,7 +760,7 @@ export function ProductionModule({
     try {
       keys.forEach((key) => previous.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       keys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(data[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '6');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '7');
     } catch {
       previous.forEach((value, key) => {
         try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch { /* rollback best effort */ }
@@ -1134,13 +1141,8 @@ export function ProductionModule({
     if (!componentDraft || !componentDraft.name.trim()) return tell('Escribe el nombre del componente.', 'error');
     if (componentDraft.pieces.some((x) => !x.name.trim() || !Number.isInteger(x.unitsPerGarment) || x.unitsPerGarment <= 0 || (x.laterality === 'simetrica' && x.unitsPerGarment % 2 !== 0))) return tell('Revisa las piezas auxiliares. Una pieza simétrica requiere una cantidad par por prenda.', 'error');
     const previous = data.components.find((item) => item.id === componentDraft.id);
-    const invalidTextilePiece = componentDraft.pieces.find((piece) => {
-      if (!piece.textileId) return false;
-      const textile = textileContext.telas.find((item) => item.id === piece.textileId);
-      const oldPiece = previous?.pieces.find((item) => item.id === piece.id);
-      return !textile || (textile.activo === false && oldPiece?.textileId !== piece.textileId);
-    });
-    if (invalidTextilePiece) return tell('La tela seleccionada ya no está disponible. Selecciona otra tela o Ninguna.', 'error');
+    const invalidFabricPiece = componentDraft.pieces.find((piece) => !isComponentFabricSlot(piece.fabricSlot));
+    if (invalidFabricPiece) return tell('Selecciona una posición válida del patrón base para cada pieza auxiliar.', 'error');
     const invalidColorPiece = componentDraft.pieces.find((piece) => piece.colorId && !textileContext.colores.some((color) => color.id === piece.colorId));
     if (invalidColorPiece) return tell('El color de una pieza ya no existe en el catálogo global. Selecciona un color vigente o Sin color.', 'error');
     const removedStockedPiece = previous?.pieces.find((oldPiece) =>
@@ -1151,7 +1153,23 @@ export function ProductionModule({
     );
     if (removedStockedPiece) return tell('No puedes quitar ni cambiar la lateralidad de "' + removedStockedPiece.name + '" porque ya tiene movimientos de inventario.', 'error');
     if (componentDraft.materials.some((x) => !variantsBySupply.has(x.variantId) || x.wastePercent < 0 || (x.mode === 'fixed' && (!Number.isFinite(x.fixedQuantity) || (x.fixedQuantity ?? -1) < 0)))) return tell('Revisa los materiales y sus consumos.', 'error');
-    const row = { ...componentDraft, name: componentDraft.name.trim(), updatedAt: now() };
+    const row: GarmentComponent = {
+      ...componentDraft,
+      name: componentDraft.name.trim(),
+      pieces: componentDraft.pieces.map((piece) => ({
+        ...piece,
+        fabricSlot: normalizeComponentFabricSlot(piece.fabricSlot, piece.textileId),
+        textileId: null,
+      })),
+      updatedAt: now(),
+    };
+    for (const product of data.productModels) {
+      if (!product.components.some((selection) => selection.componentId === row.id)) continue;
+      const basePattern = baseModels.find((model) => model.id === product.baseModelId);
+      if (!basePattern) return tell('No se puede cambiar el componente: el modelo ' + product.name + ' no tiene un patrón base disponible.', 'error');
+      const incompatiblePiece = row.pieces.find((piece) => !isComponentFabricSlotAvailableForModel(piece.fabricSlot, basePattern.secondaryFabricSlots ?? 0));
+      if (incompatiblePiece) return tell('La pieza auxiliar "' + incompatiblePiece.name + '" usa ' + componentFabricSlotLabel(incompatiblePiece.fabricSlot) + ', pero el patrón base de "' + product.name + '" no tiene esa posición.', 'error');
+    }
     const otherPieceIds = new Set(data.components.filter((component) => component.id !== row.id).flatMap((component) => component.pieces.map((piece) => piece.id)));
     const draftPieceIds = row.pieces.map((piece) => piece.id);
     if (new Set(draftPieceIds).size !== draftPieceIds.length || row.pieces.some((piece) => otherPieceIds.has(piece.id))) return tell('Cada pieza necesita un identificador propio. Vuelve a agregar la pieza duplicada.', 'error');
@@ -1244,6 +1262,11 @@ export function ProductionModule({
     const activeTextileIds = new Set(textileContext.telas.filter((textile) => textile.activo !== false).map((textile) => textile.id));
     const missingSlots = requiredFabricSlots.filter((slot) => !activeTextileIds.has(productFabricAssignments[slot] ?? ''));
     if (missingSlots.length > 0) return tell('Asigna una tela del catálogo a: ' + missingSlots.map(productFabricSlotLabel).join(', ') + '.', 'error');
+    const selectedComponents = data.components.filter((component) => component.active && productComponentIds.includes(component.id));
+    for (const component of selectedComponents) {
+      const incompatiblePiece = component.pieces.find((piece) => !isComponentFabricSlotAvailableForModel(piece.fabricSlot, selectedBaseModel.secondaryFabricSlots ?? 0));
+      if (incompatiblePiece) return tell('El componente "' + component.name + '" tiene la pieza "' + incompatiblePiece.name + '" vinculada a ' + componentFabricSlotLabel(incompatiblePiece.fabricSlot) + ', pero el patrón base "' + selectedBaseModel.name + '" no define esa posición. Añade esa tela secundaria al patrón base o cambia la posición de la pieza.', 'error');
+    }
 
     const timestamp = now();
     const row: ConfiguredProductModel = {
@@ -1309,7 +1332,7 @@ export function ProductionModule({
     setRecipeDraft(existing ? { ...existing, materials: existing.materials.map((x) => ({ ...x, bySize: { ...x.bySize } })) } : { id: id(), family, name: 'Receta general de ' + (families.find((x) => x.value === family)?.label ?? family), active: true, materials: [], updatedAt: now() });
   }
   function openComponent(component?: GarmentComponent) {
-    setComponentDraft(component ? { ...component, pieces: component.pieces.map((x) => ({ ...x, textileId: x.textileId ?? null, colorId: x.colorId ?? null })), materials: component.materials.map((x) => ({ ...x, bySize: { ...x.bySize } })) } : null);
+    setComponentDraft(component ? { ...component, pieces: component.pieces.map((x) => ({ ...x, fabricSlot: normalizeComponentFabricSlot(x.fabricSlot, x.textileId), textileId: null, colorId: x.colorId ?? null })), materials: component.materials.map((x) => ({ ...x, bySize: { ...x.bySize } })) } : null);
   }
 
   const textileName = (textileId: string | null | undefined) => textileId ? textileContext.telas.find((x) => x.id === textileId)?.nombreTela ?? '' : 'Ninguna';
@@ -1598,7 +1621,7 @@ export function ProductionModule({
     try {
       keys.forEach((key) => previous.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       keys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(next[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '6');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '7');
       setData(next);
       return true;
     } catch {
@@ -1899,7 +1922,7 @@ export function ProductionModule({
     try {
       productionKeys.forEach((key) => previousProduction.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       productionKeys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(nextData[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '6');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '7');
       localStorage.setItem(FABRIC_STORAGE_KEYS.rollos, JSON.stringify(updatedRolls));
       localStorage.setItem(FABRIC_STORAGE_KEYS.rolloMovimientos, JSON.stringify(nextRollMovements));
       const nextBase = [...baseMovements, ...baseEntries];
@@ -2076,7 +2099,7 @@ export function ProductionModule({
           {component.imageUrl && <img className="production-component-image" src={component.imageUrl} alt="" />}
           <div className="production-card-heading"><div><strong>{component.name}</strong><span>{component.type} · {component.pieces.length} piezas de patronaje · {component.materials.length} materiales</span></div><button className="button secondary" onClick={() => openComponent(component)}>Editar</button></div>
           {component.description && <p className="production-muted">{component.description}</p>}
-          <div className="production-attributes">{component.pieces.map((x) => <span key={x.id}>{x.name} ×{x.unitsPerGarment}{x.textileId ? ' · Tela: ' + textileName(x.textileId) : ''}{x.colorId ? ' · Color: ' + componentColorName(x.colorId) : ''}</span>)}</div>
+          <div className="production-attributes">{component.pieces.map((x) => <span key={x.id}>{x.name} ×{x.unitsPerGarment}{x.fabricSlot !== 'ninguna' ? ' · ' + componentFabricSlotLabel(x.fabricSlot) : ''}{x.colorId ? ' · Color: ' + componentColorName(x.colorId) : ''}</span>)}</div>
           <small className="production-muted">Molde auxiliar reutilizable. El inventario se crea dentro de cada modelo de prenda.</small>
         </article>)}
       </div>
@@ -2133,7 +2156,12 @@ export function ProductionModule({
         }).join(' · ') : 'Sin patrón base';
         const productPieces = product.components.flatMap((selection) => {
           const component = data.components.find((item) => item.id === selection.componentId && item.active);
-          return component ? component.pieces.map((piece) => ({ component, piece, selection })) : [];
+          return component ? component.pieces.map((piece) => {
+            const textileId = resolveComponentPieceTextileId(product.id, piece.fabricSlot, data.productFabrics);
+            const textile = textileId ? textileContext.telas.find((item) => item.id === textileId) : undefined;
+            const fabricDescription = piece.fabricSlot === 'ninguna' ? '' : componentFabricSlotLabel(piece.fabricSlot) + ': ' + (textile?.nombreTela ?? 'Sin asignar');
+            return { component, piece, selection, fabricDescription };
+          }) : [];
         });
         const inventoryOpen = selectedStockProductModelId === product.id;
         const unassignedLegacyMovements = data.componentPieceMovements.filter((movement) =>
@@ -2153,9 +2181,9 @@ export function ProductionModule({
             <div className="production-subheading"><strong>Inventario auxiliar · {product.name}</strong><span className="count-badge">{productPieces.length} piezas</span></div>
             <p className="production-muted">Tabla de tallas: <strong>{productSizeGroup?.name ?? 'No disponible'}</strong>. El saldo pertenece a este modelo y no se comparte con otras prendas que reutilicen el mismo componente.</p>
             {unassignedLegacyMovements > 0 && <div className="notice info">Hay {format(unassignedLegacyMovements)} movimientos anteriores de componentes sin modelo asociado. No se suman a este inventario para evitar mezclar prendas. Registra aquí el saldo inicial correcto de este modelo.</div>}
-            {productPieces.map(({ component, piece, selection }) => <article className="production-component-stock-piece" key={selection.id + ':' + piece.id}>
+            {productPieces.map(({ component, piece, selection, fabricDescription }) => <article className="production-component-stock-piece" key={selection.id + ':' + piece.id}>
               <div className="production-component-stock-title">
-                <div><strong>{component.name} · {piece.name}</strong><small>{piece.laterality === 'simetrica' ? 'Control por izquierda / derecha' : 'Control por unidades'} · {piece.unitsPerGarment * selection.quantity} por prenda{piece.textileId ? ' · ' + textileName(piece.textileId) : ''}{piece.colorId ? ' · ' + componentColorName(piece.colorId) : ''}</small></div>
+                <div><strong>{component.name} · {piece.name}</strong><small>{piece.laterality === 'simetrica' ? 'Control por izquierda / derecha' : 'Control por unidades'} · {piece.unitsPerGarment * selection.quantity} por prenda{fabricDescription ? ' · ' + fabricDescription : ''}{piece.colorId ? ' · ' + componentColorName(piece.colorId) : ''}</small></div>
                 <button className="button secondary" onClick={() => openComponentPieceMovement(product.id, component, piece)}>Registrar movimiento</button>
               </div>
               {productSizes.length > 0 ? <div className="production-component-stock-sizes">
