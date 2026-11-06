@@ -188,15 +188,18 @@ Al guardar un comprobante, TelaStock registra una entrada por cada detalle en el
 
 Las compras de telas permanecen en el módulo existente de rollos y no se duplican en compras de avíos. Las compras vinculadas a proveedor conservan su referencia aunque el proveedor luego deje de estar disponible en el catálogo local.
 
-### Inventario independiente de piezas auxiliares
+### Inventario auxiliar por modelo comercial
 
-Cada pieza de un componente puede tener movimientos de entrada, salida o merma por talla. Este ledger se mantiene separado de model_pieces y piece_stock_movements, por lo que las existencias de un cuello, bolsillo o puño no se mezclan con las piezas del patrón base.
+La biblioteca de componentes define moldes reutilizables (cuellos, bolsillos, puños, pretinas y otros acabados), sus piezas, lateralidad, tela, color y materiales. **No tiene inventario ni registra movimientos de existencias.**
 
+El inventario de piezas auxiliares nace dentro de cada modelo comercial configurado, después de combinar un patrón base con los componentes que llevará la prenda. Cada saldo se identifica por modelo comercial + pieza auxiliar + talla + lado. Por eso, dos modelos que reutilicen el mismo cuello mantienen existencias independientes.
+
+- La tabla de tallas se hereda del patrón base seleccionado. El inventario auxiliar solo muestra tallas de ese grupo.
 - Las piezas normales se controlan por unidades físicas.
 - Las piezas simétricas permiten registrar una cantidad en paridades (un lado izquierdo y uno derecho) o registrar un lado específico.
-- No se permite retirar más stock del disponible en cualquiera de los lados.
-- Una pieza auxiliar que ya tiene movimientos no se puede eliminar ni cambiar de lateralidad desde su ficha; se conserva la referencia histórica.
-- La planificación de una prenda combina la capacidad del patrón base con la capacidad de cada pieza auxiliar seleccionada y muestra el recurso limitante por talla.
+- Las entradas, salidas y mermas quedan asociadas al modelo comercial, no a la ficha reutilizable del componente.
+- La planificación y las reservas consultan el inventario del modelo seleccionado; el stock de las piezas del patrón base permanece independiente.
+- Los movimientos anteriores sin una relación inequívoca con un único modelo quedan sin asignar. No se duplican entre modelos compartidos; el operador debe registrar el saldo inicial correcto en cada modelo.
 
 ## Órdenes de producción y reservas
 
@@ -210,8 +213,8 @@ El módulo de órdenes conecta la planificación con el inventario sin crear sal
 
 El costo mostrado es una estimación basada en el último precio de compra conocido por variante/unidad. Si faltan precios, la orden muestra el número de líneas sin costo y no presenta un total como si fuera completo. No incluye mano de obra ni servicios externos.
 
-Las reservas son locales a este navegador, igual que el resto de los datos del prototipo. No proporcionan bloqueo entre dos dispositivos o usuarios. Antes de operar simultáneamente en varios equipos, se requiere migrar el flujo de reservar/completar a transacciones del backend. La migración `202611060002_production_orders_and_reservations.sql` prepara las tablas, relaciones, referencias de movimientos y controles de reservas futuros; no se ejecuta ni conecta Supabase automáticamente.
+Las reservas son locales a este navegador, igual que el resto de los datos del prototipo. No proporcionan bloqueo entre dos dispositivos o usuarios. Antes de operar simultáneamente en varios equipos, se requiere migrar el flujo de reservar/completar a transacciones del backend. Las migraciones `202611060002_production_orders_and_reservations.sql` y `202611060006_product_scoped_component_piece_inventory.sql` preparan tablas, relaciones, referencias de movimientos y reservas aisladas por modelo; no se ejecutan ni conectan Supabase automáticamente.
 
-El respaldo completo evoluciona a `schemaVersion: 5` e incluye órdenes, estado, cantidades, reservas de rollos y snapshots. Los respaldos completos anteriores (versiones 1–4) siguen siendo importables y se inicializan con la colección de órdenes vacía.
+El respaldo completo utiliza `schemaVersion: 9` e incluye órdenes, reservas, consumos reales, colecciones y movimientos auxiliares separados por modelo comercial. Los respaldos completos anteriores siguen siendo importables; los movimientos auxiliares ambiguos se conservan sin asignar en lugar de duplicar existencias.
 
 Al completar una orden, el operador confirma las cantidades reales de cada avío y de cada rollo. Puede registrar un consumo menor al reservado, lo que libera la diferencia; no puede consumir más de lo que la orden tiene reservado. Para rollos, la cantidad real se registra con precisión de 0.001 KG o M y debe coincidir, por variante textil, con el consumo real indicado. Las piezas de molde base y auxiliares se descuentan de acuerdo con la cantidad de prendas y la receta de piezas guardada en la orden.
