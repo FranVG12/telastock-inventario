@@ -19,7 +19,7 @@ import {
   type SizeGroup,
 } from '@/lib/inventory-domain';
 import { demoModels, demoMovements, demoPieces, demoSizes, demoSizeGroups } from '@/lib/demo-data';
-import { FabricModule, FABRIC_STORAGE_KEYS, emptyFabricBackupData, validateFabricBackupData, type FabricView, type ColorDefinition } from '@/app/fabric-module';
+import { FabricModule, FABRIC_STORAGE_KEYS, createGlobalColorQuickly, emptyFabricBackupData, validateFabricBackupData, type FabricView, type ColorDefinition } from '@/app/fabric-module';
 import { ProductionModule, PRODUCTION_STORAGE_KEYS, emptyProductionBackupData, validateProductionBackupData, type ProductionView } from '@/app/production-module';
 
 type View = 'inventario' | 'modelos' | 'historial' | FabricView | ProductionView;
@@ -121,6 +121,8 @@ export default function Home() {
   const [notice, setNotice] = useState<{ message: string; kind: 'success' | 'error' | 'info' } | null>(null);
   const [historySearch, setHistorySearch] = useState('');
   const [adminMode, setAdminMode] = useState(false);
+  const [quickPatternColorTarget, setQuickPatternColorTarget] = useState<{ pieceId: string; index: number } | null>(null);
+  const [quickPatternColorName, setQuickPatternColorName] = useState('');
 
   // Cargar datos una sola vez. Las claves propias de este módulo no pisan el inventario
   // genérico anterior de TelaStock. En la etapa Supabase, estas entidades pasan al repositorio remoto.
@@ -454,6 +456,33 @@ export default function Home() {
   function openCreateModel() {
     setModelForm(blankModelForm(sizeGroups[0]?.id ?? '', fabricColors[0]?.id ?? ''));
     setShowModelForm(true);
+  }
+
+  function openQuickPatternColor(pieceId: string, index: number) {
+    setQuickPatternColorTarget({ pieceId, index });
+    setQuickPatternColorName('');
+  }
+
+  function saveQuickPatternColor(event: FormEvent) {
+    event.preventDefault();
+    if (!quickPatternColorTarget) return;
+    try {
+      const color = createGlobalColorQuickly(quickPatternColorName);
+      setFabricColors((current) => current.some((item) => item.id === color.id) ? current : [...current, color]);
+      setModelForm((previous) => ({
+        ...previous,
+        pieces: previous.pieces.map((piece, pieceIndex) => {
+          if (piece.id === quickPatternColorTarget.pieceId) return { ...piece, colorId: color.id, color: color.nombre, colorOverride: pieceIndex !== 0 };
+          if (quickPatternColorTarget.index === 0 && !piece.colorOverride) return { ...piece, colorId: color.id, color: color.nombre };
+          return piece;
+        }),
+      }));
+      setQuickPatternColorTarget(null);
+      setQuickPatternColorName('');
+      setNoticeMessage('Color creado y seleccionado en el patrón base.');
+    } catch (error) {
+      setNoticeMessage(error instanceof Error ? error.message : 'No se pudo crear el color.', 'error');
+    }
   }
 
   function openEditModel(model: ManufacturingModel) {
@@ -1082,7 +1111,7 @@ export default function Home() {
           </section>}
 
           {(['telas', 'rollos', 'compras', 'proveedores'] as View[]).includes(view) && <FabricModule view={view as FabricView} />}
-          {(['insumos', 'compras-avios', 'componentes', 'modelos-producto', 'recetas', 'planificacion', 'ordenes'] as View[]).includes(view) && <ProductionModule view={view as ProductionView} baseModels={models} baseModelsReady={ready} basePieces={pieces} baseMovements={movements} sizes={sizes} sizeGroups={sizeGroups} onAddBaseMovements={replaceBaseMovements} onNavigate={(next) => setView(next)} />}
+          {(['insumos', 'compras-avios', 'componentes', 'modelos-producto', 'recetas', 'planificacion', 'ordenes'] as View[]).includes(view) && <ProductionModule view={view as ProductionView} baseModels={models} baseModelsReady={ready} basePieces={pieces} baseMovements={movements} sizes={sizes} sizeGroups={sizeGroups} onAddBaseMovements={replaceBaseMovements} onNavigate={(next) => setView(next)} onQuickCreateBaseModel={openCreateModel} />}
 
           <div className="prototype-note"><span>ⓘ</span><div><strong>Prototipo de validación · datos de demostración</strong><p>Los registros se guardan en este navegador y no se sincronizan entre dispositivos todavía. El proyecto incluye una migración SQL normalizada para Supabase; antes de producción se deben configurar autenticación, políticas de acceso y pruebas de concurrencia.</p></div></div>
         </div>
@@ -1113,6 +1142,16 @@ export default function Home() {
         </section>
       </div>}
 
+      {quickPatternColorTarget && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setQuickPatternColorTarget(null); }}>
+        <section className="modal production-modal" role="dialog" aria-modal="true" aria-labelledby="quick-pattern-color-title">
+          <div className="modal-heading"><div><h2 id="quick-pattern-color-title">Nuevo color</h2><p>Se agregará al catálogo global y quedará elegido en el molde actual.</p></div><button className="icon-button" type="button" onClick={() => setQuickPatternColorTarget(null)}>×</button></div>
+          <form className="model-form" onSubmit={saveQuickPatternColor}>
+            <label className="field-label">Nombre del color *<input className="large-input" value={quickPatternColorName} onChange={(event) => setQuickPatternColorName(event.target.value)} placeholder="Ej. Azul noche" required autoFocus /></label>
+            <div className="form-actions"><button type="button" className="button secondary" onClick={() => setQuickPatternColorTarget(null)}>Cancelar</button><button className="button primary">Crear y seleccionar</button></div>
+          </form>
+        </section>
+      </div>}
+
       {showModelForm && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowModelForm(false); }}>
         <section className="modal model-modal" role="dialog" aria-modal="true" aria-labelledby="model-modal-title">
           <div className="modal-heading"><div><div className="eyebrow">PATRÓN BASE</div><h2 id="model-modal-title">{modelForm.editingId ? 'Editar modelo' : 'Crear modelo de fabricación'}</h2><p>Define las piezas necesarias por prenda y si su stock requiere control de lateralidad.</p></div><button className="icon-button" onClick={() => setShowModelForm(false)} aria-label="Cerrar">×</button></div>
@@ -1127,7 +1166,7 @@ export default function Home() {
             if (pieceIndex === index) return { ...item, colorId: event.target.value, color: colorName, colorOverride: index !== 0 };
             if (index === 0 && !item.colorOverride) return { ...item, colorId: event.target.value, color: colorName };
             return item;
-          }) }))}><option value="">Sin especificar</option>{fabricColors.map((color) => <option key={color.id} value={color.id}>{color.nombre}</option>)}</select><small>Se propone este color por defecto; puedes elegir uno distinto en cada molde.</small></label></div></div>)}</div>
+          }) }))}><option value="">Sin especificar</option>{fabricColors.map((color) => <option key={color.id} value={color.id}>{color.nombre}</option>)}</select><button type="button" className="text-action" onClick={() => openQuickPatternColor(piece.id, index)}>＋ Crear color</button><small>Se propone este color por defecto; puedes elegir uno distinto en cada molde.</small></label></div></div>)}</div>
             <div className="symmetry-help"><strong>Cómo se cuenta la simetría:</strong> un par requiere 1 pieza izquierda y 1 derecha. El stock se registra por paridad de forma predeterminada; puedes cambiar a lados para registrar cantidades diferentes. En este molde, ×2 significa 1 pieza por lado.</div>
             <div className="form-actions"><button type="button" className="button secondary" onClick={() => setShowModelForm(false)}>Cancelar</button><button type="submit" className="button primary">{modelForm.editingId ? 'Guardar cambios' : 'Crear modelo'}</button></div>
           </form>
