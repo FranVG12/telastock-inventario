@@ -2003,12 +2003,12 @@ export function ProductionModule({
         </div>}
         <div className="form-actions"><button type="button" className="button secondary" onClick={() => setShowVariantForm(false)}>Cancelar</button><button className="button primary">Guardar variante</button></div>
       </form></section></div>}
-    {showComponentPieceMovement && selectedStockComponent && selectedComponentStockPiece && <div className="modal-backdrop">
+    {showComponentPieceMovement && selectedStockProductModel && selectedStockComponent && selectedComponentStockPiece && <div className="modal-backdrop">
       <section className="modal production-modal" role="dialog" aria-modal="true" aria-labelledby="component-piece-stock-title">
-        <div className="modal-heading"><div><h2 id="component-piece-stock-title">Movimiento de pieza auxiliar</h2><p>{selectedStockComponent.name} · {selectedComponentStockPiece.name}</p></div><button className="icon-button" onClick={() => setShowComponentPieceMovement(false)}>×</button></div>
+        <div className="modal-heading"><div><h2 id="component-piece-stock-title">Movimiento de pieza auxiliar</h2><p>{selectedStockProductModel.name} · {selectedStockComponent.name} · {selectedComponentStockPiece.name}</p></div><button className="icon-button" onClick={() => setShowComponentPieceMovement(false)}>×</button></div>
         <form className="production-form" onSubmit={saveComponentPieceMovement}>
           <label className="field-label">Operación<select className="large-input" value={componentStockKind} onChange={(event) => setComponentStockKind(event.target.value as 'entrada' | 'salida')}><option value="entrada">Entrada</option><option value="salida">Salida / merma</option></select></label>
-          <label className="field-label">Talla<select className="large-input" value={componentStockSizeId} onChange={(event) => setComponentStockSizeId(event.target.value)} required><option value="">Seleccionar talla</option>{sizes.map((size) => <option value={size.id} key={size.id}>{size.label}</option>)}</select></label>
+          <label className="field-label">Talla<select className="large-input" value={componentStockSizeId} onChange={(event) => setComponentStockSizeId(event.target.value)} required><option value="">Seleccionar talla</option>{selectedStockProductSizes.map((size) => <option value={size.id} key={size.id}>{size.label}</option>)}</select><small>Solo tallas de la tabla heredada del patrón base.</small></label>
           {selectedComponentStockPiece.laterality === 'simetrica' && <>
             <label className="field-label">Forma de registrar
               <select className="large-input" value={componentStockMode} onChange={(event) => setComponentStockMode(event.target.value as 'paridad' | 'lado')}><option value="paridad">Por paridades (izquierda + derecha)</option><option value="lado">Por un solo lado</option></select>
