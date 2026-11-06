@@ -235,11 +235,12 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
   }
   const variantIds = new Set(output.variants.map((x) => x.id));
   const componentIds = new Set(output.components.map((x) => x.id));
+  if (!output.productCollections.every((x) => typeof x.name === 'string' && x.name.trim() && typeof x.active === 'boolean' && typeof x.createdAt === 'string' && typeof x.updatedAt === 'string')) {
+    throw new Error('Hay colecciones de prendas incompletas.');
+  }
   const productCollectionIds = new Set(output.productCollections.map((x) => x.id));
   const collectionNames = output.productCollections.map((x) => x.name.trim().toLocaleLowerCase('es'));
-  if (!output.productCollections.every((x) => typeof x.name === 'string' && x.name.trim() && typeof x.active === 'boolean' && typeof x.createdAt === 'string' && typeof x.updatedAt === 'string') || new Set(collectionNames).size !== collectionNames.length) {
-    throw new Error('Hay colecciones de prendas con nombres vacíos o repetidos.');
-  }
+  if (new Set(collectionNames).size !== collectionNames.length) throw new Error('Hay colecciones de prendas con nombres repetidos.');
   const allComponentPieces = output.components.flatMap((component) => Array.isArray(component.pieces) ? component.pieces.filter((piece) => piece && typeof piece === 'object').map((piece) => ({ componentId: component.id, piece })) : []);
   const componentPieceMap = new Map(allComponentPieces.map(({ componentId, piece }) => [piece.id, { componentId, piece }] as const));
   if (componentPieceMap.size !== allComponentPieces.length) throw new Error('Hay identificadores repetidos entre piezas auxiliares.');
@@ -931,7 +932,7 @@ export function ProductionModule({
       additionalMaterials: [], active: true, createdAt: now(), updatedAt: now(),
     };
     setData((current) => ({ ...current, productModels: [...current.productModels, row] }));
-    setSelectedProductId(row.id); setProductName(''); setProductCollectionId(''); setProductDescription(''); setProductComponentIds([]);
+    setSelectedProductId(row.id); setProductName(''); setProductCollectionId(''); setShowProductCollectionCreator(false); setNewProductCollectionName(''); setProductDescription(''); setProductComponentIds([]);
     tell('Modelo configurado guardado. Se conservó intacto el patrón base.');
   }
   function deleteProduct(product: ConfiguredProductModel) {
