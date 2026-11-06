@@ -732,24 +732,32 @@ export function ProductionModule({
     return data.supplyMovements.filter((movement) => movement.variantId === variant.id && movement.sizeId === (supply.stockMode === 'talla' ? sizeId : null))
       .reduce((sum, movement) => sum + movement.delta, 0);
   }
-  function componentPieceDomainLedger(pieceId: string, sizeId: string): DomainPieceMovement[] {
-    return data.componentPieceMovements.filter((movement) => movement.pieceId === pieceId && movement.sizeId === sizeId).map((movement) => ({
+  function componentPieceDomainLedger(productModelId: string, pieceId: string, sizeId: string): DomainPieceMovement[] {
+    return data.componentPieceMovements.filter((movement) =>
+      movement.productModelId === productModelId && movement.pieceId === pieceId && movement.sizeId === sizeId
+    ).map((movement) => ({
       id: movement.id, pieceId: movement.pieceId, sizeId: movement.sizeId, delta: movement.delta,
       kind: movement.kind, side: movement.side, note: movement.note, date: movement.date,
     }));
   }
-  function componentPieceStockLabel(piece: ComponentPiece, sizeId: string): string {
-    const ledger = componentPieceDomainLedger(piece.id, sizeId);
+  function productSizeOptions(product: ConfiguredProductModel): Size[] {
+    const groupId = baseModels.find((model) => model.id === product.baseModelId)?.sizeGroupId;
+    return groupId ? sizes.filter((size) => size.groupId === groupId) : [];
+  }
+  function componentPieceStockLabel(productModelId: string, piece: ComponentPiece, sizeId: string): string {
+    const ledger = componentPieceDomainLedger(productModelId, piece.id, sizeId);
     if (piece.laterality === 'simetrica') {
       const stock = getSymmetricStock(ledger, piece.id, sizeId);
       return stock.left === stock.right ? format(stock.parity) + ' par.' : format(stock.left) + '/' + format(stock.right);
     }
     return format(getPieceStock(ledger, piece.id, sizeId));
   }
-  function openComponentPieceMovement(component: GarmentComponent, piece: ComponentPiece) {
+  function openComponentPieceMovement(productModelId: string, component: GarmentComponent, piece: ComponentPiece) {
+    const product = data.productModels.find((item) => item.id === productModelId && item.active);
+    setSelectedStockProductModelId(productModelId);
     setSelectedStockComponentId(component.id);
     setComponentStockPieceId(piece.id);
-    setComponentStockSizeId(sizes[0]?.id ?? '');
+    setComponentStockSizeId(product ? productSizeOptions(product)[0]?.id ?? '' : '');
     setComponentStockKind('entrada');
     setComponentStockMode('paridad');
     setComponentStockSide('izquierda');
@@ -759,17 +767,21 @@ export function ProductionModule({
   }
   function saveComponentPieceMovement(event: FormEvent) {
     event.preventDefault();
-    const component = data.components.find((item) => item.id === selectedStockComponentId);
+    const product = data.productModels.find((item) => item.id === selectedStockProductModelId && item.active);
+    const baseModel = product ? baseModels.find((item) => item.id === product.baseModelId) : undefined;
+    const selection = product?.components.find((item) => item.componentId === selectedStockComponentId);
+    const component = selection ? data.components.find((item) => item.id === selection.componentId && item.active) : undefined;
     const piece = component?.pieces.find((item) => item.id === componentStockPieceId);
+    const productSizes = product ? productSizeOptions(product) : [];
     const quantity = Number(componentStockQuantity);
-    if (!component || !piece) return tell('No se encontró la pieza auxiliar seleccionada.', 'error');
-    if (!componentStockSizeId || !sizes.some((size) => size.id === componentStockSizeId)) return tell('Selecciona una talla válida.', 'error');
+    if (!product || !baseModel || !component || !piece) return tell('No se encontró el modelo, componente o pieza auxiliar seleccionada.', 'error');
+    if (!componentStockSizeId || !productSizes.some((size) => size.id === componentStockSizeId)) return tell('Selecciona una talla válida de la tabla de tallas del patrón base.', 'error');
     if (!Number.isInteger(quantity) || quantity <= 0) return tell('La cantidad debe ser un entero mayor que cero.', 'error');
     const sign = componentStockKind === 'entrada' ? 1 : -1;
     const createdAt = now();
     const movements: ComponentPieceMovement[] = [];
     const createMovement = (side?: 'izquierda' | 'derecha') => movements.push({
-      id: id(), componentId: component.id, pieceId: piece.id, sizeId: componentStockSizeId,
+      id: id(), productModelId: product.id, componentId: component.id, pieceId: piece.id, sizeId: componentStockSizeId,
       delta: sign * quantity, kind: componentStockKind, side, note: componentStockNote.trim(), date: createdAt,
     });
     if (piece.laterality === 'simetrica' && componentStockMode === 'paridad') {
@@ -781,25 +793,28 @@ export function ProductionModule({
       createMovement();
     }
     const candidate = [...data.componentPieceMovements, ...movements];
-    const ledger: DomainPieceMovement[] = candidate.filter((movement) => movement.pieceId === piece.id && movement.sizeId === componentStockSizeId).map((movement) => ({
+    const ledger: DomainPieceMovement[] = candidate.filter((movement) =>
+      movement.productModelId === product.id && movement.pieceId === piece.id && movement.sizeId === componentStockSizeId
+    ).map((movement) => ({
       id: movement.id, pieceId: movement.pieceId, sizeId: movement.sizeId, delta: movement.delta,
       kind: movement.kind, side: movement.side, note: movement.note, date: movement.date,
     }));
+    const productReservations = ordersHoldingStock.filter((order) => order.productModelId === product.id).flatMap((order) => order.componentPieces);
     if (piece.laterality === 'simetrica') {
       const legacy = ledger.filter((movement) => !movement.side).reduce((sum, movement) => sum + movement.delta, 0);
       const legacyPairs = Math.floor(Math.max(0, legacy) / 2);
       const left = legacyPairs + ledger.filter((movement) => movement.side === 'izquierda').reduce((sum, movement) => sum + movement.delta, 0);
       const right = legacyPairs + ledger.filter((movement) => movement.side === 'derecha').reduce((sum, movement) => sum + movement.delta, 0);
-      const reservedLeft = reservedPieceQuantity(ordersHoldingStock.flatMap((order) => order.componentPieces), piece.id, componentStockSizeId, 'izquierda');
-      const reservedRight = reservedPieceQuantity(ordersHoldingStock.flatMap((order) => order.componentPieces), piece.id, componentStockSizeId, 'derecha');
-      if (legacy < 0 || left < reservedLeft || right < reservedRight) return tell('No puedes retirar ese stock: hay piezas reservadas para órdenes de producción.', 'error');
+      const reservedLeft = reservedPieceQuantity(productReservations, piece.id, componentStockSizeId, 'izquierda');
+      const reservedRight = reservedPieceQuantity(productReservations, piece.id, componentStockSizeId, 'derecha');
+      if (legacy < 0 || left < reservedLeft || right < reservedRight) return tell('No puedes retirar ese stock: hay piezas reservadas para órdenes de este modelo.', 'error');
     } else {
-      const reserved = reservedPieceQuantity(ordersHoldingStock.flatMap((order) => order.componentPieces), piece.id, componentStockSizeId, null);
-      if (getPieceStock(ledger, piece.id, componentStockSizeId) < reserved) return tell('No puedes retirar ese stock: hay piezas reservadas para órdenes de producción.', 'error');
+      const reserved = reservedPieceQuantity(productReservations, piece.id, componentStockSizeId, null);
+      if (getPieceStock(ledger, piece.id, componentStockSizeId) < reserved) return tell('No puedes retirar ese stock: hay piezas reservadas para órdenes de este modelo.', 'error');
     }
     setData((current) => ({ ...current, componentPieceMovements: [...current.componentPieceMovements, ...movements] }));
     setShowComponentPieceMovement(false);
-    tell('Movimiento de inventario auxiliar registrado.');
+    tell('Movimiento registrado en el inventario auxiliar de ' + product.name + '.');
   }
 
   function saveStock(event: FormEvent) {
