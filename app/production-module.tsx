@@ -1356,6 +1356,8 @@ export function ProductionModule({
   const componentColorName = (colorId: string | null | undefined) => colorId ? textileContext.colores.find((x) => x.id === colorId)?.nombre ?? 'Color no disponible' : 'Sin color';
   const selectedProductBasePattern = baseModels.find((model) => model.id === productBaseId);
   const selectedProductFabricSlots = selectedProductBasePattern ? productFabricSlotsForBaseModel(selectedProductBasePattern) : [];
+  const selectedProductBaseSizes = selectedProductBasePattern ? sizes.filter((size) => size.groupId === selectedProductBasePattern.sizeGroupId) : [];
+  const selectedProductMaterialRows = data.components.filter((component) => component.active && productComponentIds.includes(component.id)).flatMap((component) => component.materials.filter((material) => Boolean(material.specificationLabel?.trim())).map((material) => ({ component, material })));
   const activeTextiles = textileContext.telas.filter((textile) => textile.activo !== false).slice().sort((a, b) => a.nombreTela.localeCompare(b.nombreTela, 'es'));
   const editingFabricProduct = data.productModels.find((product) => product.id === editingProductFabricId);
   const editingFabricBasePattern = editingFabricProduct ? baseModels.find((model) => model.id === editingFabricProduct.baseModelId) : undefined;
@@ -2134,7 +2136,7 @@ export function ProductionModule({
             <button type="button" className="text-action danger-action" onClick={() => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.filter((_, i) => i !== index) })}>Quitar</button>
           </div>;
         })}
-        <MaterialEditor materials={componentDraft.materials} onChange={(materials) => setComponentDraft({ ...componentDraft, materials })} variants={variants} supplies={supplies} sizes={sizes} title="Materiales y consumos del componente" onCreateSupplyVariant={createSupplyVariantFromMaterial} />
+        <MaterialEditor materials={componentDraft.materials} onChange={(materials) => setComponentDraft({ ...componentDraft, materials })} variants={variants} supplies={supplies} sizes={sizes} title="Materiales y consumos del componente" onCreateSupplyVariant={createSupplyVariantFromMaterial} allowSizeSpecifications />
         <div className="form-actions"><button type="button" className="button secondary" onClick={cancelComponentDraft}>Cancelar</button><button className="button primary">Guardar componente</button></div>
       </form>}
       <div className="production-component-grid">
@@ -2179,9 +2181,57 @@ export function ProductionModule({
         <div className="production-subheading"><strong>Componentes y acabados</strong><span className="production-muted">Selecciona los que lleva esta prenda</span></div>
         {data.components.filter((x) => x.active).length === 0 && <div className="notice info"><span>Esta prenda todavía no tiene componentes. Puedes continuar sin ellos o crear uno ahora.</span><button type="button" className="button secondary" onClick={createComponentFromProduct}>＋ Crear componente y volver</button></div>}
         <div className="production-check-list">{data.components.filter((x) => x.active).map((component) => <label key={component.id}>
-          <input type="checkbox" checked={productComponentIds.includes(component.id)} onChange={(e) => setProductComponentIds((current) => e.target.checked ? [...current, component.id] : current.filter((x) => x !== component.id))} />
+          <input type="checkbox" checked={productComponentIds.includes(component.id)} onChange={(event) => {
+            const checked = event.target.checked;
+            setProductComponentIds((current) => checked ? [...current, component.id] : current.filter((x) => x !== component.id));
+            if (checked) setProductMaterialSpecsDraft((current) => {
+              const next = { ...current };
+              component.materials.filter((material) => material.specificationLabel?.trim()).forEach((material) => {
+                next[material.id] = next[material.id] ?? { label: material.specificationLabel ?? 'Medida', rules: [{ id: id(), value: '', sizeIds: [] }] };
+              });
+              return next;
+            });
+          }} />
           <span><strong>{component.name}</strong><small>{component.type} · {component.materials.length} materiales asociados</small></span>
         </label>)}</div>
+        {selectedProductMaterialRows.length > 0 && <section className="product-material-spec-section">
+          <div className="production-subheading"><strong>Características de avíos por talla</strong><span className="production-muted">Se configuran para este modelo, no en el inventario.</span></div>
+          <p className="production-muted">Agrupa las tallas que comparten una misma medida. Solo se mostrarán las tallas del patrón base «{selectedProductBasePattern?.name ?? 'seleccionado'}».</p>
+          {selectedProductMaterialRows.map(({ component, material }) => {
+            const draft = productMaterialSpecsDraft[material.id] ?? { label: material.specificationLabel ?? 'Medida', rules: [] };
+            const assignedSizeIds = draft.rules.flatMap((rule) => rule.sizeIds);
+            const missingLabels = selectedProductBaseSizes.filter((size) => !assignedSizeIds.includes(size.id)).map((size) => size.label);
+            return <article className="product-material-spec-card" key={component.id + ':' + material.id}>
+              <div><strong>{component.name} · {variantLabel(variantsBySupply.get(material.variantId) ?? { id: '', supplyId: '', name: 'Insumo', attributes: {}, textileId: null, textileColorId: null, purchasePackQuantity: null, purchasePackLabel: '', active: true }, data.variants, supplies)}</strong><small>Define la característica que cambia con la talla.</small></div>
+              <label className="field-label">Nombre de la característica
+                <input className="large-input" value={draft.label} onChange={(event) => setProductMaterialSpecsDraft((current) => ({ ...current, [material.id]: { ...draft, label: event.target.value } }))} placeholder="Longitud, ancho, grosor…" />
+              </label>
+              {draft.rules.map((rule, ruleIndex) => {
+                const otherAssigned = new Set(draft.rules.filter((_, index) => index !== ruleIndex).flatMap((item) => item.sizeIds));
+                return <div className="product-material-spec-rule" key={rule.id}>
+                  <div className="production-form-grid">
+                    <label className="field-label">Medida para este grupo
+                      <input className="large-input" value={rule.value} onChange={(event) => setProductMaterialSpecsDraft((current) => ({ ...current, [material.id]: { ...draft, rules: draft.rules.map((item, index) => index === ruleIndex ? { ...item, value: event.target.value } : item) } }))} placeholder="Ej. 13 cm" />
+                    </label>
+                    <button type="button" className="text-action danger-action" onClick={() => setProductMaterialSpecsDraft((current) => ({ ...current, [material.id]: { ...draft, rules: draft.rules.filter((_, index) => index !== ruleIndex) } }))}>Quitar grupo</button>
+                  </div>
+                  <details className="product-material-spec-sizes">
+                    <summary>Seleccionar tallas · {rule.sizeIds.length} seleccionadas</summary>
+                    <div className="product-material-size-options">
+                      {selectedProductBaseSizes.map((size) => <label key={size.id}>
+                        <input type="checkbox" checked={rule.sizeIds.includes(size.id)} disabled={otherAssigned.has(size.id)} onChange={(event) => setProductMaterialSpecsDraft((current) => ({ ...current, [material.id]: { ...draft, rules: draft.rules.map((item, index) => index === ruleIndex ? { ...item, sizeIds: event.target.checked ? [...item.sizeIds, size.id] : item.sizeIds.filter((id) => id !== size.id) } : item) } }))} />
+                        <span>{size.label}</span>
+                      </label>)}
+                    </div>
+                  </details>
+                </div>;
+              })}
+              <button type="button" className="text-action" onClick={() => setProductMaterialSpecsDraft((current) => ({ ...current, [material.id]: { ...draft, rules: [...draft.rules, { id: id(), value: '', sizeIds: [] }] } }))}>＋ Añadir grupo de tallas</button>
+              {missingLabels.length > 0 && <small className="production-shortage">Falta asignar: {missingLabels.join(', ')}</small>}
+              {missingLabels.length === 0 && <small className="production-ok">Todas las tallas del patrón tienen una medida asignada.</small>}
+            </article>;
+          })}
+        </section>}
         <div className="form-actions"><button className="button primary" disabled={baseModels.length === 0}>Guardar modelo configurado</button></div>
       </form>
       <div className="production-subheading"><strong>Modelos configurados</strong><span className="count-badge">{data.productModels.filter((x) => x.active).length}</span></div>
