@@ -1148,6 +1148,14 @@ export function ProductionModule({
     setShowSupplyForm(true);
     onNavigate('insumos');
   }
+  function cancelSupplyCreation() {
+    setShowSupplyForm(false);
+    if (supplyReturnToPurchase) {
+      setSupplyReturnToPurchase(false);
+      setShowPurchaseForm(true);
+      onNavigate('compras-avios');
+    }
+  }
   function cancelVariantCreation() {
     setShowVariantForm(false);
     if (supplyReturnToPurchase) {
@@ -1883,7 +1891,7 @@ export function ProductionModule({
         </div>
         <label className="field-label">Descripción<textarea className="large-input" rows={2} value={supplyDescription} onChange={(e) => setSupplyDescription(e.target.value)} placeholder="Uso habitual, especificaciones…" /></label>
         <label className="field-label">Características adicionales<textarea className="large-input" rows={2} value={supplyAttributes} onChange={(e) => setSupplyAttributes(e.target.value)} placeholder={'Una por línea. Ejemplo:\nAncho: 3.5 cm\nMaterial: Poliéster\nRigidez: Rígida'} /></label>
-        <div className="form-actions"><button type="button" className="button secondary" onClick={() => setShowSupplyForm(false)}>Cancelar</button><button className="button primary">Guardar insumo</button></div>
+        <div className="form-actions"><button type="button" className="button secondary" onClick={cancelSupplyCreation}>Cancelar</button><button className="button primary">Guardar insumo</button></div>
       </form>}
       {supplies.length === 0 && <div className="empty">Todavía no hay insumos. Registra el primero para crear sus variantes.</div>}
       <div className="production-list">{supplies.filter((x) => x.active).map((supply) => {
