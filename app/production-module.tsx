@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { getCompleteUnits, getPieceStock, getSymmetricStock, type PieceMovement as DomainPieceMovement, type ManufacturingModel, type ModelPiece, type Size, type SizeGroup } from '@/lib/inventory-domain';
-import { FABRIC_STORAGE_KEYS, createGlobalColorQuickly, createTextileQuickly, type RollMovement as FabricRollMovement } from '@/app/fabric-module';
+import { FABRIC_STORAGE_KEYS, createGlobalColorQuickly, createTextileColorQuickly, createTextileQuickly, type RollMovement as FabricRollMovement } from '@/app/fabric-module';
 
 export type ProductionView = 'insumos' | 'compras-avios' | 'componentes' | 'modelos-producto' | 'recetas' | 'planificacion' | 'ordenes';
 export type StockUnit = 'und' | 'm' | 'cm' | 'g' | 'kg' | 'l' | 'ml';
@@ -473,7 +473,7 @@ type QuickMaterialDraft = {
   variantName: string;
 };
 type QuickMaterialCreated = { supply: Supply; variant: SupplyVariant };
-type QuickTextileTarget = { kind: 'product'; slot: string } | { kind: 'existingProduct'; slot: string } | { kind: 'component'; pieceId: string };
+type QuickTextileTarget = { kind: 'product'; slot: string } | { kind: 'existingProduct'; slot: string } | { kind: 'component'; pieceId: string } | { kind: 'variant' };
 type QuickTextileDraft = { target: QuickTextileTarget; name: string; unit: 'KG' | 'M'; width: string; theoreticalYield: string; description: string };
 
 function MaterialEditor({
@@ -671,6 +671,8 @@ export function ProductionModule({
   const [quickTextileDraft, setQuickTextileDraft] = useState<QuickTextileDraft | null>(null);
   const [quickColorPieceId, setQuickColorPieceId] = useState('');
   const [quickColorName, setQuickColorName] = useState('');
+  const [quickVariantColorTextileId, setQuickVariantColorTextileId] = useState('');
+  const [quickVariantColorName, setQuickVariantColorName] = useState('');
 
   const refreshTextiles = () => {
     const telas = safeRead<TextileRow[]>(FABRIC_STORAGE_KEYS.telas, []);
@@ -788,7 +790,9 @@ export function ProductionModule({
     tell('Insumo registrado. Ahora agrega sus variantes comerciales.');
   }
   function openQuickTextile(target: QuickTextileTarget) {
-    setQuickTextileDraft({ target, name: '', unit: 'KG', width: '', theoreticalYield: '', description: '' });
+    const supply = target.kind === 'variant' ? supplies.find((item) => item.id === variantSupplyId) : undefined;
+    const unit: 'KG' | 'M' = supply?.baseUnit === 'm' ? 'M' : 'KG';
+    setQuickTextileDraft({ target, name: '', unit, width: '', theoreticalYield: '', description: '' });
   }
 
   function saveQuickTextile(event: FormEvent) {
@@ -800,6 +804,11 @@ export function ProductionModule({
     if (quickTextileDraft.theoreticalYield.trim() && (theoreticalYield === null || !Number.isFinite(theoreticalYield) || theoreticalYield <= 0)) return tell('El rendimiento teórico debe ser mayor que cero o quedar vacío.', 'error');
     try {
       const target = quickTextileDraft.target;
+      if (target.kind === 'variant') {
+        const supply = supplies.find((item) => item.id === variantSupplyId);
+        const expectedUnit = supply?.baseUnit === 'm' ? 'M' : supply?.baseUnit === 'kg' ? 'KG' : null;
+        if (!supply || !expectedUnit || quickTextileDraft.unit !== expectedUnit) return tell('La tela debe usar la misma unidad de inventario del insumo (metros o kilogramos).', 'error');
+      }
       const textile = createTextileQuickly({
         name: quickTextileDraft.name, unit: quickTextileDraft.unit,
         width, theoreticalYield, description: quickTextileDraft.description,
@@ -811,6 +820,9 @@ export function ProductionModule({
       } else if (target.kind === 'existingProduct') {
         const slot = target.slot;
         setEditingProductFabricAssignments((current) => ({ ...current, [slot]: textile.id }));
+      } else if (target.kind === 'variant') {
+        setVariantTextileId(textile.id);
+        setVariantTextileColorId('');
       } else {
         const pieceId = target.pieceId;
         setComponentDraft((current) => current ? {
@@ -828,6 +840,27 @@ export function ProductionModule({
   function openQuickColor(pieceId: string) {
     setQuickColorPieceId(pieceId);
     setQuickColorName('');
+  }
+
+  function openQuickVariantColor() {
+    if (!variantTextileId) return tell('Selecciona primero una tela.', 'error');
+    setQuickVariantColorTextileId(variantTextileId);
+    setQuickVariantColorName('');
+  }
+
+  function saveQuickVariantColor(event: FormEvent) {
+    event.preventDefault();
+    if (!quickVariantColorTextileId) return;
+    try {
+      const association = createTextileColorQuickly(quickVariantColorTextileId, quickVariantColorName);
+      refreshTextiles();
+      setVariantTextileColorId(association.id);
+      setQuickVariantColorTextileId('');
+      setQuickVariantColorName('');
+      tell('Color creado y asociado a la tela seleccionada.');
+    } catch (error) {
+      tell(error instanceof Error ? error.message : 'No se pudo asociar el color a la tela.', 'error');
+    }
   }
 
   function saveQuickColor(event: FormEvent) {
