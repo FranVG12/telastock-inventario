@@ -1207,8 +1207,8 @@ export function ProductionModule({
     const previous = data.components.find((item) => item.id === componentDraft.id);
     const invalidFabricPiece = componentDraft.pieces.find((piece) => !isComponentFabricSlot(piece.fabricSlot));
     if (invalidFabricPiece) return tell('Selecciona una posición válida del patrón base para cada pieza auxiliar.', 'error');
-    const invalidColorPiece = componentDraft.pieces.find((piece) => piece.colorId && !textileContext.colores.some((color) => color.id === piece.colorId));
-    if (invalidColorPiece) return tell('El color de una pieza ya no existe en el catálogo global. Selecciona un color vigente o Sin color.', 'error');
+    const invalidColorPiece = componentDraft.pieces.find((piece) => !isComponentColorSlot(normalizeComponentColorSlot(piece.colorSlot, piece.colorId)) || (piece.colorId && !textileContext.colores.some((color) => color.id === piece.colorId)));
+    if (invalidColorPiece) return tell('Selecciona una posición de color válida para cada pieza auxiliar.', 'error');
     const removedStockedPiece = previous?.pieces.find((oldPiece) =>
       (data.componentPieceMovements.some((movement) => movement.pieceId === oldPiece.id) ||
         data.productionOrders.some((order) => order.componentPieces.some((line) => line.pieceId === oldPiece.id))) &&
@@ -1223,6 +1223,7 @@ export function ProductionModule({
       pieces: componentDraft.pieces.map((piece) => ({
         ...piece,
         fabricSlot: normalizeComponentFabricSlot(piece.fabricSlot, piece.textileId),
+        colorSlot: normalizeComponentColorSlot(piece.colorSlot, piece.colorId),
         textileId: null,
       })),
       updatedAt: now(),
@@ -1233,6 +1234,8 @@ export function ProductionModule({
       if (!basePattern) return tell('No se puede cambiar el componente: el modelo ' + product.name + ' no tiene un patrón base disponible.', 'error');
       const incompatiblePiece = row.pieces.find((piece) => !isComponentFabricSlotAvailableForModel(piece.fabricSlot, basePattern.secondaryFabricSlots ?? 0));
       if (incompatiblePiece) return tell('La pieza auxiliar "' + incompatiblePiece.name + '" usa ' + componentFabricSlotLabel(incompatiblePiece.fabricSlot) + ', pero el patrón base de "' + product.name + '" no tiene esa posición.', 'error');
+      const incompatibleColorPiece = row.pieces.find((piece) => !isComponentColorSlotAvailableForModel(piece.colorSlot ?? 'cualquiera', basePattern.secondaryColorSlots ?? 0));
+      if (incompatibleColorPiece) return tell('La pieza auxiliar "' + incompatibleColorPiece.name + '" usa ' + componentColorSlotLabel(incompatibleColorPiece.colorSlot ?? 'cualquiera') + ', pero el patrón base de "' + product.name + '" no tiene esa posición de color.', 'error');
     }
     const otherPieceIds = new Set(data.components.filter((component) => component.id !== row.id).flatMap((component) => component.pieces.map((piece) => piece.id)));
     const draftPieceIds = row.pieces.map((piece) => piece.id);
@@ -1416,19 +1419,25 @@ export function ProductionModule({
     setRecipeDraft(existing ? { ...existing, materials: existing.materials.map((x) => ({ ...x, bySize: { ...x.bySize } })) } : { id: id(), family, name: 'Receta general de ' + (families.find((x) => x.value === family)?.label ?? family), active: true, materials: [], updatedAt: now() });
   }
   function openComponent(component?: GarmentComponent) {
-    setComponentDraft(component ? { ...component, pieces: component.pieces.map((x) => ({ ...x, fabricSlot: normalizeComponentFabricSlot(x.fabricSlot, x.textileId), textileId: null, colorId: x.colorId ?? null })), materials: component.materials.map((x) => ({ ...x, bySize: { ...x.bySize } })) } : null);
+    setComponentDraft(component ? { ...component, pieces: component.pieces.map((x) => ({ ...x, fabricSlot: normalizeComponentFabricSlot(x.fabricSlot, x.textileId), colorSlot: normalizeComponentColorSlot(x.colorSlot, x.colorId), textileId: null, colorId: x.colorId ?? null })), materials: component.materials.map((x) => ({ ...x, bySize: { ...x.bySize } })) } : null);
   }
 
   const textileName = (textileId: string | null | undefined) => textileId ? textileContext.telas.find((x) => x.id === textileId)?.nombreTela ?? '' : 'Ninguna';
   const componentColorName = (colorId: string | null | undefined) => colorId ? textileContext.colores.find((x) => x.id === colorId)?.nombre ?? 'Color no disponible' : 'Sin color';
   const selectedProductBasePattern = baseModels.find((model) => model.id === productBaseId);
   const selectedProductFabricSlots = selectedProductBasePattern ? productFabricSlotsForBaseModel(selectedProductBasePattern) : [];
+  const selectedProductColorSlots = selectedProductBasePattern ? productColorSlotsForBaseModel(selectedProductBasePattern) : [];
   const selectedProductBaseSizes = selectedProductBasePattern ? sizes.filter((size) => size.groupId === selectedProductBasePattern.sizeGroupId) : [];
+  const selectedProductBaseWildcardPieces = selectedProductBasePattern ? basePieces.filter((piece) => piece.modelId === selectedProductBasePattern.id && !piece.archived && (piece.fabricSlot === 'cualquiera' || piece.colorSlot === 'cualquiera')) : [];
+  const selectedProductComponentWildcardPieces = data.components.filter((component) => component.active && productComponentIds.includes(component.id)).flatMap((component) => component.pieces.filter((piece) => piece.fabricSlot === 'cualquiera' || (piece.colorSlot ?? (piece.colorId ? 'principal' : 'cualquiera')) === 'cualquiera').map((piece) => ({ component, piece })));
   const selectedProductMaterialRows = data.components.filter((component) => component.active && productComponentIds.includes(component.id)).flatMap((component) => component.materials.filter((material) => Boolean(material.specificationLabel?.trim())).map((material) => ({ component, material })));
   const activeTextiles = textileContext.telas.filter((textile) => textile.activo !== false).slice().sort((a, b) => a.nombreTela.localeCompare(b.nombreTela, 'es'));
   const editingFabricProduct = data.productModels.find((product) => product.id === editingProductFabricId);
   const editingFabricBasePattern = editingFabricProduct ? baseModels.find((model) => model.id === editingFabricProduct.baseModelId) : undefined;
   const editingFabricSlots = editingFabricBasePattern ? productFabricSlotsForBaseModel(editingFabricBasePattern) : [];
+  const editingColorProduct = data.productModels.find((product) => product.id === editingProductColorId);
+  const editingColorBasePattern = editingColorProduct ? baseModels.find((model) => model.id === editingColorProduct.baseModelId) : undefined;
+  const editingColorSlots = editingColorBasePattern ? productColorSlotsForBaseModel(editingColorBasePattern) : [];
   const textileColorOptions = textileContext.telaColores.filter((x) => x.idTela === variantTextileId && x.activo);
   const activeProduct = data.productModels.find((x) => x.id === selectedProductId && x.active);
   const selectedStockProductModel = data.productModels.find((x) => x.id === selectedStockProductModelId && x.active);
