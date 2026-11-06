@@ -31,6 +31,7 @@ test('normaliza vínculos directos antiguos a la tela principal', () => {
 test('valida posiciones principales y secundarias sin aceptar índices inválidos', () => {
   assert.equal(isComponentFabricSlot('principal'), true);
   assert.equal(isComponentFabricSlot('ninguna'), true);
+  assert.equal(isComponentFabricSlot('cualquiera'), true);
   assert.equal(isComponentFabricSlot('secundaria_1'), true);
   assert.equal(isComponentFabricSlot('secundaria_0'), false);
   assert.equal(isComponentFabricSlot('secundaria_01'), false);
@@ -38,6 +39,7 @@ test('valida posiciones principales y secundarias sin aceptar índices inválido
   assert.equal(isComponentFabricSlot('secundaria_x'), false);
   assert.equal(isComponentFabricSlotAvailableForModel('principal', 0), true);
   assert.equal(isComponentFabricSlotAvailableForModel('ninguna', 0), true);
+  assert.equal(isComponentFabricSlotAvailableForModel('cualquiera', 0), true);
   assert.equal(isComponentFabricSlotAvailableForModel('secundaria_1', 1), true);
   assert.equal(isComponentFabricSlotAvailableForModel('secundaria_2', 2), true);
   assert.equal(isComponentFabricSlotAvailableForModel('secundaria_2', 1), false);
@@ -65,6 +67,53 @@ test('presenta etiquetas inequívocas para la posición seleccionada', () => {
   assert.equal(componentFabricSlotLabel('principal'), 'Tela principal 1');
   assert.equal(componentFabricSlotLabel('secundaria_2'), 'Tela secundaria 2');
   assert.equal(componentFabricSlotLabel('ninguna'), 'Sin tela vinculada');
+  assert.equal(componentFabricSlotLabel('cualquiera'), 'Cualquier tela');
+});
+
+
+const colorSlotSource = readFileSync(new URL('../lib/component-color-slots.ts', import.meta.url), 'utf8');
+const colorSlotCompiled = ts.transpileModule(colorSlotSource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText;
+const colorSlotModule = { exports: {} };
+vm.runInNewContext(colorSlotCompiled, { exports: colorSlotModule.exports, module: colorSlotModule });
+const {
+  componentColorSlotLabel,
+  isComponentColorSlot,
+  isComponentColorSlotAvailableForModel,
+  normalizeComponentColorSlot,
+  resolveComponentPieceColorId,
+  secondaryColorSlotIndex,
+} = colorSlotModule.exports;
+
+test('los componentes usan posiciones de color y admiten el comodín', () => {
+  assert.equal(normalizeComponentColorSlot(undefined, 'legacy-blue'), 'principal');
+  assert.equal(normalizeComponentColorSlot(undefined, null), 'cualquiera');
+  assert.equal(isComponentColorSlot('cualquiera'), true);
+  assert.equal(isComponentColorSlot('principal'), true);
+  assert.equal(isComponentColorSlot('secundaria_4'), true);
+  assert.equal(isComponentColorSlot('secundaria_0'), false);
+  assert.equal(isComponentColorSlotAvailableForModel('cualquiera', 0), true);
+  assert.equal(isComponentColorSlotAvailableForModel('secundaria_2', 2), true);
+  assert.equal(isComponentColorSlotAvailableForModel('secundaria_2', 1), false);
+  assert.equal(secondaryColorSlotIndex('secundaria_4'), 4);
+  assert.equal(componentColorSlotLabel('principal'), 'Color principal 1');
+  assert.equal(componentColorSlotLabel('secundaria_3'), 'Color secundario 3');
+  assert.equal(componentColorSlotLabel('cualquiera'), 'Cualquier color');
+});
+
+test('resuelve el color de componentes por modelo comercial sin cruzar asignaciones', () => {
+  const assignments = [
+    { productModelId: 'modelo-a', colorSlot: 'principal', colorId: 'azul' },
+    { productModelId: 'modelo-b', colorSlot: 'principal', colorId: 'rojo' },
+    { productModelId: 'modelo-a', colorSlot: 'secundaria_1', colorId: 'blanco' },
+  ];
+  assert.equal(resolveComponentPieceColorId('modelo-a', 'principal', assignments), 'azul');
+  assert.equal(resolveComponentPieceColorId('modelo-b', 'principal', assignments), 'rojo');
+  assert.equal(resolveComponentPieceColorId('modelo-a', 'secundaria_1', assignments), 'blanco');
+  assert.equal(resolveComponentPieceColorId('modelo-a', 'cualquiera', assignments), null);
+  assert.equal(resolveComponentPieceColorId('modelo-a', 'ninguna', assignments), null);
+  assert.equal(resolveComponentPieceColorId('modelo-c', 'principal', assignments), null);
 });
 
 const sizeSpecSource = readFileSync(new URL('../lib/material-size-specifications.ts', import.meta.url), 'utf8');
