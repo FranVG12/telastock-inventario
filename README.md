@@ -222,3 +222,14 @@ Las reservas son locales a este navegador, igual que el resto de los datos del p
 El respaldo completo utiliza `schemaVersion: 9` e incluye órdenes, reservas, consumos reales, colecciones y movimientos auxiliares separados por modelo comercial. Los respaldos completos anteriores siguen siendo importables; los movimientos auxiliares ambiguos se conservan sin asignar en lugar de duplicar existencias.
 
 Al completar una orden, el operador confirma las cantidades reales de cada avío y de cada rollo. Puede registrar un consumo menor al reservado, lo que libera la diferencia; no puede consumir más de lo que la orden tiene reservado. Para rollos, la cantidad real se registra con precisión de 0.001 KG o M y debe coincidir, por variante textil, con el consumo real indicado. Las piezas de molde base y auxiliares se descuentan de acuerdo con la cantidad de prendas y la receta de piezas guardada en la orden.
+
+### Posiciones reutilizables de tela y color por modelo comercial
+
+- En moldes base, cada pieza guarda una referencia de color: `ninguna`, `cualquiera`, `principal` o `secundaria_N`. La tela también admite `cualquiera`, `principal` o `secundaria_N`; el patrón no guarda una tela/color comercial fijo.
+- La biblioteca de componentes utiliza las mismas posiciones. Una pieza nueva puede dejar la tela y el color abiertos con **Cualquier tela** y **Cualquier color**, o heredar posiciones numeradas del patrón.
+- Al crear un modelo comercial, se elige un color global concreto para **Color principal 1** y para cada color secundario definido por el patrón. Esas asignaciones se guardan en `productColors`, separadas del patrón y de la biblioteca.
+- Las piezas declaradas como comodín solicitan una tela y/o color concretos para ese modelo. Las selecciones quedan guardadas como excepciones del modelo o del componente seleccionado; no alteran la definición reutilizable.
+- Los componentes resuelven posiciones por `productModelId + fabricSlot/colorSlot`, de modo que dos modelos que reutilizan el mismo componente pueden utilizar telas y colores distintos.
+- Cuando un modelo combina una tela y un color que todavía no tenían relación, se crea la asociación de esa tela con el color global. Sus códigos HEX/CMYK permanecen vacíos hasta que se configuren expresamente.
+- Los respaldos completos pasan a `schemaVersion: 13`; el módulo de producción local pasa a la versión 9 y conserva la compatibilidad con datos anteriores.
+- La migración `202611060010_configured_product_colors_and_wildcards.sql` incorpora posiciones de color, comodines, excepciones por modelo y la tabla `configured_product_colors`. Está preparada en la rama; **no se ejecuta automáticamente**. La aplicación sigue usando `localStorage` hasta completar la integración con Supabase y sus políticas RLS.
