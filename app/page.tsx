@@ -124,6 +124,7 @@ export default function Home() {
   const [adminMode, setAdminMode] = useState(false);
   const [quickPatternColorTarget, setQuickPatternColorTarget] = useState<{ index: number } | null>(null);
   const [quickPatternColorName, setQuickPatternColorName] = useState('');
+  const quickBaseModelCreatedCallbackRef = useRef<((modelId: string) => void) | null>(null);
 
   // Cargar datos una sola vez. Las claves propias de este módulo no pisan el inventario
   // genérico anterior de TelaStock. En la etapa Supabase, estas entidades pasan al repositorio remoto.
@@ -454,7 +455,8 @@ export default function Home() {
     setNoticeMessage(stockOperation === 'entrada' ? `Stock registrado: ${fmt(quantityTotal)} piezas físicas ingresadas en ${selectedSizeIds.length} talla(s).` : `Stock retirado: ${fmt(quantityTotal)} piezas físicas. El historial conserva el lado y el motivo indicado.`);
   }
 
-  function openCreateModel() {
+  function openCreateModel(onCreated?: (modelId: string) => void) {
+    quickBaseModelCreatedCallbackRef.current = onCreated ?? null;
     setModelForm(blankModelForm(sizeGroups[0]?.id ?? '', fabricColors[0]?.id ?? ''));
     setShowModelForm(true);
   }
@@ -484,6 +486,11 @@ export default function Home() {
     } catch (error) {
       setNoticeMessage(error instanceof Error ? error.message : 'No se pudo crear el color.', 'error');
     }
+  }
+
+  function closeModelForm() {
+    setShowModelForm(false);
+    quickBaseModelCreatedCallbackRef.current = null;
   }
 
   function openEditModel(model: ManufacturingModel) {
@@ -550,8 +557,16 @@ export default function Home() {
     setModels((previous) => modelForm.editingId ? previous.map((model) => model.id === modelId ? savedModel : model) : [...previous, savedModel]);
     setPieces((previous) => [...previous.filter((piece) => piece.modelId !== modelId || piece.archived || archivedRemovedIds.has(piece.id)).map((piece) => archivedRemovedIds.has(piece.id) ? { ...piece, archived: true } : piece), ...savedPieces]);
     setShowModelForm(false);
-    setView('modelos');
-    setNoticeMessage(modelForm.editingId ? 'Modelo actualizado.' : 'Modelo y moldes registrados.');
+    const onQuickCreated = !modelForm.editingId ? quickBaseModelCreatedCallbackRef.current : null;
+    quickBaseModelCreatedCallbackRef.current = null;
+    if (onQuickCreated) {
+      onQuickCreated(modelId);
+      setView('modelos-producto');
+      setNoticeMessage('Patrón base creado y seleccionado en el modelo comercial.');
+    } else {
+      setView('modelos');
+      setNoticeMessage(modelForm.editingId ? 'Modelo actualizado.' : 'Modelo y moldes registrados.');
+    }
   }
 
   function moveMold(index: number, direction: -1 | 1) {
@@ -1168,9 +1183,9 @@ export default function Home() {
         </section>
       </div>}
 
-      {showModelForm && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowModelForm(false); }}>
+      {showModelForm && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModelForm(); }}>
         <section className="modal model-modal" role="dialog" aria-modal="true" aria-labelledby="model-modal-title">
-          <div className="modal-heading"><div><div className="eyebrow">PATRÓN BASE</div><h2 id="model-modal-title">{modelForm.editingId ? 'Editar modelo' : 'Crear modelo de fabricación'}</h2><p>Define las piezas necesarias por prenda y si su stock requiere control de lateralidad.</p></div><button className="icon-button" onClick={() => setShowModelForm(false)} aria-label="Cerrar">×</button></div>
+          <div className="modal-heading"><div><div className="eyebrow">PATRÓN BASE</div><h2 id="model-modal-title">{modelForm.editingId ? 'Editar modelo' : 'Crear modelo de fabricación'}</h2><p>Define las piezas necesarias por prenda y si su stock requiere control de lateralidad.</p></div><button className="icon-button" onClick={closeModelForm} aria-label="Cerrar">×</button></div>
           <form onSubmit={saveModel} className="model-form">
             <label className="field-label">Nombre del modelo<input className="large-input" required value={modelForm.name} onChange={(event) => setModelForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="Ej. Polo básico sublimado" /></label>
             <label className="field-label">Familia del patrón base<select className="large-input" required value={modelForm.family} onChange={(event) => setModelForm((prev) => ({ ...prev, family: event.target.value }))}><option value="">Seleccionar familia</option>{baseModelFamilies.map((family) => <option key={family.value} value={family.value}>{family.label}</option>)}</select><small>La familia se define aquí y la heredan los modelos comerciales que usan este patrón.</small></label>
@@ -1184,7 +1199,7 @@ export default function Home() {
             return item;
           }) }))}><option value="">Sin especificar</option>{fabricColors.map((color) => <option key={color.id} value={color.id}>{color.nombre}</option>)}</select><button type="button" className="text-action" onClick={() => openQuickPatternColor(index)}>＋ Crear color</button><small>Se propone este color por defecto; puedes elegir uno distinto en cada molde.</small></label></div></div>)}</div>
             <div className="symmetry-help"><strong>Cómo se cuenta la simetría:</strong> un par requiere 1 pieza izquierda y 1 derecha. El stock se registra por paridad de forma predeterminada; puedes cambiar a lados para registrar cantidades diferentes. En este molde, ×2 significa 1 pieza por lado.</div>
-            <div className="form-actions"><button type="button" className="button secondary" onClick={() => setShowModelForm(false)}>Cancelar</button><button type="submit" className="button primary">{modelForm.editingId ? 'Guardar cambios' : 'Crear modelo'}</button></div>
+            <div className="form-actions"><button type="button" className="button secondary" onClick={closeModelForm}>Cancelar</button><button type="submit" className="button primary">{modelForm.editingId ? 'Guardar cambios' : 'Crear modelo'}</button></div>
           </form>
         </section>
       </div>}
