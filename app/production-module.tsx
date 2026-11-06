@@ -2203,7 +2203,7 @@ export function ProductionModule({
             </div>
           </article>;
         })}
-        {data.productionOrders.length === 0 && <div className="empty">Todavía no hay órdenes. Crea un modelo configurado y calcula una producción desde Planificar.</div>}
+        {data.productionOrders.length === 0 && <div className="empty"><p>Todavía no hay órdenes de producción.</p><button type="button" className="button secondary" onClick={() => onNavigate(data.productModels.some((product) => product.active) ? 'planificacion' : 'modelos-producto')}>{data.productModels.some((product) => product.active) ? '＋ Ir a Planificar' : '＋ Crear modelo de prenda'}</button></div>}
       </div>
       <p className="production-muted">Una orden en borrador no reserva stock. Las órdenes reservadas o en proceso apartan existencias; cancelar libera la reserva. Al completar, TelaStock registra salidas de insumos, rollos, moldes base y piezas auxiliares.</p>
     </section>;
@@ -2245,7 +2245,7 @@ export function ProductionModule({
 
         </>;
       })()}
-      {!activeProduct && data.productModels.filter((x) => x.active).length === 0 && <div className="empty">Primero crea un modelo configurado a partir de un patrón base.</div>}
+      {!activeProduct && data.productModels.filter((x) => x.active).length === 0 && <div className="empty"><p>Primero crea un modelo configurado a partir de un patrón base.</p><button type="button" className="button secondary" onClick={() => onNavigate('modelos-producto')}>＋ Crear modelo de prenda</button></div>}
     </section>;
   })();
 
