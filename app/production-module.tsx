@@ -134,9 +134,18 @@ export type ProductComponentSelection = {
   variantOverrides: Record<string, string>;
 };
 
+export type ProductCollection = {
+  id: string;
+  name: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ConfiguredProductModel = {
   id: string;
   name: string;
+  collectionId: string | null;
   baseModelId: string;
   description: string;
   components: ProductComponentSelection[];
@@ -187,6 +196,7 @@ export type ProductionBackupData = {
   productionOrders: ProductionOrder[];
   components: GarmentComponent[];
   familyRecipes: FamilyRecipe[];
+  productCollections: ProductCollection[];
   productModels: ConfiguredProductModel[];
 };
 
@@ -201,11 +211,12 @@ export const PRODUCTION_STORAGE_KEYS = {
   productionOrders: 'telastock-production-orders-v1',
   components: 'telastock-garment-components-v1',
   familyRecipes: 'telastock-family-recipes-v1',
+  productCollections: 'telastock-product-collections-v1',
   productModels: 'telastock-configured-product-models-v1',
 } as const;
 
 export function emptyProductionBackupData(): ProductionBackupData {
-  return { supplies: [], variants: [], supplyMovements: [], supplyPurchases: [], supplyPurchaseDetails: [], componentPieceMovements: [], productionOrders: [], components: [], familyRecipes: [], productModels: [] };
+  return { supplies: [], variants: [], supplyMovements: [], supplyPurchases: [], supplyPurchaseDetails: [], componentPieceMovements: [], productionOrders: [], components: [], familyRecipes: [], productCollections: [], productModels: [] };
 }
 
 export function validateProductionBackupData(value: unknown): ProductionBackupData {
@@ -224,6 +235,11 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
   }
   const variantIds = new Set(output.variants.map((x) => x.id));
   const componentIds = new Set(output.components.map((x) => x.id));
+  const productCollectionIds = new Set(output.productCollections.map((x) => x.id));
+  const collectionNames = output.productCollections.map((x) => x.name.trim().toLocaleLowerCase('es'));
+  if (!output.productCollections.every((x) => typeof x.name === 'string' && x.name.trim() && typeof x.active === 'boolean' && typeof x.createdAt === 'string' && typeof x.updatedAt === 'string') || new Set(collectionNames).size !== collectionNames.length) {
+    throw new Error('Hay colecciones de prendas con nombres vacíos o repetidos.');
+  }
   const allComponentPieces = output.components.flatMap((component) => Array.isArray(component.pieces) ? component.pieces.filter((piece) => piece && typeof piece === 'object').map((piece) => ({ componentId: component.id, piece })) : []);
   const componentPieceMap = new Map(allComponentPieces.map(({ componentId, piece }) => [piece.id, { componentId, piece }] as const));
   if (componentPieceMap.size !== allComponentPieces.length) throw new Error('Hay identificadores repetidos entre piezas auxiliares.');
@@ -350,7 +366,7 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
   if (!output.familyRecipes.every((x) => x.family.trim() && x.name.trim() && validMaterials(x.materials))) {
     throw new Error('Hay recetas generales con materiales inválidos.');
   }
-  if (!output.productModels.every((x) => x.name.trim() && typeof x.baseModelId === 'string' && Array.isArray(x.components) && x.components.every((c) => componentIds.has(c.componentId) && Number.isFinite(c.quantity) && c.quantity > 0) && validMaterials(x.additionalMaterials))) {
+  if (!output.productModels.every((x) => x.name.trim() && (x.collectionId === null || x.collectionId === undefined || productCollectionIds.has(x.collectionId)) && typeof x.baseModelId === 'string' && Array.isArray(x.components) && x.components.every((c) => componentIds.has(c.componentId) && Number.isFinite(c.quantity) && c.quantity > 0) && validMaterials(x.additionalMaterials))) {
     throw new Error('Hay modelos configurados con componentes o materiales inválidos.');
   }
   if (!output.supplies.every((x) => x.name.trim() && ['total', 'talla'].includes(x.stockMode) && ['und', 'm', 'cm', 'g', 'kg', 'l', 'ml'].includes(x.baseUnit))) {
@@ -533,6 +549,9 @@ export function ProductionModule({
   const [componentDraft, setComponentDraft] = useState<GarmentComponent | null>(null);
   const [recipeDraft, setRecipeDraft] = useState<FamilyRecipe | null>(null);
   const [productName, setProductName] = useState('');
+  const [productCollectionId, setProductCollectionId] = useState('');
+  const [showProductCollectionCreator, setShowProductCollectionCreator] = useState(false);
+  const [newProductCollectionName, setNewProductCollectionName] = useState('');
   const [productBaseId, setProductBaseId] = useState('');
   const [productDescription, setProductDescription] = useState('');
   const [productComponentIds, setProductComponentIds] = useState<string[]>([]);
@@ -556,7 +575,7 @@ export function ProductionModule({
     let safe = true;
     let warning = '';
     const version = Number(localStorage.getItem(PRODUCTION_STORAGE_KEYS.version) ?? '0');
-    if (version > 2) { safe = false; warning = 'Los datos de insumos fueron creados con una versión más reciente. Se evita sobrescribirlos.'; }
+    if (version > 3) { safe = false; warning = 'Los datos de insumos fueron creados con una versión más reciente. Se evita sobrescribirlos.'; }
     for (const key of Object.keys(empty) as (keyof ProductionBackupData)[]) {
       try {
         const raw = localStorage.getItem(PRODUCTION_STORAGE_KEYS[key]);
@@ -567,15 +586,17 @@ export function ProductionModule({
         (next as unknown as Record<string, unknown>)[key] = [];
       }
     }
-    try { return { data: validateProductionBackupData(next), safe, warning }; }
-    catch { return { data: next, safe: false, warning: 'Las relaciones de insumos o componentes no son válidas. No se guardarán cambios.' }; }
+    try {
+      const validated = validateProductionBackupData(next);
+      return { data: { ...validated, productModels: validated.productModels.map((product) => ({ ...product, collectionId: product.collectionId ?? null })) }, safe, warning };
+    } catch { return { data: next, safe: false, warning: 'Las relaciones de insumos o componentes no son válidas. No se guardarán cambios.' }; }
   };
 
   useEffect(() => {
     const loaded = loadLocal();
     setData(loaded.data);
     setStorageSafe(loaded.safe);
-    if (loaded.safe) localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '2');
+    if (loaded.safe) localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '3');
     else setNotice({ text: loaded.warning, kind: 'error' });
     setReady(true);
     refreshTextiles();
@@ -618,7 +639,7 @@ export function ProductionModule({
     try {
       keys.forEach((key) => previous.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       keys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(data[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '1');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '3');
     } catch {
       previous.forEach((value, key) => {
         try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch { /* rollback best effort */ }
@@ -876,19 +897,41 @@ export function ProductionModule({
     setData((current) => ({ ...current, familyRecipes: current.familyRecipes.some((x) => x.id === row.id) ? current.familyRecipes.map((x) => x.id === row.id ? row : x) : [...current.familyRecipes, row] }));
     setRecipeDraft(null); tell('Receta estándar guardada.');
   }
+  function createProductCollection() {
+    const cleanName = newProductCollectionName.trim();
+    if (!cleanName) return tell('Escribe el nombre de la colección.', 'error');
+    const existing = data.productCollections.find((item) => item.name.trim().toLocaleLowerCase('es') === cleanName.toLocaleLowerCase('es'));
+    if (existing) {
+      if (!existing.active) return tell('Ya existe una colección archivada con ese nombre. Recupera ese registro antes de reutilizarlo.', 'error');
+      setProductCollectionId(existing.id);
+      setShowProductCollectionCreator(false);
+      setNewProductCollectionName('');
+      return tell('La colección ya existía y quedó seleccionada.', 'info');
+    }
+    const timestamp = now();
+    const collection: ProductCollection = { id: id(), name: cleanName, active: true, createdAt: timestamp, updatedAt: timestamp };
+    setData((current) => ({ ...current, productCollections: [...current.productCollections, collection] }));
+    setProductCollectionId(collection.id);
+    setShowProductCollectionCreator(false);
+    setNewProductCollectionName('');
+    tell('Colección creada y seleccionada.');
+  }
+
   function saveProduct(event: FormEvent) {
     event.preventDefault();
     const selectedBaseModel = baseModels.find((x) => x.id === productBaseId);
+    const selectedCollection = data.productCollections.find((x) => x.id === productCollectionId && x.active);
     if (!productName.trim() || !selectedBaseModel) return tell('Completa el nombre y selecciona un patrón base existente.', 'error');
+    if (!selectedCollection) return tell('Selecciona una colección guardada o crea una nueva antes de guardar el modelo.', 'error');
     if (!selectedBaseModel.family) return tell('El patrón base no tiene familia asignada. Edítalo en Modelos antes de crear el modelo comercial.', 'error');
     if (data.productModels.some((x) => x.name.toLocaleLowerCase('es') === productName.trim().toLocaleLowerCase('es'))) return tell('Ya existe un modelo configurado con ese nombre.', 'error');
     const row: ConfiguredProductModel = {
-      id: id(), name: productName.trim(), baseModelId: productBaseId, description: productDescription.trim(),
+      id: id(), name: productName.trim(), collectionId: selectedCollection.id, baseModelId: productBaseId, description: productDescription.trim(),
       components: productComponentIds.map((componentId) => ({ id: id(), componentId, quantity: 1, location: '', variantOverrides: {} })),
       additionalMaterials: [], active: true, createdAt: now(), updatedAt: now(),
     };
     setData((current) => ({ ...current, productModels: [...current.productModels, row] }));
-    setSelectedProductId(row.id); setProductName(''); setProductDescription(''); setProductComponentIds([]);
+    setSelectedProductId(row.id); setProductName(''); setProductCollectionId(''); setProductDescription(''); setProductComponentIds([]);
     tell('Modelo configurado guardado. Se conservó intacto el patrón base.');
   }
   function deleteProduct(product: ConfiguredProductModel) {
@@ -1179,7 +1222,7 @@ export function ProductionModule({
     try {
       keys.forEach((key) => previous.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       keys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(next[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '2');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '3');
       setData(next);
       return true;
     } catch {
@@ -1480,7 +1523,7 @@ export function ProductionModule({
     try {
       productionKeys.forEach((key) => previousProduction.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       productionKeys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(nextData[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '2');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '3');
       localStorage.setItem(FABRIC_STORAGE_KEYS.rollos, JSON.stringify(updatedRolls));
       localStorage.setItem(FABRIC_STORAGE_KEYS.rolloMovimientos, JSON.stringify(nextRollMovements));
       const nextBase = [...baseMovements, ...baseEntries];
@@ -1696,8 +1739,8 @@ export function ProductionModule({
       <form className="production-form" onSubmit={saveProduct}>
         <div className="production-form-grid">
           <label className="field-label">Nombre comercial<input className="large-input" value={productName} onChange={(e) => setProductName(e.target.value)} placeholder="Ej. Polo escolar cuello camisero" required /></label>
+          <div className="field-label production-span-2"><span>Colección *</span><div className="production-collection-control"><select className="large-input" value={productCollectionId} onChange={(e) => setProductCollectionId(e.target.value)} required><option value="">Seleccionar colección guardada</option>{data.productCollections.filter((x) => x.active).slice().sort((a, b) => a.name.localeCompare(b.name, 'es')).map((collection) => <option value={collection.id} key={collection.id}>{collection.name}</option>)}</select><button type="button" className="button secondary" onClick={() => setShowProductCollectionCreator((current) => !current)}>＋ Nueva colección</button></div>{showProductCollectionCreator && <div className="production-collection-create"><input className="large-input" value={newProductCollectionName} onChange={(e) => setNewProductCollectionName(e.target.value)} placeholder="Nombre de la nueva colección" aria-label="Nombre de la nueva colección" /><div className="production-collection-actions"><button type="button" className="button primary" onClick={createProductCollection}>Guardar colección</button><button type="button" className="button secondary" onClick={() => { setShowProductCollectionCreator(false); setNewProductCollectionName(''); }}>Cancelar</button></div></div>}{data.productCollections.filter((x) => x.active).length === 0 && !showProductCollectionCreator && <small>Primero crea una colección; después podrás reutilizarla en otros modelos.</small>}</div>
           <label className="field-label">Patrón base<select className="large-input" value={productBaseId} onChange={(e) => setProductBaseId(e.target.value)} required><option value="">Seleccionar patrón existente</option>{baseModels.map((x) => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label>
-          <label className="field-label">Familia heredada del patrón base<input className="large-input" value={families.find((x) => x.value === baseModels.find((model) => model.id === productBaseId)?.family)?.label ?? ''} placeholder="Selecciona un patrón base" readOnly /><small>No se edita en el modelo comercial. Se toma del patrón base seleccionado.</small></label>
         </div>
         <label className="field-label">Descripción (opcional)<input className="large-input" value={productDescription} onChange={(e) => setProductDescription(e.target.value)} placeholder="Color, temporada, cliente…" /></label>
         <div className="production-subheading"><strong>Componentes y acabados</strong><span className="production-muted">Selecciona los que lleva esta prenda</span></div>
@@ -1712,8 +1755,9 @@ export function ProductionModule({
       <div className="production-list">{data.productModels.filter((x) => x.active).map((product) => {
         const base = baseModels.find((x) => x.id === product.baseModelId);
         const familyLabel = families.find((x) => x.value === base?.family)?.label ?? (base?.family || 'Familia sin definir');
+        const collectionName = data.productCollections.find((collection) => collection.id === product.collectionId)?.name ?? 'Sin colección';
         return <article className="production-card" key={product.id}>
-          <div className="production-card-heading"><div><strong>{product.name}</strong><span>{familyLabel} · Patrón: {base?.name ?? 'No disponible'}</span></div><button className="text-action danger-action" onClick={() => deleteProduct(product)}>Archivar</button></div>
+          <div className="production-card-heading"><div><strong>{product.name}</strong><div className="production-model-meta"><span className="production-family-tag">{familyLabel}</span><span>Colección: {collectionName}</span><span>Patrón: {base?.name ?? 'No disponible'}</span></div></div><button className="text-action danger-action" onClick={() => deleteProduct(product)}>Archivar</button></div>
           <div className="production-attributes">{product.components.map((x) => <span key={x.id}>{data.components.find((c) => c.id === x.componentId)?.name ?? 'Componente archivado'} ×{x.quantity}</span>)}</div>
           <small className="production-muted">El patrón base y su inventario de piezas permanecen independientes.</small>
         </article>;
