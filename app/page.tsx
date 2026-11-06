@@ -111,6 +111,7 @@ export default function Home() {
   const [missingTarget, setMissingTarget] = useState<{ modelId: string; sizeId: string; targetUnits?: number } | null>(null);
   const [showModelForm, setShowModelForm] = useState(false);
   const [showSizeManager, setShowSizeManager] = useState(false);
+  const [returnToModelFormAfterSizeManager, setReturnToModelFormAfterSizeManager] = useState(false);
   const [sizeManagerGroupId, setSizeManagerGroupId] = useState(demoSizeGroups[0].id);
   const [newSizeLabel, setNewSizeLabel] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
@@ -617,6 +618,20 @@ export default function Home() {
     setNoticeMessage(`Talla ${size.label} eliminada.`);
   }
 
+  function openSizeManagerFromModelForm() {
+    setReturnToModelFormAfterSizeManager(true);
+    setSizeManagerGroupId(modelForm.sizeGroupId || sizeGroups[0]?.id || '');
+    setShowSizeManager(true);
+  }
+
+  function closeSizeManager() {
+    setShowSizeManager(false);
+    if (returnToModelFormAfterSizeManager && sizeManagerGroupId && sizeGroups.some((group) => group.id === sizeManagerGroupId)) {
+      setModelForm((previous) => ({ ...previous, sizeGroupId: sizeManagerGroupId }));
+    }
+    setReturnToModelFormAfterSizeManager(false);
+  }
+
   function addSizeGroup() {
     const name = newGroupName.trim();
     if (!name) return;
@@ -626,6 +641,7 @@ export default function Home() {
     const group = { id: newId(), name };
     setSizeGroups((previous) => [...previous, group]);
     setSizeManagerGroupId(group.id);
+    if (returnToModelFormAfterSizeManager) setModelForm((previous) => ({ ...previous, sizeGroupId: group.id }));
     setNewGroupName('');
     setNoticeMessage(`Grupo de tallas ${name} creado.`);
   }
@@ -1158,7 +1174,7 @@ export default function Home() {
           <form onSubmit={saveModel} className="model-form">
             <label className="field-label">Nombre del modelo<input className="large-input" required value={modelForm.name} onChange={(event) => setModelForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="Ej. Polo básico sublimado" /></label>
             <label className="field-label">Familia del patrón base<select className="large-input" required value={modelForm.family} onChange={(event) => setModelForm((prev) => ({ ...prev, family: event.target.value }))}><option value="">Seleccionar familia</option>{baseModelFamilies.map((family) => <option key={family.value} value={family.value}>{family.label}</option>)}</select><small>La familia se define aquí y la heredan los modelos comerciales que usan este patrón.</small></label>
-            <label className="field-label">Grupo de tallas<select className="large-input" required value={modelForm.sizeGroupId} onChange={(event) => setModelForm((prev) => ({ ...prev, sizeGroupId: event.target.value }))} disabled={Boolean(modelForm.editingId && modelForm.pieces.some((piece) => movements.some((movement) => movement.pieceId === piece.id)))}>{sizeGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select><small>Las tallas pertenecen al grupo y se reutilizan en los modelos.</small></label>
+            <label className="field-label">Grupo de tallas<select className="large-input" required value={modelForm.sizeGroupId} onChange={(event) => setModelForm((prev) => ({ ...prev, sizeGroupId: event.target.value }))} disabled={Boolean(modelForm.editingId && modelForm.pieces.some((piece) => movements.some((movement) => movement.pieceId === piece.id)))}><option value="">Seleccionar grupo</option>{sizeGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select><button type="button" className="text-action" onClick={openSizeManagerFromModelForm}>＋ Crear grupo o administrar tallas</button><small>Las tallas pertenecen al grupo y se reutilizan en los modelos.</small></label>
             <div className="form-section-heading"><div><strong>Moldes que componen una prenda</strong><small>En una pieza simétrica, la cantidad incluye ambos lados: 2 piezas = 1 izquierda + 1 derecha.</small></div><div className="mold-heading-actions"><button type="button" className="text-action" onClick={() => setModelForm((prev) => ({ ...prev, secondaryFabricSlots: prev.secondaryFabricSlots + 1 }))}>＋ Añadir tela secundaria</button><button type="button" className="text-action" onClick={() => setModelForm((prev) => ({ ...prev, pieces: [...prev.pieces, { id: '', name: '', unitsPerGarment: '1', laterality: 'ninguna', fabricSlot: 'principal', colorId: prev.pieces[0]?.colorId ?? fabricColors[0]?.id ?? '', colorOverride: false, fabricType: 'Tela principal', color: prev.pieces[0]?.color ?? '' }] }))}>＋ Añadir molde</button></div></div>
             <div className="fabric-slot-summary"><strong>{modelForm.secondaryFabricSlots + 1} ranuras de tela</strong><span>Principal{modelForm.secondaryFabricSlots ? ' · ' + Array.from({ length: modelForm.secondaryFabricSlots }, (_, i) => `Secundaria ${i + 1}`).join(' · ') : ''}</span></div>
             <div className="piece-editor-list">{modelForm.pieces.map((piece, index) => <div className="piece-editor" key={piece.id || `new-${index}`}><div className="piece-editor-top"><span>Molde {index + 1} · orden {index + 1}</span><div className="mold-order-actions"><button type="button" className="order-mold" disabled={index === 0} aria-label="Mover molde arriba" onClick={() => moveMold(index, -1)}>↑</button><button type="button" className="order-mold" disabled={index === modelForm.pieces.length - 1} aria-label="Mover molde abajo" onClick={() => moveMold(index, 1)}>↓</button>{modelForm.pieces.length > 1 && <button type="button" className="remove-piece" onClick={() => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.filter((_, pieceIndex) => pieceIndex !== index) }))}>Quitar</button>}</div></div><div className="piece-editor-fields mold-fields-row"><label className="field-label">Molde<input className="large-input" required value={piece.name} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => pieceIndex === index ? { ...item, name: event.target.value } : item) }))} placeholder="Pecho, cuello…" /></label><label className="field-label">Piezas/prenda<input className="large-input" required type="number" inputMode="numeric" min="1" step="1" value={piece.unitsPerGarment} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => pieceIndex === index ? { ...item, unitsPerGarment: event.target.value } : item) }))} /></label><label className="field-label">Lateralidad<select className="large-input" value={piece.laterality} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => { if (pieceIndex !== index) return item; const laterality = event.target.value as Laterality; const currentUnits = Number(item.unitsPerGarment); const unitsPerGarment = laterality === 'simetrica' && (!Number.isInteger(currentUnits) || currentUnits < 2 || currentUnits % 2 !== 0) ? String(Math.max(2, Math.ceil((currentUnits || 1) / 2) * 2)) : item.unitsPerGarment; return { ...item, laterality, unitsPerGarment }; }) }))}><option value="ninguna">Sin lado</option><option value="simetrica">Simétrica</option><option value="izquierda">Izquierda</option><option value="derecha">Derecha</option></select></label><label className="field-label">Tela asignada<select className="large-input" value={piece.fabricSlot} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => pieceIndex === index ? { ...item, fabricSlot: event.target.value as FabricSlot, fabricType: fabricSlotLabel(event.target.value as FabricSlot) } : item) }))}>{fabricSlotOptions(modelForm.secondaryFabricSlots).map((slot) => <option key={slot} value={slot}>{fabricSlotLabel(slot)}</option>)}</select><small>El material se seleccionará al crear el producto de fabricación.</small></label><label className="field-label">Color base<select className="large-input" value={piece.colorId} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => {
@@ -1173,14 +1189,14 @@ export default function Home() {
         </section>
       </div>}
 
-      {showSizeManager && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowSizeManager(false); }}>
+      {showSizeManager && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeSizeManager(); }}>
         <section className="modal size-manager-modal" role="dialog" aria-modal="true" aria-labelledby="size-manager-title">
-          <div className="modal-heading"><div><div className="eyebrow">CONFIGURACIÓN DE TALLAS</div><h2 id="size-manager-title">Editar grupos y tallas</h2><p>Las tallas se comparten entre modelos del mismo grupo. El orden aquí se usa en los selectores y en el inventario.</p></div><button className="icon-button" onClick={() => setShowSizeManager(false)} aria-label="Cerrar">×</button></div>
+          <div className="modal-heading"><div><div className="eyebrow">CONFIGURACIÓN DE TALLAS</div><h2 id="size-manager-title">Editar grupos y tallas</h2><p>Las tallas se comparten entre modelos del mismo grupo. El orden aquí se usa en los selectores y en el inventario.</p></div><button className="icon-button" onClick={closeSizeManager} aria-label="Cerrar">×</button></div>
           <div className="size-manager-groups"><label className="field-label">Grupo de tallas<select className="large-input" value={sizeManagerGroupId} onChange={(event) => setSizeManagerGroupId(event.target.value)}>{sizeGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label><div className="add-group-row"><input className="large-input" value={newGroupName} onChange={(event) => setNewGroupName(event.target.value)} placeholder="Nuevo grupo: p. ej. Medias" /><button type="button" className="button secondary" onClick={addSizeGroup}>Crear grupo</button></div></div>
           <div className="add-size-row"><input className="large-input" value={newSizeLabel} onChange={(event) => setNewSizeLabel(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addSize(); } }} placeholder="Nueva talla: T4, S, M, 6 a 9 años…" /><button type="button" className="button primary" onClick={addSize}>＋ Agregar talla</button></div>
           <div className="size-manager-list">{groupSizes(sizeManagerGroupId).map((size, index) => <div className="size-manager-row" key={size.id}><span className="size-order">{index + 1}</span><input className="large-input" aria-label={`Nombre de talla ${size.label}`} value={size.label} onChange={(event) => renameSize(size.id, event.target.value)} /><div className="size-manager-actions"><button type="button" className="order-mold" disabled={index === 0} onClick={() => reorderSize(size.id, -1)} aria-label="Subir talla">↑</button><button type="button" className="order-mold" disabled={index === groupSizes(sizeManagerGroupId).length - 1} onClick={() => reorderSize(size.id, 1)} aria-label="Bajar talla">↓</button><button type="button" className="remove-piece" onClick={() => deleteSize(size)}>Eliminar</button></div></div>)}{groupSizes(sizeManagerGroupId).length === 0 && <div className="empty">Este grupo todavía no tiene tallas. Agrega la primera arriba.</div>}</div>
           <div className="symmetry-help">Si una talla ya tiene movimientos, no se elimina físicamente para no romper el historial. Puedes renombrarla o dejar de usarla. Los cambios de nombre y orden se guardan automáticamente en este prototipo.</div>
-          <div className="form-actions"><button type="button" className="button primary" onClick={() => setShowSizeManager(false)}>Listo</button></div>
+          <div className="form-actions"><button type="button" className="button primary" onClick={closeSizeManager}>Listo</button></div>
         </section>
       </div>}
 
