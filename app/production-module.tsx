@@ -2400,6 +2400,41 @@ export function ProductionModule({
             <button type="button" className="text-action" onClick={() => openQuickTextile({ kind: 'product', slot })}>＋ Crear tela y asignarla aquí</button>
           </label>)}</div>
         </section>}
+        {selectedProductBasePattern && <section className="product-fabric-assignment-section">
+          <div className="production-subheading"><strong>Colores del modelo</strong><span className="production-muted">Asigna el color definitivo a cada posición</span></div>
+          <p className="production-muted">El patrón conserva referencias como Color principal 1 y Color secundario 1. Aquí eliges los colores concretos del modelo comercial.</p>
+          {textileContext.colores.length === 0 && <div className="notice info">No hay colores en el catálogo global. Crea el primero desde cualquiera de las posiciones.</div>}
+          <div className="product-fabric-slots">{selectedProductColorSlots.map((slot) => <label className="field-label" key={slot}>
+            <span>{productColorSlotLabel(slot)}</span>
+            <select className="large-input" value={productColorAssignments[slot] ?? ''} disabled={textileContext.colores.length === 0} onChange={(e) => setProductColorAssignments((current) => ({ ...current, [slot]: e.target.value }))} required>
+              <option value="">Seleccionar color del catálogo</option>
+              {textileContext.colores.slice().sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')).map((color) => <option key={color.id} value={color.id}>{color.nombre}</option>)}
+            </select>
+            <button type="button" className="text-action" onClick={() => openQuickProductColor(slot)}>＋ Crear color y asignarlo aquí</button>
+          </label>)}</div>
+        </section>}
+        {selectedProductBaseWildcardPieces.length > 0 && <section className="product-fabric-assignment-section">
+          <div className="production-subheading"><strong>Asignaciones de moldes comodín</strong><span className="production-muted">Solo para este modelo comercial</span></div>
+          <p className="production-muted">Estos moldes del patrón se definieron como «Cualquier tela» o «Cualquier color». Selecciona aquí sus valores concretos sin modificar el patrón reutilizable.</p>
+          {selectedProductBaseWildcardPieces.map((piece) => {
+            const key = 'base:' + piece.id;
+            const current = productPieceOverrides[key] ?? { textileId: null, colorId: null };
+            const colorSlot = piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna');
+            return <article className="product-material-spec-card" key={piece.id}>
+              <strong>{piece.name}</strong>
+              {piece.fabricSlot === 'cualquiera' && <label className="field-label">Tela concreta
+                <select className="large-input" value={current.textileId ?? ''} onChange={(event) => setProductPieceOverrides((state) => ({ ...state, [key]: { ...current, textileId: event.target.value || null } }))} required>
+                  <option value="">Seleccionar tela</option>{activeTextiles.map((textile) => <option key={textile.id} value={textile.id}>{textile.nombreTela}</option>)}
+                </select>
+              </label>}
+              {colorSlot === 'cualquiera' && <label className="field-label">Color concreto
+                <select className="large-input" value={current.colorId ?? ''} onChange={(event) => setProductPieceOverrides((state) => ({ ...state, [key]: { ...current, colorId: event.target.value || null } }))} required>
+                  <option value="">Seleccionar color</option>{textileContext.colores.map((color) => <option key={color.id} value={color.id}>{color.nombre}</option>)}
+                </select>
+              </label>}
+            </article>;
+          })}
+        </section>}
         <label className="field-label">Descripción (opcional)<input className="large-input" value={productDescription} onChange={(e) => setProductDescription(e.target.value)} placeholder="Color, temporada, cliente…" /></label>
         <div className="production-subheading"><strong>Componentes y acabados</strong><span className="production-muted">Selecciona los que lleva esta prenda</span></div>
         {data.components.filter((x) => x.active).length === 0 && <div className="notice info"><span>Esta prenda todavía no tiene componentes. Puedes continuar sin ellos o crear uno ahora.</span><button type="button" className="button secondary" onClick={createComponentFromProduct}>＋ Crear componente y volver</button></div>}
@@ -2417,6 +2452,28 @@ export function ProductionModule({
           }} />
           <span><strong>{component.name}</strong><small>{component.type} · {component.materials.length} materiales asociados</small></span>
         </label>)}</div>
+        {selectedProductComponentWildcardPieces.length > 0 && <section className="product-fabric-assignment-section">
+          <div className="production-subheading"><strong>Asignaciones de componentes comodín</strong><span className="production-muted">Valores específicos de esta prenda</span></div>
+          <p className="production-muted">Cuando una pieza de la biblioteca permite «Cualquier tela» o «Cualquier color», concreta aquí su material y color para este modelo.</p>
+          {selectedProductComponentWildcardPieces.map(({ component, piece }) => {
+            const key = component.id + ':' + piece.id;
+            const current = productPieceOverrides[key] ?? { textileId: null, colorId: null };
+            const colorSlot = piece.colorSlot ?? (piece.colorId ? 'principal' : 'cualquiera');
+            return <article className="product-material-spec-card" key={key}>
+              <strong>{component.name} · {piece.name}</strong>
+              {piece.fabricSlot === 'cualquiera' && <label className="field-label">Tela concreta
+                <select className="large-input" value={current.textileId ?? ''} onChange={(event) => setProductPieceOverrides((state) => ({ ...state, [key]: { ...current, textileId: event.target.value || null } }))} required>
+                  <option value="">Seleccionar tela</option>{activeTextiles.map((textile) => <option key={textile.id} value={textile.id}>{textile.nombreTela}</option>)}
+                </select>
+              </label>}
+              {colorSlot === 'cualquiera' && <label className="field-label">Color concreto
+                <select className="large-input" value={current.colorId ?? ''} onChange={(event) => setProductPieceOverrides((state) => ({ ...state, [key]: { ...current, colorId: event.target.value || null } }))} required>
+                  <option value="">Seleccionar color</option>{textileContext.colores.map((color) => <option key={color.id} value={color.id}>{color.nombre}</option>)}
+                </select>
+              </label>}
+            </article>;
+          })}
+        </section>}
         {selectedProductMaterialRows.length > 0 && <section className="product-material-spec-section">
           <div className="production-subheading"><strong>Características de avíos por talla</strong><span className="production-muted">Se configuran para este modelo, no en el inventario.</span></div>
           <p className="production-muted">Agrupa las tallas que comparten una misma medida. Solo se mostrarán las tallas del patrón base «{selectedProductBasePattern?.name ?? 'seleccionado'}».</p>
