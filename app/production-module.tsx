@@ -473,7 +473,7 @@ type QuickMaterialDraft = {
   variantName: string;
 };
 type QuickMaterialCreated = { supply: Supply; variant: SupplyVariant };
-type QuickTextileTarget = { kind: 'product'; slot: string } | { kind: 'component'; pieceId: string };
+type QuickTextileTarget = { kind: 'product'; slot: string } | { kind: 'existingProduct'; slot: string } | { kind: 'component'; pieceId: string };
 type QuickTextileDraft = { target: QuickTextileTarget; name: string; unit: 'KG' | 'M'; width: string; theoreticalYield: string; description: string };
 
 function MaterialEditor({
@@ -808,6 +808,9 @@ export function ProductionModule({
       if (target.kind === 'product') {
         const slot = target.slot;
         setProductFabricAssignments((current) => ({ ...current, [slot]: textile.id }));
+      } else if (target.kind === 'existingProduct') {
+        const slot = target.slot;
+        setEditingProductFabricAssignments((current) => ({ ...current, [slot]: textile.id }));
       } else {
         const pieceId = target.pieceId;
         setComponentDraft((current) => current ? {
@@ -2279,9 +2282,10 @@ export function ProductionModule({
                 {activeTextiles.map((textile) => <option key={textile.id} value={textile.id}>{textile.nombreTela}</option>)}
                 {archivedTextile && <option value={archivedTextile.id} disabled>{archivedTextile.nombreTela} · archivada</option>}
               </select>
+              <button type="button" className="text-action" onClick={() => openQuickTextile({ kind: 'existingProduct', slot })}>＋ Crear tela y asignarla aquí</button>
             </label>;
           })}</div>
-          {activeTextiles.length === 0 && <div className="notice info">No hay telas activas. Activa una tela en el catálogo antes de guardar.</div>}
+          {activeTextiles.length === 0 && <div className="notice info">No hay telas activas todavía. Crea una desde cualquiera de las posiciones y quedará seleccionada aquí.</div>}
           <div className="form-actions">
             <button type="button" className="button secondary" onClick={() => { setEditingProductFabricId(''); setEditingProductFabricAssignments({}); }}>Cancelar</button>
             <button className="button primary" disabled={activeTextiles.length === 0}>Guardar telas</button>
