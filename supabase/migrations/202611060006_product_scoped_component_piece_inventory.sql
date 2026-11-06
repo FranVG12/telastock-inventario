@@ -50,7 +50,7 @@ where movement.source_production_order_id = production_order.id
 -- A component-only movement can be assigned safely only when one product model
 -- references that component. When it is shared, leave it unassigned for review.
 with single_product_component as (
-  select component_id, min(product_model_id) as product_model_id
+  select component_id, (array_agg(product_model_id order by product_model_id))[1] as product_model_id
   from public.configured_product_components
   group by component_id
   having count(distinct product_model_id) = 1
@@ -91,6 +91,7 @@ declare
   v_owner_id uuid;
   v_product_active boolean;
   v_order_product_id uuid;
+  v_order_status text;
   v_balance numeric(18,5);
   v_lock_key bigint;
 begin
@@ -110,12 +111,26 @@ begin
     raise exception 'La pieza no pertenece al componente indicado.';
   end if;
 
+  if new.source_production_order_id is not null then
+    select product_model_id, status
+      into v_order_product_id, v_order_status
+    from public.production_orders
+    where id = new.source_production_order_id;
+
+    if v_order_product_id is distinct from new.product_model_id then
+      raise exception 'El movimiento no pertenece al modelo de prenda de la orden.';
+    end if;
+  end if;
+
   select is_active into v_product_active
   from public.configured_product_models
   where id = new.product_model_id;
 
-  if coalesce(v_product_active, false) is not true then
-    raise exception 'El modelo de prenda no existe o está archivado.';
+  -- An archived model cannot receive manual movements, but a production order
+  -- already in progress may still need to post its confirmed consumption.
+  if coalesce(v_product_active, false) is not true
+     and (new.source_production_order_id is null or v_order_status <> 'en_proceso') then
+    raise exception 'El modelo de prenda está archivado y no admite movimientos manuales.';
   end if;
 
   if not exists (
@@ -125,16 +140,6 @@ begin
       and selected.component_id = new.component_id
   ) then
     raise exception 'El componente no forma parte del modelo de prenda seleccionado.';
-  end if;
-
-  if new.source_production_order_id is not null then
-    select product_model_id into v_order_product_id
-    from public.production_orders
-    where id = new.source_production_order_id;
-
-    if v_order_product_id is distinct from new.product_model_id then
-      raise exception 'El movimiento no pertenece al modelo de prenda de la orden.';
-    end if;
   end if;
 
   if (v_laterality = 'simetrica' and new.side is null)
