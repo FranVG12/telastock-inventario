@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { getCompleteUnits, getPieceStock, getSymmetricStock, type PieceMovement as DomainPieceMovement, type ManufacturingModel, type ModelPiece, type Size, type SizeGroup } from '@/lib/inventory-domain';
-import { FABRIC_STORAGE_KEYS, type RollMovement as FabricRollMovement } from '@/app/fabric-module';
+import { FABRIC_STORAGE_KEYS, createGlobalColorQuickly, createTextileQuickly, type RollMovement as FabricRollMovement } from '@/app/fabric-module';
 
 export type ProductionView = 'insumos' | 'compras-avios' | 'componentes' | 'modelos-producto' | 'recetas' | 'planificacion' | 'ordenes';
 export type StockUnit = 'und' | 'm' | 'cm' | 'g' | 'kg' | 'l' | 'ml';
@@ -464,27 +464,80 @@ type RollRow = { id: string; idTela: string; idTelaColor?: string | null; unidad
 type SupplierOption = { id: string; nombre: string; ruc?: string | null };
 type TextileContext = { telas: TextileRow[]; rollos: RollRow[]; telaColores: TextileColorRow[]; colores: ColorRow[]; proveedores: SupplierOption[] };
 type PurchaseLineDraft = { id: string; variantId: string; sizeId: string; quantity: string; unitPrice: string };
+type QuickMaterialDraft = {
+  existingSupplyId: string;
+  supplyName: string;
+  category: SupplyCategory;
+  baseUnit: StockUnit;
+  stockMode: 'total' | 'talla';
+  variantName: string;
+};
+type QuickMaterialCreated = { supply: Supply; variant: SupplyVariant };
 
 function MaterialEditor({
-  materials, onChange, variants, sizes, title,
+  materials, onChange, variants, supplies, sizes, title, onCreateSupplyVariant,
 }: {
   materials: MaterialRequirement[];
   onChange: (items: MaterialRequirement[]) => void;
   variants: SupplyVariant[];
+  supplies: Supply[];
   sizes: Size[];
   title: string;
+  onCreateSupplyVariant: (draft: QuickMaterialDraft) => QuickMaterialCreated | null;
 }) {
-  const variantOptions = variants.map((variant) => ({ variant, label: variantLabel(variant, variants, undefined) }));
+  const variantOptions = variants.map((variant) => ({ variant, label: variantLabel(variant, variants, supplies) }));
+  const [showQuickMaterial, setShowQuickMaterial] = useState(false);
+  const [quickMaterialDraft, setQuickMaterialDraft] = useState<QuickMaterialDraft>({
+    existingSupplyId: supplies.find((item) => item.active)?.id ?? '',
+    supplyName: '', category: 'Otros avíos', baseUnit: 'und', stockMode: 'total', variantName: '',
+  });
+  function openQuickMaterial() {
+    setQuickMaterialDraft({
+      existingSupplyId: supplies.find((item) => item.active)?.id ?? '',
+      supplyName: '', category: 'Otros avíos', baseUnit: 'und', stockMode: 'total', variantName: '',
+    });
+    setShowQuickMaterial((current) => !current);
+  }
+  function saveQuickMaterial() {
+    const created = onCreateSupplyVariant(quickMaterialDraft);
+    if (!created) return;
+    onChange([...materials, {
+      id: id(), variantId: created.variant.id, mode: 'fixed',
+      unit: created.supply.baseUnit, fixedQuantity: 1, bySize: {}, wastePercent: 0,
+    }]);
+    setShowQuickMaterial(false);
+  }
   function update(index: number, patch: Partial<MaterialRequirement>) {
     onChange(materials.map((item, i) => i === index ? { ...item, ...patch } : item));
   }
   function add() {
     const first = variants[0];
     if (!first) return;
-    onChange([...materials, { id: id(), variantId: first.id, mode: 'fixed', unit: 'und', fixedQuantity: 1, bySize: {}, wastePercent: 0 }]);
+    const supply = supplies.find((item) => item.id === first.supplyId);
+    onChange([...materials, { id: id(), variantId: first.id, mode: 'fixed', unit: supply?.baseUnit ?? 'und', fixedQuantity: 1, bySize: {}, wastePercent: 0 }]);
   }
   return <div className="production-material-editor">
-    <div className="production-subheading"><strong>{title}</strong><button type="button" className="text-action" disabled={variants.length === 0} onClick={add}>＋ Agregar material</button></div>
+    <div className="production-subheading"><strong>{title}</strong><div className="production-material-actions"><button type="button" className="text-action" disabled={variants.length === 0} onClick={add}>＋ Agregar material</button><button type="button" className="text-action" onClick={openQuickMaterial}>＋ Crear insumo y variante</button></div></div>
+    {showQuickMaterial && <div className="production-quick-material">
+      <strong>Crear material para este consumo</strong>
+      {supplies.filter((item) => item.active).length > 0 && <label className="field-label">Usar insumo existente
+        <select className="large-input" value={quickMaterialDraft.existingSupplyId} onChange={(event) => setQuickMaterialDraft((current) => ({ ...current, existingSupplyId: event.target.value }))}>
+          <option value="">＋ Crear un insumo nuevo</option>
+          {supplies.filter((item) => item.active).map((item) => <option key={item.id} value={item.id}>{item.name} · {unitLabel[item.baseUnit]}</option>)}
+        </select>
+      </label>}
+      {!quickMaterialDraft.existingSupplyId && <>
+        <label className="field-label">Nombre del insumo<input className="large-input" value={quickMaterialDraft.supplyName} onChange={(event) => setQuickMaterialDraft((current) => ({ ...current, supplyName: event.target.value }))} placeholder="Ej. Cinta elástica" /></label>
+        <div className="production-form-grid">
+          <label className="field-label">Categoría<select className="large-input" value={quickMaterialDraft.category} onChange={(event) => setQuickMaterialDraft((current) => ({ ...current, category: event.target.value as SupplyCategory }))}>{categories.map((category) => <option key={category}>{category}</option>)}</select></label>
+          <label className="field-label">Unidad de inventario<select className="large-input" value={quickMaterialDraft.baseUnit} onChange={(event) => setQuickMaterialDraft((current) => ({ ...current, baseUnit: event.target.value as StockUnit }))}>{units.map((unit) => <option key={unit} value={unit}>{unitLabel[unit]}</option>)}</select></label>
+        </div>
+        <label className="field-label">Control de stock<select className="large-input" value={quickMaterialDraft.stockMode} onChange={(event) => setQuickMaterialDraft((current) => ({ ...current, stockMode: event.target.value as 'total' | 'talla' }))}><option value="total">Cantidad total</option><option value="talla">Separado por talla</option></select></label>
+      </>}
+      <label className="field-label">Variante inicial<input className="large-input" value={quickMaterialDraft.variantName} onChange={(event) => setQuickMaterialDraft((current) => ({ ...current, variantName: event.target.value }))} placeholder="Ej. Negro · 3.5 cm · Estándar" /></label>
+      <small>Se creará y se añadirá directamente a esta receta o componente. Después podrás completar sus detalles y presentaciones en Insumos y avíos.</small>
+      <div className="production-quick-material-actions"><button type="button" className="button secondary" onClick={() => setShowQuickMaterial(false)}>Cancelar</button><button type="button" className="button primary" onClick={saveQuickMaterial}>Guardar y usar</button></div>
+    </div>}
     {materials.length === 0 && <p className="production-muted">Todavía no has agregado materiales.</p>}
     {materials.map((material, index) => {
       const variant = variants.find((x) => x.id === material.variantId);
