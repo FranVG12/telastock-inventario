@@ -161,7 +161,7 @@ La rama de trabajo feature/componentes-insumos incorpora un módulo local-first 
 - **Insumos y avíos:** catálogo por categoría, unidad base, modalidad de stock total o por talla, características adicionales y variantes comerciales (color, ancho, material, calibre, presentación, etc.).
 - **Variantes y existencias:** el stock se registra mediante movimientos de entrada/salida. Las presentaciones comerciales guardan su equivalencia declarada; no se inventan conversiones entre unidades incompatibles.
 - **Vinculación textil:** una variante puede referenciar una tela y un color ya existentes. Si se vincula a un rollo, el stock se consulta desde el inventario de rollos; el nuevo módulo no crea un saldo paralelo ni consume rollos automáticamente.
-- **Componentes reutilizables:** biblioteca de cuellos, bolsillos, puños, pretinas, tapeteras y otros acabados, con piezas auxiliares, lateralidad y consumos de materiales.
+- **Componentes reutilizables:** biblioteca de cuellos, bolsillos, puños, pretinas, tapeteras y otros acabados, con piezas auxiliares, lateralidad y consumos de materiales. Cada pieza puede enlazar una tela del catálogo existente (o quedar sin tela) y un color del catálogo global por identificador.
 - **Modelos configurados:** una prenda comercial referencia un patrón base, elige una colección guardada y selecciona componentes. La colección vive en un catálogo normalizado reutilizable. La familia se hereda del patrón base y se muestra como una etiqueta compacta fuera del formulario; no se captura de nuevo en el modelo comercial.
 - **Recetas estándar:** consumos compartidos por familia (polo, buzo y casaca), con consumo fijo o diferenciado por talla y porcentaje de desperdicio.
 - **Planificación:** estima materiales requeridos, disponibilidad y faltantes por variante, talla y presentación de compra. Es una simulación: no descuenta stock ni genera órdenes de compra.
@@ -176,7 +176,7 @@ No se debe sumar KG con metros ni inferir metros a partir de KG sin un rendimien
 
 ### Respaldo y migración
 
-El respaldo completo usa schemaVersion 7 e incluye el catálogo de colecciones y su relación con los modelos comerciales. e incluye insumos, variantes, movimientos, componentes, recetas y modelos configurados. Se mantienen importables los respaldos completos de versiones 1, 2 y 3; al restaurar uno antiguo, las nuevas colecciones se inicializan vacías.
+El respaldo completo usa schemaVersion 8 e incluye insumos, variantes, movimientos, componentes, recetas, colecciones y modelos configurados. Se mantienen importables los respaldos completos de versiones anteriores; los campos opcionales de tela y color de piezas auxiliares se normalizan al restaurar.
 
 La migración 202611060001_supplies_components_product_models.sql define el esquema relacional futuro. **No se ejecuta automáticamente** y no conecta la aplicación con Supabase. Las tablas nuevas mantienen RLS habilitado sin políticas permisivas, igual que el resto del esquema pendiente de configuración de autenticación y acceso.
 
