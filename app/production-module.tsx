@@ -144,6 +144,15 @@ export type ProductCollection = {
   updatedAt: string;
 };
 
+export type ProductFabricAssignment = {
+  id: string;
+  productModelId: string;
+  fabricSlot: string;
+  textileId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ConfiguredProductModel = {
   id: string;
   name: string;
@@ -200,6 +209,7 @@ export type ProductionBackupData = {
   familyRecipes: FamilyRecipe[];
   productCollections: ProductCollection[];
   productModels: ConfiguredProductModel[];
+  productFabrics: ProductFabricAssignment[];
 };
 
 export const PRODUCTION_STORAGE_KEYS = {
@@ -215,10 +225,11 @@ export const PRODUCTION_STORAGE_KEYS = {
   familyRecipes: 'telastock-family-recipes-v1',
   productCollections: 'telastock-product-collections-v1',
   productModels: 'telastock-configured-product-models-v1',
+  productFabrics: 'telastock-configured-product-fabrics-v1',
 } as const;
 
 export function emptyProductionBackupData(): ProductionBackupData {
-  return { supplies: [], variants: [], supplyMovements: [], supplyPurchases: [], supplyPurchaseDetails: [], componentPieceMovements: [], productionOrders: [], components: [], familyRecipes: [], productCollections: [], productModels: [] };
+  return { supplies: [], variants: [], supplyMovements: [], supplyPurchases: [], supplyPurchaseDetails: [], componentPieceMovements: [], productionOrders: [], components: [], familyRecipes: [], productCollections: [], productModels: [], productFabrics: [] };
 }
 
 export function validateProductionBackupData(value: unknown): ProductionBackupData {
@@ -393,6 +404,11 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
   if (!output.productModels.every((x) => x.name.trim() && (x.collectionId === null || x.collectionId === undefined || productCollectionIds.has(x.collectionId)) && typeof x.baseModelId === 'string' && Array.isArray(x.components) && x.components.every((c) => componentIds.has(c.componentId) && Number.isFinite(c.quantity) && c.quantity > 0) && validMaterials(x.additionalMaterials))) {
     throw new Error('Hay modelos configurados con componentes o materiales inválidos.');
   }
+  const productModelIds = new Set(output.productModels.map((product) => product.id));
+  const productFabricKeys = output.productFabrics.map((assignment) => assignment.productModelId + ':' + assignment.fabricSlot);
+  if (!output.productFabrics.every((assignment) => productModelIds.has(assignment.productModelId) && typeof assignment.fabricSlot === 'string' && assignment.fabricSlot.trim() && typeof assignment.textileId === 'string' && assignment.textileId.trim() && typeof assignment.createdAt === 'string' && typeof assignment.updatedAt === 'string') || new Set(productFabricKeys).size !== productFabricKeys.length) {
+    throw new Error('Hay asignaciones de tela duplicadas o vinculadas a modelos inexistentes.');
+  }
   if (!output.supplies.every((x) => x.name.trim() && ['total', 'talla'].includes(x.stockMode) && ['und', 'm', 'cm', 'g', 'kg', 'l', 'ml'].includes(x.baseUnit))) {
     throw new Error('Hay insumos con unidades o modalidad de inventario inválidas.');
   }
@@ -414,6 +430,8 @@ const families = [
 const componentTypes = ['Cuello', 'Bolsillo', 'Puño', 'Pretina', 'Tapetera', 'Cierre', 'Terminación', 'Otro'];
 const unitLabel: Record<StockUnit, string> = { und: 'unidades', m: 'm', cm: 'cm', g: 'g', kg: 'kg', l: 'l', ml: 'ml' };
 const id = () => typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : 'prod-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+const productFabricSlotsForBaseModel = (model: ManufacturingModel) => ['principal', ...Array.from({ length: Math.max(0, Math.floor(model.secondaryFabricSlots ?? 0)) }, (_, index) => 'secundaria_' + (index + 1))];
+const productFabricSlotLabel = (slot: string) => slot === 'principal' ? 'Tela principal 1' : slot.replace(/^secundaria_(\\d+)$/, 'Tela secundaria $1');
 const now = () => new Date().toISOString();
 const numberOrNull = (value: string) => value.trim() === '' ? null : Number(value);
 const format = (value: number) => new Intl.NumberFormat('es-PE', { maximumFractionDigits: 3 }).format(value);
