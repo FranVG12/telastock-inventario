@@ -507,7 +507,7 @@ const conversionFactor = (from: StockUnit, to: StockUnit): number | null => {
 };
 
 type TextileRow = { id: string; nombreTela: string; unidadVenta: 'KG' | 'M'; activo?: boolean };
-type TextileColorRow = { id: string; idTela: string; idColor: string; activo: boolean };
+type TextileColorRow = { id: string; idTela: string; idColor: string; hexadecimal?: string | null; cmykC?: number | null; cmykM?: number | null; cmykY?: number | null; cmykK?: number | null; activo: boolean; createdAt?: string; updatedAt?: string };
 type ColorRow = { id: string; nombre: string };
 type RollRow = { id: string; idTela: string; idTelaColor?: string | null; unidadIngreso?: 'KG' | 'M'; metros: number | null; pesoKg: number | null; estado: string; fechaIngreso?: string; updatedAt?: string; ubicacion?: string; idLote?: string };
 type SupplierOption = { id: string; nombre: string; ruc?: string | null };
@@ -1297,6 +1297,18 @@ export function ProductionModule({
     tell('Colección creada y seleccionada.');
   }
 
+  function ensureProductTextileColorAssociation(textileId: string | null | undefined, colorId: string | null | undefined) {
+    if (!textileId || !colorId) return;
+    const rows = safeRead<TextileColorRow[]>(FABRIC_STORAGE_KEYS.telaColores, []);
+    if (rows.some((row) => row.idTela === textileId && row.idColor === colorId)) return;
+    const timestamp = now();
+    const row: TextileColorRow = { id: id(), idTela: textileId, idColor: colorId, hexadecimal: null, cmykC: null, cmykM: null, cmykY: null, cmykK: null, activo: true, createdAt: timestamp, updatedAt: timestamp };
+    const next = [...rows, row];
+    localStorage.setItem(FABRIC_STORAGE_KEYS.telaColores, JSON.stringify(next));
+    setTextileContext((current) => ({ ...current, telaColores: next }));
+    window.dispatchEvent(new Event('telastock-fabric-data-updated'));
+  }
+
   function saveProduct(event: FormEvent) {
     event.preventDefault();
     const selectedBaseModel = baseModels.find((x) => x.id === productBaseId);
@@ -1377,6 +1389,21 @@ export function ProductionModule({
       });
     }
 
+    // Ensure every concrete textile/color pair used by this product has a textile-specific color variant.
+    basePieces.filter((piece) => piece.modelId === selectedBaseModel.id && !piece.archived).forEach((piece) => {
+      const slot = piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna');
+      const override = basePieceOverrides[piece.id];
+      const textileId = piece.fabricSlot === 'cualquiera' ? override?.textileId : productFabricAssignments[piece.fabricSlot];
+      const colorId = slot === 'cualquiera' ? override?.colorId : slot === 'ninguna' ? null : productColorAssignments[slot];
+      ensureProductTextileColorAssociation(textileId, colorId);
+    });
+    selectedComponents.forEach((component) => component.pieces.forEach((piece) => {
+      const slot = piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna');
+      const override = productPieceOverrides[component.id + ':' + piece.id];
+      const textileId = piece.fabricSlot === 'cualquiera' ? override?.textileId : piece.fabricSlot === 'ninguna' ? null : productFabricAssignments[piece.fabricSlot];
+      const colorId = slot === 'cualquiera' ? override?.colorId : slot === 'ninguna' ? null : productColorAssignments[slot];
+      ensureProductTextileColorAssociation(textileId, colorId);
+    }));
     const timestamp = now();
     const row: ConfiguredProductModel = {
       id: id(), name: productName.trim(), collectionId: selectedCollection.id, baseModelId: productBaseId, description: productDescription.trim(),
@@ -2388,8 +2415,8 @@ export function ProductionModule({
           <label className="field-label">Nombre comercial<input className="large-input" value={productName} onChange={(e) => setProductName(e.target.value)} placeholder="Ej. Polo escolar cuello camisero" required /></label>
           <div className="field-label production-span-2"><span>Colección *</span><div className="production-collection-control"><select className="large-input" value={productCollectionId} onChange={(e) => setProductCollectionId(e.target.value)} required><option value="">Seleccionar colección guardada</option>{data.productCollections.filter((x) => x.active).slice().sort((a, b) => a.name.localeCompare(b.name, 'es')).map((collection) => <option value={collection.id} key={collection.id}>{collection.name}</option>)}</select><button type="button" className="button secondary" onClick={() => setShowProductCollectionCreator((current) => !current)}>＋ Nueva colección</button></div>{showProductCollectionCreator && <div className="production-collection-create"><input className="large-input" value={newProductCollectionName} onChange={(e) => setNewProductCollectionName(e.target.value)} placeholder="Nombre de la nueva colección" aria-label="Nombre de la nueva colección" /><div className="production-collection-actions"><button type="button" className="button primary" onClick={createProductCollection}>Guardar colección</button><button type="button" className="button secondary" onClick={() => { setShowProductCollectionCreator(false); setNewProductCollectionName(''); }}>Cancelar</button></div></div>}{data.productCollections.filter((x) => x.active).length === 0 && !showProductCollectionCreator && <small>Primero crea una colección; después podrás reutilizarla en otros modelos.</small>}</div>
           <div className="product-base-pattern-field">
-            <label className="field-label">Patrón base<select className="large-input" value={productBaseId} onChange={(e) => { setProductBaseId(e.target.value); setProductFabricAssignments({}); }} required><option value="">Seleccionar patrón existente</option>{baseModels.map((x) => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label>
-            <button type="button" className="text-action" onClick={() => onQuickCreateBaseModel((modelId) => { setProductBaseId(modelId); setProductFabricAssignments({}); })}>＋ Crear patrón base</button>
+            <label className="field-label">Patrón base<select className="large-input" value={productBaseId} onChange={(e) => { setProductBaseId(e.target.value); setProductFabricAssignments({}); setProductColorAssignments({}); setProductPieceOverrides({}); }} required><option value="">Seleccionar patrón existente</option>{baseModels.map((x) => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label>
+            <button type="button" className="text-action" onClick={() => onQuickCreateBaseModel((modelId) => { setProductBaseId(modelId); setProductFabricAssignments({}); setProductColorAssignments({}); setProductPieceOverrides({}); })}>＋ Crear patrón base</button>
             {baseModels.length === 0 && <small>No hay patrones disponibles. Crea uno aquí; al guardarlo aparecerá en esta lista.</small>}
           </div>
           <div className="product-inherited-size-tag"><span>Tallas heredadas</span><strong>{sizeGroups.find((group) => group.id === selectedProductBasePattern?.sizeGroupId)?.name ?? 'Selecciona un patrón base'}</strong></div>
