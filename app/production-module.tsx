@@ -2530,13 +2530,28 @@ export function ProductionModule({
           const textile = assignment ? textileContext.telas.find((item) => item.id === assignment.textileId) : undefined;
           return productFabricSlotLabel(slot) + ': ' + (textile?.nombreTela ?? 'Sin asignar');
         }).join(' · ') : 'Sin patrón base';
+        const productColorRows = data.productColors.filter((assignment) => assignment.productModelId === product.id);
+        const productColorSummary = base ? productColorSlotsForBaseModel(base).map((slot) => {
+          const assignment = productColorRows.find((item) => item.colorSlot === slot);
+          const color = assignment ? textileContext.colores.find((item) => item.id === assignment.colorId) : undefined;
+          return productColorSlotLabel(slot) + ': ' + (color?.nombre ?? 'Sin asignar');
+        }).join(' · ') : '';
         const productPieces = product.components.flatMap((selection) => {
           const component = data.components.find((item) => item.id === selection.componentId && item.active);
           return component ? component.pieces.map((piece) => {
-            const textileId = resolveComponentPieceTextileId(product.id, piece.fabricSlot, data.productFabrics);
+            const override = selection.pieceOverrides?.[piece.id];
+            const textileId = piece.fabricSlot === 'cualquiera'
+              ? override?.textileId ?? null
+              : resolveComponentPieceTextileId(product.id, piece.fabricSlot, data.productFabrics);
             const textile = textileId ? textileContext.telas.find((item) => item.id === textileId) : undefined;
-            const fabricDescription = piece.fabricSlot === 'ninguna' ? '' : componentFabricSlotLabel(piece.fabricSlot) + ': ' + (textile?.nombreTela ?? 'Sin asignar');
-            return { component, piece, selection, fabricDescription };
+            const fabricDescription = piece.fabricSlot === 'ninguna' ? '' : (piece.fabricSlot === 'cualquiera' ? 'Tela elegida' : componentFabricSlotLabel(piece.fabricSlot)) + ': ' + (textile?.nombreTela ?? 'Sin asignar');
+            const colorSlot = normalizeComponentColorSlot(piece.colorSlot, piece.colorId);
+            const resolvedColorId = colorSlot === 'cualquiera'
+              ? override?.colorId ?? null
+              : resolveComponentPieceColorId(product.id, colorSlot, data.productColors);
+            const resolvedColorName = resolvedColorId ? componentColorName(resolvedColorId) : (piece.colorId ? componentColorName(piece.colorId) : '');
+            const colorDescription = colorSlot === 'ninguna' ? '' : 'Color: ' + (resolvedColorName || componentColorSlotLabel(colorSlot));
+            return { component, piece, selection, fabricDescription, colorDescription };
           }) : [];
         });
         const inventoryOpen = selectedStockProductModelId === product.id;
@@ -2544,10 +2559,11 @@ export function ProductionModule({
           !movement.productModelId && product.components.some((selection) => selection.componentId === movement.componentId)
         ).length;
         return <article className="production-card" key={product.id}>
-          <div className="production-card-heading"><div><strong>{product.name}</strong><div className="production-model-meta"><span className="production-family-tag">{familyLabel}</span><span>Colección: {collectionName}</span><span>Patrón: {base?.name ?? 'No disponible'}</span><span>Tallas: {productSizeGroup?.name ?? 'No disponible'}</span></div><small className="production-product-fabric-summary">{productFabricSummary}</small></div></div>
+          <div className="production-card-heading"><div><strong>{product.name}</strong><div className="production-model-meta"><span className="production-family-tag">{familyLabel}</span><span>Colección: {collectionName}</span><span>Patrón: {base?.name ?? 'No disponible'}</span><span>Tallas: {productSizeGroup?.name ?? 'No disponible'}</span></div><small className="production-product-fabric-summary">{productFabricSummary}</small><small className="production-product-fabric-summary">{productColorSummary}</small></div></div>
           <div className="production-attributes">{product.components.map((x) => <span key={x.id}>{data.components.find((c) => c.id === x.componentId)?.name ?? 'Componente archivado'} ×{x.quantity}</span>)}</div>
           <div className="production-card-actions">
             <button className="button secondary" onClick={() => openProductFabricEditor(product)}>Configurar telas</button>
+            <button className="button secondary" onClick={() => openProductColorEditor(product)}>Configurar colores</button>
             <button className="button secondary" disabled={productPieces.length === 0 || productSizes.length === 0} onClick={() => { setSelectedStockProductModelId(inventoryOpen ? '' : product.id); setSelectedStockComponentId(''); setComponentStockPieceId(''); }}>
               {inventoryOpen ? 'Ocultar inventario auxiliar' : 'Inventario auxiliar'}
             </button>
@@ -2559,7 +2575,7 @@ export function ProductionModule({
             {unassignedLegacyMovements > 0 && <div className="notice info">Hay {format(unassignedLegacyMovements)} movimientos anteriores de componentes sin modelo asociado. No se suman a este inventario para evitar mezclar prendas. Registra aquí el saldo inicial correcto de este modelo.</div>}
             {productPieces.map(({ component, piece, selection, fabricDescription }) => <article className="production-component-stock-piece" key={selection.id + ':' + piece.id}>
               <div className="production-component-stock-title">
-                <div><strong>{component.name} · {piece.name}</strong><small>{piece.laterality === 'simetrica' ? 'Control por izquierda / derecha' : 'Control por unidades'} · {piece.unitsPerGarment * selection.quantity} por prenda{fabricDescription ? ' · ' + fabricDescription : ''}{piece.colorId ? ' · ' + componentColorName(piece.colorId) : ''}</small></div>
+                <div><strong>{component.name} · {piece.name}</strong><small>{piece.laterality === 'simetrica' ? 'Control por izquierda / derecha' : 'Control por unidades'} · {piece.unitsPerGarment * selection.quantity} por prenda{fabricDescription ? ' · ' + fabricDescription : ''}{colorDescription ? ' · ' + colorDescription : ''}</small></div>
                 <button className="button secondary" onClick={() => openComponentPieceMovement(product.id, component, piece)}>Registrar movimiento</button>
               </div>
               {productSizes.length > 0 ? <div className="production-component-stock-sizes">
@@ -2742,6 +2758,41 @@ export function ProductionModule({
             <button type="button" className="button secondary" onClick={() => { setEditingProductFabricId(''); setEditingProductFabricAssignments({}); }}>Cancelar</button>
             <button className="button primary" disabled={activeTextiles.length === 0}>Guardar telas</button>
           </div>
+        </form>
+      </section>
+    </div>}
+    {editingProductColorId && editingColorProduct && editingColorBasePattern && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) { setEditingProductColorId(''); setEditingProductColorAssignments({}); } }}>
+      <section className="modal production-modal product-fabrics-modal" role="dialog" aria-modal="true" aria-labelledby="product-colors-title">
+        <div className="modal-heading">
+          <div><h2 id="product-colors-title">Colores · {editingColorProduct.name}</h2><p>Asigna los colores concretos que corresponden a las posiciones de este modelo.</p></div>
+          <button className="icon-button" onClick={() => { setEditingProductColorId(''); setEditingProductColorAssignments({}); }}>×</button>
+        </div>
+        <form className="production-form" onSubmit={saveProductColorEditor}>
+          <div className="product-fabric-slots">{editingColorSlots.map((slot) => {
+            const selectedColorId = editingProductColorAssignments[slot] ?? '';
+            return <label className="field-label" key={slot}>
+              <span>{productColorSlotLabel(slot)}</span>
+              <select className="large-input" value={selectedColorId} onChange={(event) => setEditingProductColorAssignments((current) => ({ ...current, [slot]: event.target.value }))} required>
+                <option value="">Seleccionar color del catálogo</option>
+                {textileContext.colores.slice().sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')).map((color) => <option key={color.id} value={color.id}>{color.nombre}</option>)}
+              </select>
+              <button type="button" className="text-action" onClick={() => openQuickProductColor(slot, 'edit')}>＋ Crear color y asignarlo aquí</button>
+            </label>;
+          })}</div>
+          {textileContext.colores.length === 0 && <div className="notice info">No hay colores en el catálogo. Crea uno desde la primera posición.</div>}
+          <div className="form-actions">
+            <button type="button" className="button secondary" onClick={() => { setEditingProductColorId(''); setEditingProductColorAssignments({}); }}>Cancelar</button>
+            <button className="button primary" disabled={textileContext.colores.length === 0}>Guardar colores</button>
+          </div>
+        </form>
+      </section>
+    </div>}
+    {quickProductColorSlot && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setQuickProductColorSlot(''); }}>
+      <section className="modal production-modal product-fabrics-modal" role="dialog" aria-modal="true" aria-labelledby="quick-product-color-title">
+        <div className="modal-heading"><div><h2 id="quick-product-color-title">Nuevo color</h2><p>Se agregará al catálogo global y quedará asignado a {productColorSlotLabel(quickProductColorSlot.split(':').slice(1).join(':'))}.</p></div><button className="icon-button" onClick={() => setQuickProductColorSlot('')}>×</button></div>
+        <form className="production-form" onSubmit={saveQuickProductColor}>
+          <label className="field-label">Nombre del color *<input className="large-input" value={quickProductColorName} onChange={(event) => setQuickProductColorName(event.target.value)} placeholder="Ej. Azul noche" required autoFocus /></label>
+          <div className="form-actions"><button type="button" className="button secondary" onClick={() => setQuickProductColorSlot('')}>Cancelar</button><button className="button primary">Crear y asignar</button></div>
         </form>
       </section>
     </div>}
