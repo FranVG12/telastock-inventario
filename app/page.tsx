@@ -755,7 +755,13 @@ export default function Home() {
           order.componentPieces.every((line) => sizeIds.has(line.sizeId)) &&
           order.rollAllocations.every((allocation) => importedFabric.rollos.some((roll) => roll.id === allocation.rollId))
         );
-      if (!productionSizeLinksValid) throw new Error('Hay órdenes, movimientos o reservas vinculados a tallas, moldes o rollos que no existen en este respaldo.');
+      const componentPieceCatalogLinksValid = Number(raw.schemaVersion) < 8 || importedProduction.components.every((component) =>
+        component.pieces.every((piece) =>
+          (piece.textileId == null || importedFabric.telas.some((textile) => textile.id === piece.textileId)) &&
+          (piece.colorId == null || importedFabric.colores.some((color) => color.id === piece.colorId))
+        )
+      );
+      if (!productionSizeLinksValid || !componentPieceCatalogLinksValid) throw new Error('Hay órdenes, movimientos o piezas auxiliares vinculados a tallas, moldes, telas o colores que no existen en este respaldo.');
       const importedColorMap = new Map(importedFabric.colores.map((color) => [color.nombre.toLocaleLowerCase('es'), color]));
       importedPieces.forEach((piece) => {
         const legacyName = (piece.color ?? '').trim();
