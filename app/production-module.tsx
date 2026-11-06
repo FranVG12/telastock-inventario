@@ -2461,7 +2461,20 @@ export function ProductionModule({
             {plan.rows.map((row) => {
               const variant = variantsBySupply.get(row.variantId)!;
               const supply = supplies.find((x) => x.id === variant.supplyId)!;
-              return <tr key={row.variantId}><td><strong>{supply.name}</strong><small>{variant.name}</small>{row.missingSizes.length > 0 && <em>Consumo pendiente: {row.missingSizes.join(', ')}</em>}</td><td>{format(row.total)} {supply.baseUnit}</td><td>{format(row.available)} {supply.baseUnit}</td><td className={row.shortage > 0 || row.missingSizes.length > 0 ? 'production-shortage' : 'production-ok'}>{format(row.shortage)} {supply.baseUnit}</td><td>{row.packs === null ? (row.shortage > 0 ? 'Sin presentación' : '—') : row.packs + ' ' + (variant.purchasePackLabel || 'paquete(s)')}</td></tr>;
+              const specificationSummary = Object.entries(row.specificationsBySize).map(([sizeId, labels]) =>
+                (sizes.find((size) => size.id === sizeId)?.label ?? 'Talla') + ': ' + labels.join(' · ')
+              );
+              return <tr key={row.variantId}>
+                <td><strong>{supply.name}</strong>{supply.stockMode !== 'none' && <small>{variant.name}</small>}
+                  {specificationSummary.length > 0 && <small>{specificationSummary.join(' · ')}</small>}
+                  {row.missingSizes.length > 0 && <em>Consumo o medida pendiente: {row.missingSizes.join(', ')}</em>}
+                  {supply.stockMode === 'none' && <small className="production-muted">Sin inventario · se compra según las medidas del modelo</small>}
+                </td>
+                <td>{format(row.total)} {supply.baseUnit}</td>
+                <td>{row.available === null ? 'No controlado' : format(row.available) + ' ' + supply.baseUnit}</td>
+                <td className={row.shortage !== null && row.shortage > 0 || row.missingSizes.length > 0 ? 'production-shortage' : 'production-ok'}>{row.shortage === null ? '—' : format(row.shortage) + ' ' + supply.baseUnit}</td>
+                <td>{row.packs === null ? (supply.stockMode === 'none' ? 'Según modelo' : row.shortage !== null && row.shortage > 0 ? 'Sin presentación' : '—') : row.packs + ' ' + (variant.purchasePackLabel || 'paquete(s)')}</td>
+              </tr>;
             })}
           </tbody></table></div>
           <div className="production-order-create">
