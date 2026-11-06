@@ -1326,19 +1326,60 @@ export function ProductionModule({
     if (data.productModels.some((x) => x.name.toLocaleLowerCase('es') === productName.trim().toLocaleLowerCase('es'))) return tell('Ya existe un modelo configurado con ese nombre.', 'error');
 
     const requiredFabricSlots = productFabricSlotsForBaseModel(selectedBaseModel);
+    const requiredColorSlots = productColorSlotsForBaseModel(selectedBaseModel);
     const activeTextileIds = new Set(textileContext.telas.filter((textile) => textile.activo !== false).map((textile) => textile.id));
+    const activeColorIds = new Set(textileContext.colores.map((color) => color.id));
     const missingSlots = requiredFabricSlots.filter((slot) => !activeTextileIds.has(productFabricAssignments[slot] ?? ''));
     if (missingSlots.length > 0) return tell('Asigna una tela del catálogo a: ' + missingSlots.map(productFabricSlotLabel).join(', ') + '.', 'error');
+    const missingColorSlots = requiredColorSlots.filter((slot) => !activeColorIds.has(productColorAssignments[slot] ?? ''));
+    if (missingColorSlots.length > 0) return tell('Asigna un color del catálogo a: ' + missingColorSlots.map(productColorSlotLabel).join(', ') + '.', 'error');
+
+    const baseWildcardPieces = basePieces.filter((piece) => piece.modelId === selectedBaseModel.id && !piece.archived).filter((piece) =>
+      (piece.fabricSlot ?? 'principal') === 'cualquiera' || (piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna')) === 'cualquiera'
+    );
+    const basePieceOverrides: Record<string, ProductPieceOverride> = {};
+    for (const piece of baseWildcardPieces) {
+      const key = 'base:' + piece.id;
+      const selection = productPieceOverrides[key] ?? { textileId: null, colorId: null };
+      const needsTextile = (piece.fabricSlot ?? 'principal') === 'cualquiera';
+      const needsColor = (piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna')) === 'cualquiera';
+      if (needsTextile && !activeTextileIds.has(selection.textileId ?? '')) return tell('El molde "' + piece.name + '" necesita una tela concreta porque está definido como Cualquier tela.', 'error');
+      if (needsColor && !activeColorIds.has(selection.colorId ?? '')) return tell('El molde "' + piece.name + '" necesita un color concreto porque está definido como Cualquier color.', 'error');
+      basePieceOverrides[piece.id] = { textileId: needsTextile ? selection.textileId : null, colorId: needsColor ? selection.colorId : null };
+    }
+
     const selectedComponents = data.components.filter((component) => component.active && productComponentIds.includes(component.id));
     for (const component of selectedComponents) {
       const incompatiblePiece = component.pieces.find((piece) => !isComponentFabricSlotAvailableForModel(piece.fabricSlot, selectedBaseModel.secondaryFabricSlots ?? 0));
       if (incompatiblePiece) return tell('El componente "' + component.name + '" tiene la pieza "' + incompatiblePiece.name + '" vinculada a ' + componentFabricSlotLabel(incompatiblePiece.fabricSlot) + ', pero el patrón base "' + selectedBaseModel.name + '" no define esa posición. Añade esa tela secundaria al patrón base o cambia la posición de la pieza.', 'error');
+      const incompatibleColorPiece = component.pieces.find((piece) => !isComponentColorSlotAvailableForModel(piece.colorSlot ?? (piece.colorId ? 'principal' : 'cualquiera'), selectedBaseModel.secondaryColorSlots ?? 0));
+      if (incompatibleColorPiece) return tell('El componente "' + component.name + '" tiene la pieza "' + incompatibleColorPiece.name + '" vinculada a ' + componentColorSlotLabel(incompatibleColorPiece.colorSlot ?? 'cualquiera') + ', pero el patrón base "' + selectedBaseModel.name + '" no define esa posición de color.', 'error');
+      for (const piece of component.pieces) {
+        const fabricSlot = piece.fabricSlot;
+        const colorSlot = piece.colorSlot ?? (piece.colorId ? 'principal' : 'cualquiera');
+        const needsTextile = fabricSlot === 'cualquiera';
+        const needsColor = colorSlot === 'cualquiera';
+        if (!needsTextile && !needsColor) continue;
+        const selection = productPieceOverrides[component.id + ':' + piece.id] ?? { textileId: null, colorId: null };
+        if (needsTextile && !activeTextileIds.has(selection.textileId ?? '')) return tell(component.name + ' · ' + piece.name + ': selecciona la tela concreta para esta pieza comodín.', 'error');
+        if (needsColor && !activeColorIds.has(selection.colorId ?? '')) return tell(component.name + ' · ' + piece.name + ': selecciona el color concreto para esta pieza comodín.', 'error');
+      }
     }
 
     const productSizes = sizes.filter((size) => size.groupId === selectedBaseModel.sizeGroupId);
     const componentSelections: ProductComponentSelection[] = [];
     for (const component of selectedComponents) {
       const materialSpecifications: Record<string, SizeSpecification> = {};
+      const pieceOverrides: Record<string, ProductPieceOverride> = {};
+      for (const piece of component.pieces) {
+        const needsTextile = piece.fabricSlot === 'cualquiera';
+        const colorSlot = piece.colorSlot ?? (piece.colorId ? 'principal' : 'cualquiera');
+        const needsColor = colorSlot === 'cualquiera';
+        if (needsTextile || needsColor) {
+          const selection = productPieceOverrides[component.id + ':' + piece.id] ?? { textileId: null, colorId: null };
+          pieceOverrides[piece.id] = { textileId: needsTextile ? selection.textileId : null, colorId: needsColor ? selection.colorId : null };
+        }
+      }
       for (const material of component.materials.filter((item) => item.specificationLabel?.trim())) {
         const draft = productMaterialSpecsDraft[material.id];
         if (!draft || !draft.label.trim()) return tell(component.name + ' · ' + variantLabel(variantsBySupply.get(material.variantId)!, data.variants, supplies) + ': indica el nombre de la característica por talla.', 'error');
@@ -1351,7 +1392,7 @@ export function ProductionModule({
       }
       componentSelections.push({
         id: id(), componentId: component.id, quantity: 1, location: '', variantOverrides: {},
-        materialSpecifications,
+        materialSpecifications, pieceOverrides,
       });
     }
 
@@ -1359,18 +1400,22 @@ export function ProductionModule({
     const row: ConfiguredProductModel = {
       id: id(), name: productName.trim(), collectionId: selectedCollection.id, baseModelId: productBaseId, description: productDescription.trim(),
       components: componentSelections,
-      additionalMaterials: [], active: true, createdAt: timestamp, updatedAt: timestamp,
+      additionalMaterials: [], basePieceOverrides, active: true, createdAt: timestamp, updatedAt: timestamp,
     };
     const fabricRows: ProductFabricAssignment[] = requiredFabricSlots.map((fabricSlot) => ({
       id: id(), productModelId: row.id, fabricSlot, textileId: productFabricAssignments[fabricSlot], createdAt: timestamp, updatedAt: timestamp,
+    }));
+    const colorRows: ProductColorAssignment[] = requiredColorSlots.map((colorSlot) => ({
+      id: id(), productModelId: row.id, colorSlot, colorId: productColorAssignments[colorSlot], createdAt: timestamp, updatedAt: timestamp,
     }));
     setData((current) => ({
       ...current,
       productModels: [...current.productModels, row],
       productFabrics: [...current.productFabrics, ...fabricRows],
+      productColors: [...current.productColors, ...colorRows],
     }));
-    setSelectedProductId(row.id); setSelectedStockProductModelId(row.id); setProductName(''); setProductCollectionId(''); setShowProductCollectionCreator(false); setNewProductCollectionName(''); setProductBaseId(''); setProductFabricAssignments({}); setProductDescription(''); setProductComponentIds([]); setProductMaterialSpecsDraft({});
-    tell('Modelo configurado guardado con sus telas asignadas. Se conservó intacto el patrón base.');
+    setSelectedProductId(row.id); setSelectedStockProductModelId(row.id); setProductName(''); setProductCollectionId(''); setShowProductCollectionCreator(false); setNewProductCollectionName(''); setProductBaseId(''); setProductFabricAssignments({}); setProductColorAssignments({}); setProductPieceOverrides({}); setProductDescription(''); setProductComponentIds([]); setProductMaterialSpecsDraft({});
+    tell('Modelo configurado guardado con sus telas y colores definitivos.');
   }
 
   function openProductFabricEditor(product: ConfiguredProductModel) {
