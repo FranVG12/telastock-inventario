@@ -604,7 +604,7 @@ export function ProductionModule({
   sizeGroups: SizeGroup[];
   onAddBaseMovements: (movements: DomainPieceMovement[]) => boolean;
   onNavigate: (view: ProductionView) => void;
-  onQuickCreateBaseModel: () => void;
+  onQuickCreateBaseModel: (onCreated: (modelId: string) => void) => void;
 }) {
   const [data, setData] = useState<ProductionBackupData>(emptyProductionBackupData);
   const [ready, setReady] = useState(false);
@@ -2055,7 +2055,7 @@ export function ProductionModule({
           <div className="field-label production-span-2"><span>Colección *</span><div className="production-collection-control"><select className="large-input" value={productCollectionId} onChange={(e) => setProductCollectionId(e.target.value)} required><option value="">Seleccionar colección guardada</option>{data.productCollections.filter((x) => x.active).slice().sort((a, b) => a.name.localeCompare(b.name, 'es')).map((collection) => <option value={collection.id} key={collection.id}>{collection.name}</option>)}</select><button type="button" className="button secondary" onClick={() => setShowProductCollectionCreator((current) => !current)}>＋ Nueva colección</button></div>{showProductCollectionCreator && <div className="production-collection-create"><input className="large-input" value={newProductCollectionName} onChange={(e) => setNewProductCollectionName(e.target.value)} placeholder="Nombre de la nueva colección" aria-label="Nombre de la nueva colección" /><div className="production-collection-actions"><button type="button" className="button primary" onClick={createProductCollection}>Guardar colección</button><button type="button" className="button secondary" onClick={() => { setShowProductCollectionCreator(false); setNewProductCollectionName(''); }}>Cancelar</button></div></div>}{data.productCollections.filter((x) => x.active).length === 0 && !showProductCollectionCreator && <small>Primero crea una colección; después podrás reutilizarla en otros modelos.</small>}</div>
           <div className="product-base-pattern-field">
             <label className="field-label">Patrón base<select className="large-input" value={productBaseId} onChange={(e) => { setProductBaseId(e.target.value); setProductFabricAssignments({}); }} required><option value="">Seleccionar patrón existente</option>{baseModels.map((x) => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label>
-            <button type="button" className="text-action" onClick={onQuickCreateBaseModel}>＋ Crear patrón base</button>
+            <button type="button" className="text-action" onClick={() => onQuickCreateBaseModel((modelId) => { setProductBaseId(modelId); setProductFabricAssignments({}); })}>＋ Crear patrón base</button>
             {baseModels.length === 0 && <small>No hay patrones disponibles. Crea uno aquí; al guardarlo aparecerá en esta lista.</small>}
           </div>
           <div className="product-inherited-size-tag"><span>Tallas heredadas</span><strong>{sizeGroups.find((group) => group.id === selectedProductBasePattern?.sizeGroupId)?.name ?? 'Selecciona un patrón base'}</strong></div>
