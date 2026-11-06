@@ -1070,6 +1070,7 @@ export function ProductionModule({
     const supply = variant ? supplies.find((x) => x.id === variant.supplyId) : undefined;
     const quantity = Number(stockQuantity);
     if (!variant || !supply || !Number.isFinite(quantity) || quantity <= 0 || (supply.baseUnit === 'und' && !Number.isInteger(quantity))) return tell('Selecciona una variante e ingresa una cantidad válida para su unidad de inventario.', 'error');
+    if (supply.stockMode === 'none') return tell('Este insumo no controla inventario. Sus medidas se definen por talla dentro de cada modelo comercial.', 'info');
     if (variant.textileId) return tell('Esta variante utiliza el stock real de rollos. Registra sus entradas o consumos desde Inventario de rollos.', 'info');
     if (supply.stockMode === 'talla' && !stockSizeId) return tell('Selecciona la talla de este insumo.', 'error');
     const sizeId = supply.stockMode === 'talla' ? stockSizeId : null;
@@ -1079,7 +1080,7 @@ export function ProductionModule({
     setData((current) => ({ ...current, supplyMovements: [...current.supplyMovements, movement] }));
     setShowStockForm(false); setStockQuantity(''); tell('Movimiento de insumo registrado.');
   }
-  const purchasableVariants = variants.filter((variant) => !variant.textileId && supplies.some((supply) => supply.id === variant.supplyId && supply.active));
+  const purchasableVariants = variants.filter((variant) => !variant.textileId && supplies.some((supply) => supply.id === variant.supplyId && supply.active && supply.stockMode !== 'none'));
   const purchaseLineTotal = (line: PurchaseLineDraft) => {
     const quantity = Number(line.quantity);
     const unitPrice = Number(line.unitPrice);
@@ -1637,18 +1638,21 @@ export function ProductionModule({
         const supply = variant ? supplies.find((item) => item.id === variant.supplyId) : undefined;
         if (!variant || !supply) return tell('Una variante de material dejó de estar disponible. Revisa la receta.', 'error');
         const cost = latestUnitCost(variant, supply.baseUnit);
-        const addLine = (sizeId: string | null, quantity: number) => {
+        const addLine = (sizeId: string | null, quantity: number, specificationValue?: string) => {
           if (!(quantity > 0)) return;
           if (supply.baseUnit === 'und' && !Number.isInteger(quantity)) throw new Error(supply.name + ': el consumo configurado debe ser entero porque se controla por unidades.');
           orderMaterials.push({
             id: id(), variantId: variant.id, sizeId, quantity: Number(quantity.toFixed(variant.textileId ? 3 : 5)),
             unit: supply.baseUnit, unitCost: cost, lineCost: cost === null ? null : Number((quantity * cost).toFixed(2)),
+            specificationLabel: specificationValue ? 'Características por talla' : null,
+            specificationValue: specificationValue ?? null,
           });
         };
-        if (supply.stockMode === 'total') {
+        const hasSizeSpecifications = Object.values(row.specificationsBySize).some((entries) => entries.length > 0);
+        if (supply.stockMode === 'total' && !hasSizeSpecifications) {
           addLine(null, Object.values(row.bySize).reduce((sum, value) => sum + value, 0));
         } else {
-          Object.entries(row.bySize).forEach(([sizeId, quantity]) => addLine(sizeId, quantity));
+          Object.entries(row.bySize).forEach(([sizeId, quantity]) => addLine(sizeId, quantity, row.specificationsBySize[sizeId]?.join(' · ')));
         }
       }
     } catch (error) {
@@ -1742,6 +1746,7 @@ export function ProductionModule({
       const variant = variantsBySupply.get(line.variantId);
       const supply = variant ? supplies.find((item) => item.id === variant.supplyId) : undefined;
       if (!variant || !supply) { issues.push('Material no disponible en el catálogo.'); continue; }
+      if (supply.stockMode === 'none') continue;
       if (variant.textileId) {
         if (supply.baseUnit !== 'm' && supply.baseUnit !== 'kg') { issues.push(supply.name + ': la tela vinculada requiere unidad M o KG.'); continue; }
         const unit: 'M' | 'KG' = supply.baseUnit === 'm' ? 'M' : 'KG';
@@ -1864,6 +1869,7 @@ export function ProductionModule({
       const variant = variantsBySupply.get(line.variantId);
       const supply = variant ? supplies.find((item) => item.id === variant.supplyId) : undefined;
       if (!variant || !supply) { issues.push('Material ya no disponible: ' + line.variantId); continue; }
+      if (supply.stockMode === 'none') continue;
       if (!variant.textileId) {
         const reservedByOthers = otherOrders.reduce((sum, activeOrder) => sum + activeOrder.materials.filter((item) => item.variantId === line.variantId && item.sizeId === line.sizeId).reduce((total, item) => total + item.quantity, 0), 0);
         const available = stockForVariant(variant, line.sizeId) - reservedByOthers;
@@ -1949,7 +1955,7 @@ export function ProductionModule({
       };
     });
 
-    const supplyMovements: SupplyMovement[] = actualMaterials.filter((line) => line.quantity > 0 && !variantsBySupply.get(line.variantId)?.textileId).map((line) => ({
+    const supplyMovements: SupplyMovement[] = actualMaterials.filter((line) => line.quantity > 0 && supplies.find((supply) => supply.id === variantsBySupply.get(line.variantId)?.supplyId)?.stockMode !== 'none' && !variantsBySupply.get(line.variantId)?.textileId).map((line) => ({
       id: id(), variantId: line.variantId, sizeId: line.sizeId, delta: -line.quantity, kind: 'salida',
       note: 'Consumo real de orden ' + order.number, date: timestamp, sourceProductionOrderId: order.id,
     }));
