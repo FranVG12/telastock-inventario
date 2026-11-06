@@ -20,6 +20,7 @@ import {
 } from '@/lib/inventory-domain';
 import { demoModels, demoMovements, demoPieces, demoSizes, demoSizeGroups } from '@/lib/demo-data';
 import { isComponentFabricSlotAvailableForModel } from '@/lib/component-fabric-slots';
+import { isComponentColorSlotAvailableForModel } from '@/lib/component-color-slots';
 import { validateSizeSpecification } from '@/lib/material-size-specifications';
 import { FabricModule, FABRIC_STORAGE_KEYS, emptyFabricBackupData, validateFabricBackupData, type FabricView, type ColorDefinition } from '@/app/fabric-module';
 import { ProductionModule, PRODUCTION_STORAGE_KEYS, emptyProductionBackupData, validateProductionBackupData, type ProductionView } from '@/app/production-module';
@@ -481,7 +482,7 @@ export default function Home() {
 
   function openCreateModel(onCreated?: (modelId: string) => void) {
     quickBaseModelCreatedCallbackRef.current = onCreated ?? null;
-    setModelForm(blankModelForm(sizeGroups[0]?.id ?? '', fabricColors[0]?.id ?? ''));
+    setModelForm(blankModelForm(sizeGroups[0]?.id ?? ''));
     setShowModelForm(true);
   }
 
@@ -743,7 +744,7 @@ export default function Home() {
       const payload = {
         app: 'TelaStock',
         backupType: 'full',
-        schemaVersion: 12,
+        schemaVersion: 13,
         exportedAt: new Date().toISOString(),
         data: {
           sizeGroups, sizes, models, pieces, movements, fabricInventory,
@@ -774,7 +775,7 @@ export default function Home() {
       const raw = JSON.parse(await file.text()) as unknown;
       const isRecord = (value: unknown): value is Record<string, unknown> =>
         Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-      if (!isRecord(raw) || raw.app !== 'TelaStock' || raw.backupType !== 'full' || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].includes(Number(raw.schemaVersion)) || !isRecord(raw.data)) {
+      if (!isRecord(raw) || raw.app !== 'TelaStock' || raw.backupType !== 'full' || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].includes(Number(raw.schemaVersion)) || !isRecord(raw.data)) {
         throw new Error('Este no es un respaldo completo de TelaStock compatible.');
       }
       const data = raw.data;
@@ -795,15 +796,16 @@ export default function Home() {
       const importedSizes = getRows('sizes') as unknown as Size[];
       const importedModelsRaw = getRows('models') as unknown as ManufacturingModel[];
       const importedPieces = getRows('pieces') as unknown as ModelPiece[];
+      const normalizedImportedPieces = importedPieces.map((piece) => ({ ...piece, colorSlot: piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna') }));
       const importedMovements = getRows('movements') as unknown as PieceMovement[];
       let importedFabric = Number(raw.schemaVersion) >= 2 ? validateFabricBackupData(data.fabricInventory) : emptyFabricBackupData();
       const importedProduction = Number(raw.schemaVersion) >= 4 ? validateProductionBackupData(data.production) : emptyProductionBackupData();
-      const importedModels = normalizeModelsWithSlots(migrateBaseModelFamilies(importedModelsRaw, importedProduction.productModels), importedPieces);
+      const importedModels = normalizeModelsWithSlots(migrateBaseModelFamilies(importedModelsRaw, importedProduction.productModels), normalizedImportedPieces);
       const hasText = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
       const groupIds = new Set(importedGroups.map((item) => item.id));
       const sizeIds = new Set(importedSizes.map((item) => item.id));
       const modelIds = new Set(importedModels.map((item) => item.id));
-      const pieceIds = new Set(importedPieces.map((item) => item.id));
+      const pieceIds = new Set(normalizedImportedPieces.map((item) => item.id));
       const productMaterialSpecificationsValid = importedProduction.productModels.every((product) => {
         const base = importedModels.find((model) => model.id === product.baseModelId);
         if (!base) return false;
@@ -823,6 +825,13 @@ export default function Home() {
         return Boolean(product && baseModel &&
           isValidFabricSlot(assignment.fabricSlot, baseModel.secondaryFabricSlots ?? 0) &&
           importedFabric.telas.some((textile) => textile.id === assignment.textileId));
+      });
+      const productColorLinksValid = importedProduction.productColors.every((assignment) => {
+        const product = importedProduction.productModels.find((item) => item.id === assignment.productModelId);
+        const baseModel = product ? importedModels.find((item) => item.id === product.baseModelId) : undefined;
+        return Boolean(product && baseModel &&
+          isValidColorSlot(assignment.colorSlot, baseModel.secondaryColorSlots ?? 0) &&
+          importedFabric.colores.some((color) => color.id === assignment.colorId));
       });
       const productionSizeLinksValid =
         importedProduction.supplyMovements.every((movement) => movement.sizeId === null || sizeIds.has(movement.sizeId)) &&
@@ -848,11 +857,12 @@ export default function Home() {
         return Boolean(basePattern && product.components.every((selection) => {
           const component = importedProduction.components.find((item) => item.id === selection.componentId);
           return Boolean(component && component.pieces.every((piece) =>
-            isComponentFabricSlotAvailableForModel(piece.fabricSlot, basePattern.secondaryFabricSlots ?? 0)
+            isComponentFabricSlotAvailableForModel(piece.fabricSlot, basePattern.secondaryFabricSlots ?? 0) &&
+            isComponentColorSlotAvailableForModel(piece.colorSlot ?? (piece.colorId ? 'principal' : 'cualquiera'), basePattern.secondaryColorSlots ?? 0)
           ));
         }));
       });
-      if (!productionSizeLinksValid || !componentPieceCatalogLinksValid || !componentPieceSlotsValidForProducts || !productMaterialSpecificationsValid || !productFabricLinksValid) throw new Error('Hay órdenes, movimientos, piezas auxiliares o telas de modelos vinculados a registros que no existen en este respaldo.');
+      if (!productionSizeLinksValid || !componentPieceCatalogLinksValid || !componentPieceSlotsValidForProducts || !productMaterialSpecificationsValid || !productFabricLinksValid || !productColorLinksValid) throw new Error('Hay órdenes, movimientos, piezas auxiliares o telas de modelos vinculados a registros que no existen en este respaldo.');
       const importedColorMap = new Map(importedFabric.colores.map((color) => [color.nombre.toLocaleLowerCase('es'), color]));
       importedPieces.forEach((piece) => {
         const legacyName = (piece.color ?? '').trim();
@@ -866,13 +876,14 @@ export default function Home() {
       if (!importedGroups.every((item) => hasText(item.name))) throw new Error('Hay grupos de tallas sin nombre.');
       if (!importedSizes.every((item) => hasText(item.label) && groupIds.has(item.groupId) && Number.isInteger(item.sortOrder))) throw new Error('Hay tallas incompletas o vinculadas a un grupo inexistente.');
       if (!importedModels.every((item) => hasText(item.name) && groupIds.has(item.sizeGroupId))) throw new Error('Hay modelos incompletos o vinculados a un grupo inexistente.');
-      if (!importedPieces.every((item) =>
+      if (!normalizedImportedPieces.every((item) =>
         hasText(item.name) &&
         modelIds.has(item.modelId) &&
         Number.isInteger(item.unitsPerGarment) &&
         item.unitsPerGarment > 0 &&
         ['simetrica', 'izquierda', 'derecha', 'ninguna'].includes(item.laterality) &&
-        (item.fabricSlot === undefined || isValidFabricSlot(item.fabricSlot, (importedModels.find((model) => model.id === item.modelId)?.secondaryFabricSlots ?? Math.max(0, ...importedPieces.filter((piece) => piece.modelId === item.modelId).map((piece) => secondarySlotIndex(piece.fabricSlot)))))) &&
+        (item.fabricSlot === undefined || isValidFabricSlot(item.fabricSlot, (importedModels.find((model) => model.id === item.modelId)?.secondaryFabricSlots ?? Math.max(0, ...normalizedImportedPieces.filter((piece) => piece.modelId === item.modelId).map((piece) => secondarySlotIndex(piece.fabricSlot)))))) &&
+        isValidColorSlot(item.colorSlot ?? 'ninguna', (importedModels.find((model) => model.id === item.modelId)?.secondaryColorSlots ?? Math.max(0, ...normalizedImportedPieces.filter((piece) => piece.modelId === item.modelId).map((piece) => secondaryColorSlotIndex(piece.colorSlot))))) &&
         (item.colorId == null || importedFabric.colores.some((color) => color.id === item.colorId)) &&
         (item.colorOverride === undefined || typeof item.colorOverride === 'boolean') &&
         Number.isInteger(item.sortOrder)
@@ -896,9 +907,10 @@ export default function Home() {
       setSizeGroups(importedGroups);
       setSizes(importedSizes);
       setModels(importedModels);
-      setPieces(importedPieces.map((piece) => ({
+      setPieces(normalizedImportedPieces.map((piece) => ({
         ...piece,
         fabricSlot: piece.fabricSlot ?? 'principal',
+        colorSlot: piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna'),
         fabricType: fabricSlotLabel(piece.fabricSlot ?? 'principal'),
         color: piece.colorId ? importedFabric.colores.find((color) => color.id === piece.colorId)?.nombre ?? 'Sin especificar' : piece.color ?? 'Sin especificar',
         colorId: piece.colorId ?? importedFabric.colores.find((color) => color.nombre.toLocaleLowerCase('es') === (piece.color ?? '').toLocaleLowerCase('es'))?.id ?? null,
