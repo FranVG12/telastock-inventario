@@ -2103,7 +2103,7 @@ export function ProductionModule({
               </select>
               {secondaryIndex > 0 && <span className="component-piece-secondary-index">
                 <span>N.º de tela secundaria</span>
-                <input className="large-input" type="number" min="1" step="1" value={secondaryIndex} onChange={(e) => {
+                <input className="large-input" type="number" min="1" step="1" aria-label="Número de tela secundaria" value={secondaryIndex} onChange={(e) => {
                   const slotIndex = Number(e.target.value);
                   if (!Number.isInteger(slotIndex) || slotIndex < 1) return;
                   setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, fabricSlot: ('secundaria_' + slotIndex) as ComponentFabricSlot } : x) });
