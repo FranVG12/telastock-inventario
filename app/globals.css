@@ -571,6 +571,10 @@
 .production-size-grid input{width:100%;min-width:0;border:1px solid #dfe5ee;border-radius:7px;padding:8px;font-size:12px;background:#fff}
 .production-size-consumption>small{display:block;margin-top:8px;font-size:10px;color:#8993a4}
 .production-piece-row{display:grid;grid-template-columns:minmax(150px,2fr) repeat(4,minmax(105px,1fr)) auto;gap:10px;align-items:end;padding:10px;background:#fff;border:1px solid #e6ebf3;border-radius:9px}
+.component-piece-secondary-index{display:grid;gap:5px;margin-top:8px;max-width:150px}
+.component-piece-secondary-index>span{font-size:10px;font-weight:700;color:#8792a4}
+.component-piece-secondary-index .large-input{width:100%;min-width:0}
+.production-piece-row .field-label>small{display:block;margin-top:6px;font-size:10px;line-height:1.45;color:#8994a5}
 .production-component-grid,.production-family-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px}
 .production-product-piece-stock{display:grid;gap:12px;margin-top:12px;padding:12px;border:1px solid #e5eaf3;border-radius:12px;background:#f9faff}
 .production-product-piece-stock>.production-subheading{margin:0}
