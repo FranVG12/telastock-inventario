@@ -20,6 +20,7 @@ import {
 } from '@/lib/inventory-domain';
 import { demoModels, demoMovements, demoPieces, demoSizes, demoSizeGroups } from '@/lib/demo-data';
 import { isComponentFabricSlotAvailableForModel } from '@/lib/component-fabric-slots';
+import { validateSizeSpecification } from '@/lib/material-size-specifications';
 import { FabricModule, FABRIC_STORAGE_KEYS, createGlobalColorQuickly, emptyFabricBackupData, validateFabricBackupData, type FabricView, type ColorDefinition } from '@/app/fabric-module';
 import { ProductionModule, PRODUCTION_STORAGE_KEYS, emptyProductionBackupData, validateProductionBackupData, type ProductionView } from '@/app/production-module';
 
@@ -742,7 +743,7 @@ export default function Home() {
       const payload = {
         app: 'TelaStock',
         backupType: 'full',
-        schemaVersion: 11,
+        schemaVersion: 12,
         exportedAt: new Date().toISOString(),
         data: {
           sizeGroups, sizes, models, pieces, movements, fabricInventory,
@@ -773,7 +774,7 @@ export default function Home() {
       const raw = JSON.parse(await file.text()) as unknown;
       const isRecord = (value: unknown): value is Record<string, unknown> =>
         Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-      if (!isRecord(raw) || raw.app !== 'TelaStock' || raw.backupType !== 'full' || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(Number(raw.schemaVersion)) || !isRecord(raw.data)) {
+      if (!isRecord(raw) || raw.app !== 'TelaStock' || raw.backupType !== 'full' || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].includes(Number(raw.schemaVersion)) || !isRecord(raw.data)) {
         throw new Error('Este no es un respaldo completo de TelaStock compatible.');
       }
       const data = raw.data;
@@ -803,6 +804,19 @@ export default function Home() {
       const sizeIds = new Set(importedSizes.map((item) => item.id));
       const modelIds = new Set(importedModels.map((item) => item.id));
       const pieceIds = new Set(importedPieces.map((item) => item.id));
+      const productMaterialSpecificationsValid = importedProduction.productModels.every((product) => {
+        const base = importedModels.find((model) => model.id === product.baseModelId);
+        if (!base) return false;
+        const validSizeIds = importedSizes.filter((size) => size.groupId === base.sizeGroupId).map((size) => size.id);
+        return product.components.every((selection) => {
+          const component = importedProduction.components.find((item) => item.id === selection.componentId);
+          if (!component) return false;
+          const specifications = selection.materialSpecifications ?? {};
+          const specificationMaterials = component.materials.filter((material) => material.specificationLabel?.trim());
+          return specificationMaterials.every((material) => validateSizeSpecification(specifications[material.id], validSizeIds)) &&
+            Object.keys(specifications).every((materialId) => component.materials.some((material) => material.id === materialId && Boolean(material.specificationLabel?.trim())));
+        });
+      });
       const productFabricLinksValid = importedProduction.productFabrics.every((assignment) => {
         const product = importedProduction.productModels.find((item) => item.id === assignment.productModelId);
         const baseModel = product ? importedModels.find((item) => item.id === product.baseModelId) : undefined;
@@ -838,7 +852,7 @@ export default function Home() {
           ));
         }));
       });
-      if (!productionSizeLinksValid || !componentPieceCatalogLinksValid || !componentPieceSlotsValidForProducts || !productFabricLinksValid) throw new Error('Hay órdenes, movimientos, piezas auxiliares o telas de modelos vinculados a registros que no existen en este respaldo.');
+      if (!productionSizeLinksValid || !componentPieceCatalogLinksValid || !componentPieceSlotsValidForProducts || !productMaterialSpecificationsValid || !productFabricLinksValid) throw new Error('Hay órdenes, movimientos, piezas auxiliares o telas de modelos vinculados a registros que no existen en este respaldo.');
       const importedColorMap = new Map(importedFabric.colores.map((color) => [color.nombre.toLocaleLowerCase('es'), color]));
       importedPieces.forEach((piece) => {
         const legacyName = (piece.color ?? '').trim();
