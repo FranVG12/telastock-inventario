@@ -1135,6 +1135,13 @@ export function ProductionModule({
     newComponent();
     onNavigate('componentes');
   }
+  function cancelComponentDraft() {
+    setComponentDraft(null);
+    if (returnToProductAfterComponentCreate) {
+      setReturnToProductAfterComponentCreate(false);
+      onNavigate('modelos-producto');
+    }
+  }
   function startSupplyCreationForPurchase() {
     setSupplyReturnToPurchase(true);
     setSupplyName(''); setSupplyCategory('Otros avíos'); setSupplyUnit('und'); setStockMode('total'); setSupplyDescription(''); setSupplyAttributes('');
@@ -2015,7 +2022,7 @@ export function ProductionModule({
           <button type="button" className="text-action danger-action" onClick={() => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.filter((_, i) => i !== index) })}>Quitar</button>
         </div>)}
         <MaterialEditor materials={componentDraft.materials} onChange={(materials) => setComponentDraft({ ...componentDraft, materials })} variants={variants} supplies={supplies} sizes={sizes} title="Materiales y consumos del componente" onCreateSupplyVariant={createSupplyVariantFromMaterial} />
-        <div className="form-actions"><button type="button" className="button secondary" onClick={() => setComponentDraft(null)}>Cancelar</button><button className="button primary">Guardar componente</button></div>
+        <div className="form-actions"><button type="button" className="button secondary" onClick={cancelComponentDraft}>Cancelar</button><button className="button primary">Guardar componente</button></div>
       </form>}
       <div className="production-component-grid">
         {data.components.filter((x) => x.active).map((component) => <article className="production-card" key={component.id}>
@@ -2045,7 +2052,7 @@ export function ProductionModule({
         {selectedProductBasePattern && <section className="product-fabric-assignment-section">
           <div className="production-subheading"><strong>Telas del modelo</strong><span className="production-muted">Asigna una tela a cada posición del patrón</span></div>
           <p className="production-muted">Estas telas se seleccionan del catálogo existente. El molde base conserva sus posiciones; cada modelo comercial puede usar telas diferentes.</p>
-          {activeTextiles.length === 0 && <div className="notice info">No hay telas activas en el catálogo. Registra primero las telas en «Catálogo de telas».</div>}
+          {activeTextiles.length === 0 && <div className="notice info">No hay telas activas todavía. Usa «Crear tela y asignarla aquí» debajo de cada posición.</div>}
           <div className="product-fabric-slots">{selectedProductFabricSlots.map((slot) => <label className="field-label" key={slot}>
             <span>{productFabricSlotLabel(slot)}</span>
             <select className="large-input" value={productFabricAssignments[slot] ?? ''} disabled={activeTextiles.length === 0} onChange={(e) => setProductFabricAssignments((current) => ({ ...current, [slot]: e.target.value }))} required>
