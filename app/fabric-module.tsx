@@ -38,6 +38,7 @@ export type PurchaseDetail = {
 export type RollMovement = {
   id: string; idRollo: string; fecha: string; tipo: 'ingreso' | 'consumo' | 'ajuste' | 'medicion';
   unidad: FabricUnit; delta: number | null; cantidadAnterior: number | null; cantidadNueva: number | null; nota: string;
+  sourceProductionOrderId?: string | null;
 };
 export type FabricBackupData = {
   telas: Textile[]; rollos: FabricRoll[]; rolloMovimientos: RollMovement[]; proveedores: Supplier[];
@@ -58,6 +59,120 @@ export const FABRIC_STORAGE_KEYS = {
   colores: 'telastock-fabric-colores-v2',
   telaColores: 'telastock-fabric-tela-colores-v2',
 } as const;
+
+/** Crea una tela mínima desde otro formulario sin abandonar el trabajo actual.
+ * Mantiene el mismo catálogo local y publica el evento que refresca los módulos abiertos.
+ */
+export function createTextileQuickly(input: {
+  name: string;
+  unit: FabricUnit;
+  width?: number | null;
+  theoreticalYield?: number | null;
+  description?: string;
+}): Textile {
+  const name = input.name.trim();
+  if (!name) throw new Error('Escribe el nombre de la tela.');
+  if (!['KG', 'M'].includes(input.unit)) throw new Error('Selecciona una unidad de venta válida.');
+  if (input.width != null && (!Number.isFinite(input.width) || input.width <= 0)) throw new Error('El ancho debe ser mayor que cero.');
+  if (input.theoreticalYield != null && (!Number.isFinite(input.theoreticalYield) || input.theoreticalYield <= 0)) throw new Error('El rendimiento debe ser mayor que cero.');
+  const raw = localStorage.getItem(FABRIC_STORAGE_KEYS.telas);
+  const current: unknown = raw ? JSON.parse(raw) : [];
+  if (!Array.isArray(current) || !current.every((row) => row && typeof row === 'object' && typeof (row as { id?: unknown }).id === 'string' && typeof (row as { nombreTela?: unknown }).nombreTela === 'string')) {
+    throw new Error('El catálogo de telas tiene datos no válidos. Restaura un respaldo antes de modificarlo.');
+  }
+  const rows = current as Textile[];
+  if (rows.some((row) => row.nombreTela.trim().toLocaleLowerCase('es') === name.toLocaleLowerCase('es'))) {
+    throw new Error('Ya existe una tela con ese nombre. Selecciónala del catálogo.');
+  }
+  const timestamp = new Date().toISOString();
+  const created: Textile = {
+    id: id(), nombreTela: name, unidadVenta: input.unit,
+    anchoNominalM: input.width ?? null, rendimientoTeorico: input.theoreticalYield ?? null,
+    descripcion: input.description?.trim() ?? '', activo: true, createdAt: timestamp, updatedAt: timestamp,
+  };
+  localStorage.setItem(FABRIC_STORAGE_KEYS.telas, JSON.stringify([...rows, created]));
+  window.dispatchEvent(new Event('telastock-fabric-data-updated'));
+  return created;
+}
+
+/** Añade un color al diccionario global, sin obligar a asociarlo primero a una tela. */
+export function createGlobalColorQuickly(nameValue: string): ColorDefinition {
+  const name = nameValue.trim();
+  if (!name) throw new Error('Escribe el nombre del color.');
+  const raw = localStorage.getItem(FABRIC_STORAGE_KEYS.colores);
+  const current: unknown = raw ? JSON.parse(raw) : [];
+  if (!Array.isArray(current) || !current.every((row) => row && typeof row === 'object' && typeof (row as { id?: unknown }).id === 'string' && typeof (row as { nombre?: unknown }).nombre === 'string')) {
+    throw new Error('El catálogo de colores tiene datos no válidos. Restaura un respaldo antes de modificarlo.');
+  }
+  const rows = current as ColorDefinition[];
+  const existing = rows.find((row) => row.nombre.trim().toLocaleLowerCase('es') === name.toLocaleLowerCase('es'));
+  if (existing) return existing;
+  const timestamp = new Date().toISOString();
+  const created: ColorDefinition = { id: id(), nombre: name, createdAt: timestamp, updatedAt: timestamp };
+  localStorage.setItem(FABRIC_STORAGE_KEYS.colores, JSON.stringify([...rows, created]));
+  window.dispatchEvent(new Event('telastock-fabric-data-updated'));
+  return created;
+}
+
+/** Crea/reutiliza un color global y lo asocia a una tela desde otro formulario. */
+export function createTextileColorQuickly(textileId: string, colorNameValue: string): TextileColor {
+  const colorName = colorNameValue.trim();
+  if (!textileId) throw new Error('Selecciona primero una tela.');
+  if (!colorName) throw new Error('Escribe el nombre del color.');
+
+  const rawTextiles = localStorage.getItem(FABRIC_STORAGE_KEYS.telas);
+  const rawColors = localStorage.getItem(FABRIC_STORAGE_KEYS.colores);
+  const rawVariants = localStorage.getItem(FABRIC_STORAGE_KEYS.telaColores);
+  const textilesValue: unknown = rawTextiles ? JSON.parse(rawTextiles) : [];
+  const colorsValue: unknown = rawColors ? JSON.parse(rawColors) : [];
+  const variantsValue: unknown = rawVariants ? JSON.parse(rawVariants) : [];
+
+  if (!Array.isArray(textilesValue) || !textilesValue.every((row) => row && typeof row === 'object' && typeof (row as { id?: unknown }).id === 'string' && typeof (row as { nombreTela?: unknown }).nombreTela === 'string' && typeof (row as { activo?: unknown }).activo === 'boolean')) {
+    throw new Error('El catálogo de telas tiene datos no válidos. Restaura un respaldo antes de modificarlo.');
+  }
+  if (!Array.isArray(colorsValue) || !colorsValue.every((row) => row && typeof row === 'object' && typeof (row as { id?: unknown }).id === 'string' && typeof (row as { nombre?: unknown }).nombre === 'string')) {
+    throw new Error('El catálogo global de colores tiene datos no válidos.');
+  }
+  if (!Array.isArray(variantsValue) || !variantsValue.every((row) => row && typeof row === 'object' && typeof (row as { id?: unknown }).id === 'string' && typeof (row as { idTela?: unknown }).idTela === 'string' && typeof (row as { idColor?: unknown }).idColor === 'string' && typeof (row as { activo?: unknown }).activo === 'boolean')) {
+    throw new Error('Las asociaciones de colores por tela tienen datos no válidos.');
+  }
+
+  const textiles = textilesValue as Textile[];
+  const colors = colorsValue as ColorDefinition[];
+  const variants = variantsValue as TextileColor[];
+  const textile = textiles.find((row) => row.id === textileId && row.activo);
+  if (!textile) throw new Error('La tela ya no está activa. Selecciona otra tela.');
+
+  const timestamp = new Date().toISOString();
+  let color = colors.find((row) => row.nombre.trim().toLocaleLowerCase('es') === colorName.toLocaleLowerCase('es'));
+  const nextColors = color ? colors : [...colors, { id: id(), nombre: colorName, createdAt: timestamp, updatedAt: timestamp }];
+  if (!color) color = nextColors[nextColors.length - 1];
+
+  const existing = variants.find((row) => row.idTela === textileId && row.idColor === color!.id);
+  const association: TextileColor = existing
+    ? { ...existing, activo: true, updatedAt: timestamp }
+    : { id: id(), idTela: textileId, idColor: color.id, hexadecimal: null, cmykC: null, cmykM: null, cmykY: null, cmykK: null, activo: true, createdAt: timestamp, updatedAt: timestamp };
+
+  const nextVariants = existing
+    ? variants.map((row) => row.id === existing.id ? association : row)
+    : [...variants, association];
+  const previousColors = localStorage.getItem(FABRIC_STORAGE_KEYS.colores);
+  const previousVariants = localStorage.getItem(FABRIC_STORAGE_KEYS.telaColores);
+  try {
+    localStorage.setItem(FABRIC_STORAGE_KEYS.colores, JSON.stringify(nextColors));
+    localStorage.setItem(FABRIC_STORAGE_KEYS.telaColores, JSON.stringify(nextVariants));
+  } catch (error) {
+    try {
+      if (previousColors === null) localStorage.removeItem(FABRIC_STORAGE_KEYS.colores);
+      else localStorage.setItem(FABRIC_STORAGE_KEYS.colores, previousColors);
+      if (previousVariants === null) localStorage.removeItem(FABRIC_STORAGE_KEYS.telaColores);
+      else localStorage.setItem(FABRIC_STORAGE_KEYS.telaColores, previousVariants);
+    } catch { /* Best-effort rollback; preserve the original storage error. */ }
+    throw new Error('No se pudo guardar el color. Comprueba el espacio disponible en el navegador.');
+  }
+  window.dispatchEvent(new Event('telastock-fabric-data-updated'));
+  return association;
+}
 
 export function emptyFabricBackupData(): FabricBackupData {
   return { telas: [], rollos: [], rolloMovimientos: [], proveedores: [], proveedorTelefonos: [], proveedorCategorias: [], compras: [], detalleCompra: [], colores: [], telaColores: [] };
@@ -225,6 +340,7 @@ type SupplierForm = { id: string | null; nombre: string; ruc: string; contacto: 
 type PurchaseLineForm = { idRollo: string | null; idDetalle?: string | null; idTela: string; idTelaColor: string; unidad: FabricUnit; cantidad: string; precio: string; precioAutomatico: boolean; color: string; pesoKg: string; metros: string; idLote: string };
 type PurchaseForm = { id: string | null; idProveedor: string; fechaCompra: string; tipoComprobante: string; numeroComprobante: string; observacion: string; lines: PurchaseLineForm[] };
 type InlineColorTarget = 'tela' | 'rollo' | 'compra';
+type TelaQuickReturnTarget = { kind: 'rollo' } | { kind: 'compra'; lineIndex: number };
 type InlineColorForm = { target: InlineColorTarget; telaId: string; lineIndex: number | null; idTelaColor: string | null; idColorGlobal: string; nombre: string; hexadecimal: string; cmykC: string; cmykM: string; cmykY: string; cmykK: string };
 
 function migrateLegacyColorData(value: FabricBackupData): FabricBackupData {
@@ -300,6 +416,7 @@ export function FabricModule({ view }: { view: FabricView }) {
   const [showMoreRollo, setShowMoreRollo] = useState(false);
   const [selectedRolloId, setSelectedRolloId] = useState<string | null>(null);
   const [telaForm, setTelaForm] = useState<TelaForm>(blankTela);
+  const [telaQuickReturnTarget, setTelaQuickReturnTarget] = useState<TelaQuickReturnTarget | null>(null);
   const [rolloForm, setRolloForm] = useState<RolloForm>(() => blankRollo([]));
   const [supplierForm, setSupplierForm] = useState<SupplierForm>({ id: null, nombre: '', ruc: '', contacto: '', direccion: '', nota: '', telefonos: [{ id: id(), numero: '', etiqueta: 'Principal' }], categorias: ['Telas'] });
   const [purchaseForm, setPurchaseForm] = useState<PurchaseForm>(() => blankPurchase([]));
@@ -491,7 +608,8 @@ export function FabricModule({ view }: { view: FabricView }) {
       (supplierCategoryFilter === 'all' || data.proveedorCategorias.some((x) => x.idProveedor === supplier.id && x.categoria === supplierCategoryFilter));
   }).sort((a,b) => a.nombre.localeCompare(b.nombre, 'es')), [data.proveedores, data.proveedorTelefonos, data.proveedorCategorias, supplierSearch, supplierCategoryFilter]);
 
-  function openTela(tela?: Textile) {
+  function openTela(tela?: Textile, returnTarget: TelaQuickReturnTarget | null = null) {
+    setTelaQuickReturnTarget(tela ? null : returnTarget);
     setTelaForm(tela ? { id: tela.id, nombreTela: tela.nombreTela, unidadVenta: tela.unidadVenta, anchoNominalM: inputNumber(tela.anchoNominalM), rendimientoTeorico: inputNumber(tela.rendimientoTeorico ?? null), descripcion: tela.descripcion, activo: tela.activo } : blankTela());
     setShowTelaForm(true);
   }
@@ -507,7 +625,13 @@ export function FabricModule({ view }: { view: FabricView }) {
     const now = new Date().toISOString();
     const row: Textile = { id: telaForm.id ?? id(), nombreTela: name, unidadVenta: telaForm.unidadVenta, anchoNominalM: width, rendimientoTeorico: yieldValue, descripcion: telaForm.descripcion.trim(), activo: telaForm.activo, createdAt: telaForm.id ? (telaById.get(telaForm.id)?.createdAt ?? now) : now, updatedAt: now };
     if (!persist({ ...data, telas: telaForm.id ? data.telas.map((x) => x.id === row.id ? row : x) : [...data.telas, row] })) return;
-    setShowTelaForm(false); tell(telaForm.id ? 'Tela actualizada. Los rollos y compras anteriores se conservaron.' : 'Tela creada y activada según el checklist.');
+    if (!telaForm.id && telaQuickReturnTarget?.kind === 'rollo') {
+      setRolloForm((current) => ({ ...current, idTela: row.id, idTelaColor: '', color: '', unidadIngreso: row.unidadVenta }));
+    } else if (!telaForm.id && telaQuickReturnTarget?.kind === 'compra') {
+      updatePurchaseLine(telaQuickReturnTarget.lineIndex, { idTela: row.id, idTelaColor: '', color: '', unidad: row.unidadVenta, pesoKg: '', metros: '', precio: '', precioAutomatico: false });
+    }
+    setTelaQuickReturnTarget(null);
+    setShowTelaForm(false); tell(telaForm.id ? 'Tela actualizada. Los rollos y compras anteriores se conservaron.' : 'Tela creada y seleccionada en el formulario anterior.');
   }
   function toggleTela(tela: Textile) {
     if (!persist({ ...data, telas: data.telas.map((x) => x.id === tela.id ? { ...x, activo: !x.activo, updatedAt: new Date().toISOString() } : x) })) return;
@@ -592,6 +716,16 @@ export function FabricModule({ view }: { view: FabricView }) {
     } : { ...defaultRoll, idTela: tela?.id ?? '', unidadIngreso: tela?.unidadVenta ?? 'KG' });
     setShowRolloForm(true);
   }
+  function reservedProductionRollQuantity(rollId: string, unit: FabricUnit): number {
+    try {
+      const raw = localStorage.getItem('telastock-production-orders-v1');
+      const orders = raw ? JSON.parse(raw) as Array<{ status?: string; rollAllocations?: Array<{ rollId?: string; unit?: FabricUnit; quantity?: number }> }> : [];
+      if (!Array.isArray(orders)) return 0;
+      return orders.filter((order) => order.status === 'reservada' || order.status === 'en_proceso')
+        .reduce((sum, order) => sum + (Array.isArray(order.rollAllocations) ? order.rollAllocations.filter((item) => item.rollId === rollId && item.unit === unit).reduce((total, item) => total + (Number(item.quantity) || 0), 0) : 0), 0);
+    } catch { return 0; }
+  }
+
   function saveRollo(event: FormEvent) {
     event.preventDefault();
     const tela = telaById.get(rolloForm.idTela);
@@ -618,6 +752,13 @@ export function FabricModule({ view }: { view: FabricView }) {
       idProveedor: rolloForm.idProveedor || null, ubicacion: rolloForm.ubicacion.trim(), estado: rolloForm.estado, nota: rolloForm.nota.trim(),
       createdAt: rolloForm.id ? (rollById.get(rolloForm.id)?.createdAt ?? now) : now, updatedAt: now,
     };
+    if (previousRoll) {
+      const reservedKg = reservedProductionRollQuantity(previousRoll.id, 'KG');
+      const reservedM = reservedProductionRollQuantity(previousRoll.id, 'M');
+      if (reservedKg > 0 && (row.pesoKg === null || row.pesoKg + 0.00001 < reservedKg)) return tell('No puedes reducir el peso real por debajo de ' + nfmt.format(reservedKg) + ' KG: ese rollo está reservado para órdenes de producción.', 'error');
+      if (reservedM > 0 && (row.metros === null || row.metros + 0.00001 < reservedM)) return tell('No puedes reducir los metros reales por debajo de ' + nfmt.format(reservedM) + ' M: ese rollo está reservado para órdenes de producción.', 'error');
+      if ((reservedKg > 0 || reservedM > 0) && row.estado !== 'disponible') return tell('No puedes cambiar el estado de un rollo con reservas activas de producción.', 'error');
+    }
     const movementRows: RollMovement[] = [];
     const previous = rolloForm.id ? rollById.get(rolloForm.id) : undefined;
     const addMeasurement = (unit: FabricUnit, before: number | null, after: number | null) => {
@@ -653,7 +794,9 @@ export function FabricModule({ view }: { view: FabricView }) {
     if (!validQty(quantity)) return tell('La cantidad debe ser mayor que cero.', 'error');
     const current = rollMovementForm.unidad === 'KG' ? roll.pesoKg : roll.metros;
     if (current === null) return tell(`No hay una medición real en ${rollMovementForm.unidad} para este rollo. Registra primero esa medida; no se hará una conversión estimada.`, 'error');
-    if (quantity > current) return tell(`No puedes retirar ${nfmt.format(quantity)} ${rollMovementForm.unidad}: solo hay ${nfmt.format(current)} disponible.`, 'error');
+    const reserved = reservedProductionRollQuantity(roll.id, rollMovementForm.unidad);
+    const available = Math.max(0, current - reserved);
+    if (quantity > available + 0.00001) return tell(`No puedes retirar ${nfmt.format(quantity)} ${rollMovementForm.unidad}: ${nfmt.format(reserved)} están reservados y quedan ${nfmt.format(available)} disponibles para otros usos.`, 'error');
     const otherUnit: FabricUnit = rollMovementForm.unidad === 'KG' ? 'M' : 'KG';
     const otherCurrent = otherUnit === 'KG' ? roll.pesoKg : roll.metros;
     const otherEntered = nullableNumber(rollMovementForm.medidaComplementaria);
@@ -1092,8 +1235,8 @@ export function FabricModule({ view }: { view: FabricView }) {
         <button className="button secondary" onClick={() => csvImportRef.current?.click()}>↑ <span>Importar CSV</span></button>
         <button className="button secondary" onClick={exportCurrentCsv}>↓ <span>Exportar CSV</span></button>
         {view === 'telas' && <button className="button primary" onClick={() => openTela()}>＋ <span>Nueva tela</span></button>}
-        {view === 'rollos' && <button className="button primary" onClick={() => openRollo() } disabled={data.telas.filter((x) => x.activo).length === 0}>＋ <span>Nuevo rollo</span></button>}
-        {view === 'compras' && <button className="button primary" onClick={() => openPurchase()} disabled={data.telas.filter((x) => x.activo).length === 0}>＋ <span>Nueva compra</span></button>}
+        {view === 'rollos' && <button className="button primary" onClick={() => openRollo() }>＋ <span>Nuevo rollo</span></button>}
+        {view === 'compras' && <button className="button primary" onClick={() => openPurchase()}>＋ <span>Nueva compra</span></button>}
         {view === 'proveedores' && <button className="button primary" onClick={() => openSupplier()}>＋ <span>Nuevo proveedor</span></button>}
       </div>
     </div>
@@ -1158,14 +1301,18 @@ export function FabricModule({ view }: { view: FabricView }) {
     {showRolloForm && <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setShowRolloForm(false); }}><section className="modal fabric-form-modal" role="dialog" aria-modal="true" aria-labelledby="fabric-roll-title">
       <div className="modal-heading"><div><div className="eyebrow">INVENTARIO FÍSICO</div><h2 id="fabric-roll-title">{rolloForm.id ? 'Editar rollo' : 'Registrar rollo'}</h2><p>El valor ingresado se guarda como medición real de la unidad elegida. No se estima la otra medida.</p></div><button className="icon-button" onClick={() => setShowRolloForm(false)}>×</button></div>
       <form onSubmit={saveRollo} className="fabric-form-grid">
-        <label className="field-label fabric-span-2">Tela *<select className="large-input" required value={rolloForm.idTela} onChange={(e) => { const telaId = e.target.value; const first = preferredColorForTela(telaId); const variantId = first ? ensureTelaColorAssociation(telaId, first.idColor) : ''; setRolloForm((x) => ({ ...x, idTela: telaId, idTelaColor: variantId, color: first?.color.nombre ?? '', unidadIngreso: telaById.get(telaId)?.unidadVenta ?? x.unidadIngreso })); }}><option value="">Seleccionar tela</option>{data.telas.filter((x) => x.activo || x.id === rolloForm.idTela).map((x) => <option key={x.id} value={x.id}>{x.nombreTela}{x.activo ? '' : ' · Inactiva'}</option>)}</select></label>
+        <label className="field-label fabric-span-2">Tela *<select className="large-input" required value={rolloForm.idTela} onChange={(e) => { const telaId = e.target.value; const first = preferredColorForTela(telaId); const variantId = first ? ensureTelaColorAssociation(telaId, first.idColor) : ''; setRolloForm((x) => ({ ...x, idTela: telaId, idTelaColor: variantId, color: first?.color.nombre ?? '', unidadIngreso: telaById.get(telaId)?.unidadVenta ?? x.unidadIngreso })); }}><option value="">Seleccionar tela</option>{data.telas.filter((x) => x.activo || x.id === rolloForm.idTela).map((x) => <option key={x.id} value={x.id}>{x.nombreTela}{x.activo ? '' : ' · Inactiva'}</option>)}</select><button type="button" className="text-action" onClick={() => openTela(undefined, { kind: 'rollo' })}>＋ Crear tela sin salir del registro</button></label>
         <label className="field-label">Unidad de ingreso *<select className="large-input" value={rolloForm.unidadIngreso} disabled={Boolean(rolloForm.id)} onChange={(e) => setRolloForm((x) => ({ ...x, unidadIngreso: e.target.value as FabricUnit }))}><option value="KG">Kilogramos (KG)</option><option value="M">Metros (M)</option></select></label>
         <label className="field-label">{rolloForm.id ? 'Cantidad original ingresada' : 'Cantidad ingresada *'}<input className="large-input" type="number" step="0.001" min="0.001" required value={rolloForm.cantidadIngreso} disabled={Boolean(rolloForm.id)} onChange={(e) => setRolloForm((x) => ({ ...x, cantidadIngreso: e.target.value }))} placeholder={rolloForm.unidadIngreso === 'KG' ? 'Ej. 20.5' : 'Ej. 45'} /></label>        {telaById.get(rolloForm.idTela)?.rendimientoTeorico != null && <small className="fabric-form-hint fabric-span-2">Rendimiento teórico de esta tela: {nfmt.format(telaById.get(rolloForm.idTela)!.rendimientoTeorico!)} {telaById.get(rolloForm.idTela)?.unidadVenta === 'KG' ? 'm/kg' : 'kg/m'}. Es una referencia y no modifica las mediciones reales.</small>}
         <label className="field-label">Fecha de ingreso *<input className="large-input" type="date" required value={rolloForm.fechaIngreso} onChange={(e) => setRolloForm((x) => ({ ...x, fechaIngreso: e.target.value }))} /></label>
         <div className="field-label"><span>Color de esta tela</span><div className="fabric-provider-inline"><select className="large-input" value={telaColorById.get(rolloForm.idTelaColor)?.idColor ?? ''} onChange={(e) => { const colorId = e.target.value; const variantId = ensureTelaColorAssociation(rolloForm.idTela, colorId); setRolloForm((x) => ({ ...x, idTelaColor: variantId, color: colorById.get(colorId)?.nombre ?? '' })); }}><option value="">Sin color asignado</option>{colorsForTela(rolloForm.idTela).map((x) => <option key={x.idColor} value={x.idColor}>{x.color.nombre}{x.cantidadRollos ? ` · ${x.cantidadRollos} rollos` : ''}{x.hexadecimal ? ' · ' + x.hexadecimal : ''}</option>)}</select><button type="button" className="button secondary" onClick={() => openInlineColor('rollo', rolloForm.idTela)} disabled={!rolloForm.idTela}>＋ Color</button></div><small>Ordenados por los colores con más rollos de esta tela.</small></div>
         <details className="fabric-more fabric-span-2" open={showMoreRollo} onToggle={(e) => setShowMoreRollo((e.currentTarget as HTMLDetailsElement).open)}><summary>Ver más <span>Mediciones adicionales y trazabilidad</span></summary>
-          <div className="fabric-form-grid nested"><label className="field-label">Peso real (KG)<input className="large-input" type="number" min="0" step="0.001" value={!rolloForm.id && rolloForm.unidadIngreso === 'KG' ? rolloForm.cantidadIngreso : rolloForm.pesoKg} onChange={(e) => setRolloForm((x) => ({ ...x, pesoKg: e.target.value }))} disabled={!rolloForm.id && rolloForm.unidadIngreso === 'KG'} placeholder="Vacío = desconocido" /></label>
-          <label className="field-label">Metros reales (M)<input className="large-input" type="number" min="0" step="0.001" value={!rolloForm.id && rolloForm.unidadIngreso === 'M' ? rolloForm.cantidadIngreso : rolloForm.metros} onChange={(e) => setRolloForm((x) => ({ ...x, metros: e.target.value }))} disabled={!rolloForm.id && rolloForm.unidadIngreso === 'M'} placeholder="Vacío = desconocido" /></label>
+          <div className="fabric-form-grid nested">
+          {rolloForm.unidadIngreso === 'KG' ? (
+            <label className="field-label">Metros reales (M)<input className="large-input" type="number" min="0" step="0.001" value={rolloForm.metros} onChange={(e) => setRolloForm((x) => ({ ...x, metros: e.target.value }))} placeholder="Vacío = desconocido" /></label>
+          ) : (
+            <label className="field-label">Peso real (KG)<input className="large-input" type="number" min="0" step="0.001" value={rolloForm.pesoKg} onChange={(e) => setRolloForm((x) => ({ ...x, pesoKg: e.target.value }))} placeholder="Vacío = desconocido" /></label>
+          )}
           <label className="field-label">Partida / lote<input className="large-input" value={rolloForm.idLote} onChange={(e) => setRolloForm((x) => ({ ...x, idLote: e.target.value }))} /></label>
           <label className="field-label">Proveedor<select className="large-input" value={rolloForm.idProveedor} onChange={(e) => setRolloForm((x) => ({ ...x, idProveedor: e.target.value }))}><option value="">Sin proveedor</option>{data.proveedores.map((x) => <option key={x.id} value={x.id}>{x.nombre}</option>)}</select></label>
           <label className="field-label">Ubicación<input className="large-input" value={rolloForm.ubicacion} onChange={(e) => setRolloForm((x) => ({ ...x, ubicacion: e.target.value }))} placeholder="Ej. Estante A2" /></label>
@@ -1205,7 +1352,7 @@ export function FabricModule({ view }: { view: FabricView }) {
         <div className="fabric-purchase-edit-lines">{purchaseForm.lines.map((line, index) => <div className="fabric-purchase-input-line" key={line.idDetalle ?? `new-${index}`}>
           <div className="fabric-purchase-line-head"><strong>{line.idRollo ? `Rollo ${line.idRollo.slice(0,8)} · ${telaById.get(line.idTela)?.nombreTela ?? 'Tela'}` : `Nuevo rollo ${index + 1}`}</strong>{!line.idRollo && <button type="button" className="remove-piece" onClick={() => setPurchaseForm((x) => ({ ...x, lines: x.lines.filter((_,i) => i !== index) }))}>Quitar</button>}</div>
           {line.idRollo ? <div className="fabric-form-grid nested"><label className="field-label">Cantidad comprada<input className="large-input" type="number" min="0.001" step="0.001" value={line.cantidad} onChange={(e) => updatePurchaseLine(index, { cantidad: e.target.value })} /></label><label className="field-label">Precio por {line.unidad}<input className="large-input" type="number" min="0" step="0.0001" value={line.precio} onChange={(e) => updatePurchaseLine(index, { precio: e.target.value })} /></label><div className="fabric-span-2 purchase-edit-line">Unidad original: {line.unidad}. La cantidad y el precio corresponden al historial de compra; corregirlos no modifica el saldo físico medido del rollo.</div></div>
-          : <div className="fabric-form-grid nested"><label className="field-label">Tela<select className="large-input" required value={line.idTela} onChange={(e) => selectPurchaseTextile(index, e.target.value)}><option value="">Seleccionar</option>{data.telas.filter((x) => x.activo).map((x) => <option key={x.id} value={x.id}>{x.nombreTela}</option>)}</select></label><label className="field-label">Unidad<select className="large-input" value={line.unidad} onChange={(e) => selectPurchaseUnit(index, e.target.value as FabricUnit)}><option value="KG">KG</option><option value="M">M</option></select></label><label className="field-label">Cantidad<input className="large-input" type="number" min="0.001" step="0.001" value={line.cantidad} onChange={(e) => updatePurchaseLine(index, { cantidad: e.target.value })} /></label><label className="field-label">Precio por {line.unidad}<input className="large-input" type="number" min="0" step="0.01" value={line.precio} onChange={(e) => updatePurchaseLine(index, { precio: e.target.value, precioAutomatico: false })} />{line.precioAutomatico && line.precio && <small>Precio sugerido de otra compra con este proveedor y tela. Puedes editarlo.</small>}</label><div className="field-label"><span>Color de esta tela</span><div className="fabric-provider-inline"><select className="large-input" value={telaColorById.get(line.idTelaColor)?.idColor ?? ''} onChange={(e) => { const colorId = e.target.value; const variantId = ensureTelaColorAssociation(line.idTela, colorId); updatePurchaseLine(index, { idTelaColor: variantId, color: colorById.get(colorId)?.nombre ?? '' }); }}><option value="">Sin color asignado</option>{colorsForTela(line.idTela).map((x) => <option key={x.idColor} value={x.idColor}>{x.color.nombre}{x.cantidadRollos ? ` · ${x.cantidadRollos} rollos` : ''}{x.hexadecimal ? ' · ' + x.hexadecimal : ''}</option>)}</select><button type="button" className="button secondary" onClick={() => openInlineColor('compra', line.idTela, index)} disabled={!line.idTela}>＋ Color</button></div><small>Ordenados por frecuencia de rollos de esta tela.</small></div><label className="field-label">Partida<input className="large-input" value={line.idLote} onChange={(e) => updatePurchaseLine(index, { idLote: e.target.value })} /></label><details className="fabric-more fabric-span-2"><summary>Mediciones reales adicionales</summary><div className="fabric-form-grid nested"><label className="field-label">Peso real (KG)<input className="large-input" type="number" min="0" step="0.001" value={line.unidad === 'KG' ? line.cantidad : line.pesoKg} onChange={(e) => updatePurchaseLine(index, { pesoKg: e.target.value })} disabled={line.unidad === 'KG'} placeholder="Vacío = desconocido" /></label><label className="field-label">Metros reales (M)<input className="large-input" type="number" min="0" step="0.001" value={line.unidad === 'M' ? line.cantidad : line.metros} onChange={(e) => updatePurchaseLine(index, { metros: e.target.value })} disabled={line.unidad === 'M'} placeholder="Vacío = desconocido" /></label></div></details></div>}
+          : <div className="fabric-form-grid nested"><label className="field-label">Tela<select className="large-input" required value={line.idTela} onChange={(e) => selectPurchaseTextile(index, e.target.value)}><option value="">Seleccionar</option>{data.telas.filter((x) => x.activo).map((x) => <option key={x.id} value={x.id}>{x.nombreTela}</option>)}</select><button type="button" className="text-action" onClick={() => openTela(undefined, { kind: 'compra', lineIndex: index })}>＋ Crear tela</button></label><label className="field-label">Unidad<select className="large-input" value={line.unidad} onChange={(e) => selectPurchaseUnit(index, e.target.value as FabricUnit)}><option value="KG">KG</option><option value="M">M</option></select></label><label className="field-label">Cantidad<input className="large-input" type="number" min="0.001" step="0.001" value={line.cantidad} onChange={(e) => updatePurchaseLine(index, { cantidad: e.target.value })} /></label><label className="field-label">Precio por {line.unidad}<input className="large-input" type="number" min="0" step="0.01" value={line.precio} onChange={(e) => updatePurchaseLine(index, { precio: e.target.value, precioAutomatico: false })} />{line.precioAutomatico && line.precio && <small>Precio sugerido de otra compra con este proveedor y tela. Puedes editarlo.</small>}</label><div className="field-label"><span>Color de esta tela</span><div className="fabric-provider-inline"><select className="large-input" value={telaColorById.get(line.idTelaColor)?.idColor ?? ''} onChange={(e) => { const colorId = e.target.value; const variantId = ensureTelaColorAssociation(line.idTela, colorId); updatePurchaseLine(index, { idTelaColor: variantId, color: colorById.get(colorId)?.nombre ?? '' }); }}><option value="">Sin color asignado</option>{colorsForTela(line.idTela).map((x) => <option key={x.idColor} value={x.idColor}>{x.color.nombre}{x.cantidadRollos ? ` · ${x.cantidadRollos} rollos` : ''}{x.hexadecimal ? ' · ' + x.hexadecimal : ''}</option>)}</select><button type="button" className="button secondary" onClick={() => openInlineColor('compra', line.idTela, index)} disabled={!line.idTela}>＋ Color</button></div><small>Ordenados por frecuencia de rollos de esta tela.</small></div><label className="field-label">Partida<input className="large-input" value={line.idLote} onChange={(e) => updatePurchaseLine(index, { idLote: e.target.value })} /></label><details className="fabric-more fabric-span-2"><summary>Mediciones reales adicionales</summary><div className="fabric-form-grid nested"><label className="field-label">Peso real (KG)<input className="large-input" type="number" min="0" step="0.001" value={line.unidad === 'KG' ? line.cantidad : line.pesoKg} onChange={(e) => updatePurchaseLine(index, { pesoKg: e.target.value })} disabled={line.unidad === 'KG'} placeholder="Vacío = desconocido" /></label><label className="field-label">Metros reales (M)<input className="large-input" type="number" min="0" step="0.001" value={line.unidad === 'M' ? line.cantidad : line.metros} onChange={(e) => updatePurchaseLine(index, { metros: e.target.value })} disabled={line.unidad === 'M'} placeholder="Vacío = desconocido" /></label></div></details></div>}
           <div className="fabric-line-total"><span>Importe de línea</span><strong>{money.format(purchaseLineAmount(line))}</strong></div>
         </div>)}</div>
         <div className="fabric-purchase-summary"><span>Total de la compra</span><strong>{money.format(purchaseForm.lines.reduce((sum,x)=>sum+purchaseLineAmount(x),0))}</strong></div>
@@ -1223,7 +1370,7 @@ export function FabricModule({ view }: { view: FabricView }) {
         <p className="purchase-usability-note">Cada tarjeta es un rollo físico. Al añadir otro, se copian tela, color y precio; ingresa su cantidad individual. El precio sugerido corresponde a la última compra de ese proveedor para esa tela y unidad, y puedes corregirlo.</p>
         <div className="fabric-purchase-edit-lines">{purchaseForm.lines.map((line, index) => <div className="fabric-purchase-input-line" key={index}>
           <div className="fabric-purchase-line-head"><strong>Rollo {index + 1}</strong>{purchaseForm.lines.length > 1 && <button type="button" className="remove-piece" onClick={() => setPurchaseForm((x) => ({ ...x, lines: x.lines.filter((_,i) => i !== index) }))}>Quitar</button>}</div>
-          <div className="fabric-form-grid nested"><label className="field-label">Tela<select className="large-input" required value={line.idTela} onChange={(e) => selectPurchaseTextile(index, e.target.value)}><option value="">Seleccionar</option>{data.telas.filter((x) => x.activo).map((x) => <option key={x.id} value={x.id}>{x.nombreTela}</option>)}</select></label>
+          <div className="fabric-form-grid nested"><label className="field-label">Tela<select className="large-input" required value={line.idTela} onChange={(e) => selectPurchaseTextile(index, e.target.value)}><option value="">Seleccionar</option>{data.telas.filter((x) => x.activo).map((x) => <option key={x.id} value={x.id}>{x.nombreTela}</option>)}</select><button type="button" className="text-action" onClick={() => openTela(undefined, { kind: 'compra', lineIndex: index })}>＋ Crear tela</button></label>
           <label className="field-label">Unidad<select className="large-input" value={line.unidad} onChange={(e) => selectPurchaseUnit(index, e.target.value as FabricUnit)}><option value="KG">KG</option><option value="M">M</option></select></label>
           <label className="field-label">Cantidad comprada *<input className="large-input" type="number" min="0.001" step="0.001" required value={line.cantidad} onChange={(e) => updatePurchaseLine(index, { cantidad: e.target.value })} /></label>
           <label className="field-label">Precio por {line.unidad} *<input className="large-input" type="number" min="0" step="0.0001" required value={line.precio} onChange={(e) => updatePurchaseLine(index, { precio: e.target.value, precioAutomatico: false })} />{line.precioAutomatico && line.precio && <small>Último precio de este proveedor para esta tela. Puedes modificarlo.</small>}</label>

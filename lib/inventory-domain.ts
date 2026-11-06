@@ -5,7 +5,7 @@
  */
 export type SizeGroup = { id: string; name: string; description?: string };
 export type Size = { id: string; groupId: string; label: string; sortOrder: number };
-export type ManufacturingModel = { id: string; name: string; sizeGroupId: string; secondaryFabricSlots?: number; updatedAt?: string };
+export type ManufacturingModel = { id: string; name: string; sizeGroupId: string; family?: string; secondaryFabricSlots?: number; secondaryColorSlots?: number; updatedAt?: string };
 export type Laterality = 'simetrica' | 'izquierda' | 'derecha' | 'ninguna';
 export type StockSide = 'izquierda' | 'derecha';
 export type ModelPiece = {
@@ -18,7 +18,9 @@ export type ModelPiece = {
   sortOrder: number;
   /** Ranura dinámica de material: principal o secundaria_N, sin límite fijo. */
   fabricSlot?: string;
-  /** Color del catálogo global; el HEX/CMYK final se resuelve para la tela elegida en el producto. */
+  /** Posición de color que se resolverá en cada modelo comercial: principal, secundaria_N o comodín. */
+  colorSlot?: string;
+  /** Color fijo histórico, conservado solo para compatibilidad con registros antiguos. */
   colorId?: string | null;
   /** True cuando el usuario eligió un color distinto del valor heredado del modelo. */
   colorOverride?: boolean;
@@ -38,6 +40,7 @@ export type PieceMovement = {
   side?: StockSide;
   note: string;
   date: string;
+  sourceProductionOrderId?: string | null;
 };
 export type PieceBalance = { pieceId: string; quantity: number };
 export type SymmetricStock = {
