@@ -29,8 +29,8 @@ type StockFilter = 'Con stock' | 'Vacío' | 'Todos';
 type SymmetricEntryMode = 'paridad' | 'lados';
 type StockSlot = 'paridad' | StockSide;
 type FabricSlot = string;
-type ModelFormPiece = { id: string; name: string; unitsPerGarment: string; laterality: Laterality; fabricSlot: FabricSlot; colorId: string; colorOverride: boolean; fabricType: string; color: string };
-type ModelFormState = { editingId: string | null; name: string; sizeGroupId: string; family: string; secondaryFabricSlots: number; pieces: ModelFormPiece[] };
+type ModelFormPiece = { id: string; name: string; unitsPerGarment: string; laterality: Laterality; fabricSlot: FabricSlot; colorSlot: string; colorId: string; colorOverride: boolean; fabricType: string; color: string };
+type ModelFormState = { editingId: string | null; name: string; sizeGroupId: string; family: string; secondaryFabricSlots: number; secondaryColorSlots: number; pieces: ModelFormPiece[] };
 
 const STORAGE = {
   groups: 'telastock-size-groups-v1',
@@ -64,29 +64,49 @@ const nf = new Intl.NumberFormat('es-PE', { maximumFractionDigits: 0 });
 const fmt = (value: number) => nf.format(value);
 const newId = () => typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const fabricSlotLabel = (slot: FabricSlot) => {
-  if (slot === 'principal') return 'Tela principal';
+  if (slot === 'cualquiera') return 'Cualquier tela';
+  if (slot === 'principal') return 'Tela principal 1';
   const match = /^secundaria_(\\d+)$/.exec(slot);
   return match ? `Tela secundaria ${Number(match[1])}` : slot;
 };
 const fabricSlotOptions = (secondaryCount: number): FabricSlot[] =>
-  ['principal', ...Array.from({ length: secondaryCount }, (_, index) => `secundaria_${index + 1}`)];
+  ['cualquiera', 'principal', ...Array.from({ length: secondaryCount }, (_, index) => `secundaria_${index + 1}`)];
+const colorSlotLabel = (slot: string) => {
+  if (slot === 'ninguna') return 'Sin color';
+  if (slot === 'cualquiera') return 'Cualquier color';
+  if (slot === 'principal') return 'Color principal 1';
+  const match = /^secundaria_(\\d+)$/.exec(slot);
+  return match ? `Color secundario ${Number(match[1])}` : 'Posición de color inválida';
+};
+const colorSlotOptions = (secondaryCount: number) => [
+  'ninguna', 'cualquiera', 'principal', ...Array.from({ length: secondaryCount }, (_, index) => `secundaria_${index + 1}`),
+];
+const secondaryColorSlotIndex = (slot?: string) => {
+  const match = /^secundaria_(\\d+)$/.exec(slot ?? '');
+  return match ? Number(match[1]) : 0;
+};
 const secondarySlotIndex = (slot?: string) => {
   const match = /^secundaria_(\\d+)$/.exec(slot ?? '');
   return match ? Number(match[1]) : 0;
 };
 const isValidFabricSlot = (slot: string, secondaryCount: number) =>
-  slot === 'principal' || (secondarySlotIndex(slot) > 0 && secondarySlotIndex(slot) <= secondaryCount);
+  slot === 'cualquiera' || slot === 'principal' || (secondarySlotIndex(slot) > 0 && secondarySlotIndex(slot) <= secondaryCount);
+const isValidColorSlot = (slot: string, secondaryCount: number) =>
+  slot === 'ninguna' || slot === 'cualquiera' || slot === 'principal' || (secondaryColorSlotIndex(slot) > 0 && secondaryColorSlotIndex(slot) <= secondaryCount);
 const secondarySlotCountForModel = (model: ManufacturingModel, modelPieces: ModelPiece[]) =>
   Math.max(model.secondaryFabricSlots ?? 0, ...modelPieces.filter((piece) => piece.modelId === model.id).map((piece) => secondarySlotIndex(piece.fabricSlot)), 0);
+const secondaryColorSlotCountForModel = (model: ManufacturingModel, modelPieces: ModelPiece[]) =>
+  Math.max(model.secondaryColorSlots ?? 0, ...modelPieces.filter((piece) => piece.modelId === model.id).map((piece) => secondaryColorSlotIndex(piece.colorSlot)), 0);
 const normalizeModelsWithSlots = (models: ManufacturingModel[], modelPieces: ModelPiece[]) =>
-  models.map((model) => ({ ...model, secondaryFabricSlots: secondarySlotCountForModel(model, modelPieces) }));
+  models.map((model) => ({ ...model, secondaryFabricSlots: secondarySlotCountForModel(model, modelPieces), secondaryColorSlots: secondaryColorSlotCountForModel(model, modelPieces) }));
 const blankModelForm = (sizeGroupId: string, colorId = ''): ModelFormState => ({
   editingId: null,
   name: '',
   sizeGroupId,
   family: '',
   secondaryFabricSlots: 0,
-  pieces: [{ id: '', name: 'Pecho', unitsPerGarment: '1', laterality: 'ninguna', fabricSlot: 'principal', colorId, colorOverride: false, fabricType: 'Tela principal', color: '' }],
+  secondaryColorSlots: 0,
+  pieces: [{ id: '', name: 'Pecho', unitsPerGarment: '1', laterality: 'ninguna', fabricSlot: 'principal', colorSlot: 'principal', colorId, colorOverride: false, fabricType: 'Tela principal 1', color: '' }],
 });
 
 export default function Home() {
@@ -155,14 +175,18 @@ export default function Home() {
       const colors = [...colorMap.values()];
       localStorage.setItem(FABRIC_STORAGE_KEYS.colores, JSON.stringify(colors));
       setFabricColors(colors);
-      const migratedPieces = storedPieces.map((piece) => ({
-        ...piece,
-        fabricType: fabricSlotLabel(piece.fabricSlot ?? 'principal'),
-        fabricSlot: piece.fabricSlot ?? 'principal',
-        color: piece.color ?? 'Sin especificar',
-        colorId: piece.colorId ?? colors.find((color) => color.nombre.toLocaleLowerCase('es') === (piece.color ?? '').toLocaleLowerCase('es'))?.id ?? null,
-        colorOverride: piece.colorOverride ?? true,
-      }));
+      const migratedPieces = storedPieces.map((piece) => {
+        const legacyColorId = piece.colorId ?? colors.find((color) => color.nombre.toLocaleLowerCase('es') === (piece.color ?? '').toLocaleLowerCase('es'))?.id ?? null;
+        return {
+          ...piece,
+          fabricType: fabricSlotLabel(piece.fabricSlot ?? 'principal'),
+          fabricSlot: piece.fabricSlot ?? 'principal',
+          color: piece.color ?? 'Sin especificar',
+          colorSlot: piece.colorSlot ?? (legacyColorId ? 'principal' : 'ninguna'),
+          colorId: legacyColorId,
+          colorOverride: piece.colorOverride ?? true,
+        };
+      });
       setPieces(migratedPieces);
       const migratedModels = normalizeModelsWithSlots(migrateBaseModelFamilies(storedModels, legacyProductModels), migratedPieces);
       setModels(migratedModels);
@@ -502,7 +526,8 @@ export default function Home() {
       sizeGroupId: model.sizeGroupId,
       family: model.family ?? '',
       secondaryFabricSlots: secondarySlotCountForModel(model, pieces),
-      pieces: modelPieces(model.id).map((piece) => ({ id: piece.id, name: piece.name, unitsPerGarment: String(piece.unitsPerGarment), laterality: piece.laterality, fabricSlot: piece.fabricSlot ?? 'principal', colorId: piece.colorId ?? colorIdForName(piece.color ?? ''), colorOverride: piece.colorOverride ?? true, fabricType: piece.fabricType ?? '', color: piece.color ?? '' })),
+      secondaryColorSlots: secondaryColorSlotCountForModel(model, pieces),
+      pieces: modelPieces(model.id).map((piece) => ({ id: piece.id, name: piece.name, unitsPerGarment: String(piece.unitsPerGarment), laterality: piece.laterality, fabricSlot: piece.fabricSlot ?? 'principal', colorSlot: piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna'), colorId: piece.colorId ?? colorIdForName(piece.color ?? ''), colorOverride: piece.colorOverride ?? true, fabricType: piece.fabricType ?? '', color: piece.color ?? '' })),
     });
     setShowModelForm(true);
   }
@@ -516,7 +541,7 @@ export default function Home() {
     if (!cleanName) { setNoticeMessage('Escribe el nombre del modelo.', 'error'); return; }
     if (!modelForm.sizeGroupId) { setNoticeMessage('Selecciona un grupo de tallas.', 'error'); return; }
     if (!baseModelFamilies.some((family) => family.value === modelForm.family)) { setNoticeMessage('Selecciona la familia del patrón base.', 'error'); return; }
-    if (cleanPieces.length === 0 || cleanPieces.some((piece) => !piece.name || !Number.isInteger(piece.units) || piece.units < 1 || !isValidFabricSlot(piece.fabricSlot, modelForm.secondaryFabricSlots))) {
+    if (cleanPieces.length === 0 || cleanPieces.some((piece) => !piece.name || !Number.isInteger(piece.units) || piece.units < 1 || !isValidFabricSlot(piece.fabricSlot, modelForm.secondaryFabricSlots) || !isValidColorSlot(piece.colorSlot, modelForm.secondaryColorSlots))) {
       setNoticeMessage('Cada molde debe tener nombre y una cantidad requerida entera mayor que cero.', 'error'); return;
     }
     if (cleanPieces.some((piece) => piece.colorId && !fabricColorById.has(piece.colorId))) {
@@ -550,10 +575,10 @@ export default function Home() {
     }
 
     const modelId = modelForm.editingId ?? newId();
-    const savedModel: ManufacturingModel = { id: modelId, name: cleanName, sizeGroupId: modelForm.sizeGroupId, family: modelForm.family, secondaryFabricSlots: modelForm.secondaryFabricSlots, updatedAt: new Date().toISOString() };
+    const savedModel: ManufacturingModel = { id: modelId, name: cleanName, sizeGroupId: modelForm.sizeGroupId, family: modelForm.family, secondaryFabricSlots: modelForm.secondaryFabricSlots, secondaryColorSlots: modelForm.secondaryColorSlots, updatedAt: new Date().toISOString() };
     const savedPieces: ModelPiece[] = cleanPieces.map((formPiece, index) => ({
       id: formPiece.id || newId(), modelId, name: formPiece.name, unitsPerGarment: formPiece.units,
-      laterality: formPiece.laterality, fabricSlot: formPiece.fabricSlot, colorId: formPiece.colorId || null,
+      laterality: formPiece.laterality, fabricSlot: formPiece.fabricSlot, colorSlot: formPiece.colorSlot, colorId: formPiece.colorId || null,
       fabricType: fabricSlotLabel(formPiece.fabricSlot), color: fabricColorById.get(formPiece.colorId)?.nombre ?? 'Sin especificar', colorOverride: formPiece.colorOverride, sortOrder: index + 1, archived: false,
     }));
     setModels((previous) => modelForm.editingId ? previous.map((model) => model.id === modelId ? savedModel : model) : [...previous, savedModel]);
