@@ -317,6 +317,10 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
     Number.isFinite(x.wastePercent) && x.wastePercent >= 0 &&
     (x.specificationLabel === undefined || typeof x.specificationLabel === 'string')
   );
+  const validPieceOverrides = (value: unknown) => value === undefined || Boolean(value && typeof value === 'object' && !Array.isArray(value) &&
+    Object.values(value as Record<string, unknown>).every((entry) => Boolean(entry && typeof entry === 'object' && !Array.isArray(entry) &&
+      ((entry as { textileId?: unknown }).textileId === null || typeof (entry as { textileId?: unknown }).textileId === 'string') &&
+      ((entry as { colorId?: unknown }).colorId === null || typeof (entry as { colorId?: unknown }).colorId === 'string'))));
   if (!output.variants.every((x) => {
     const supply = output.supplies.find((item) => item.id === x.supplyId);
     return Boolean(supply && x.name.trim() && (x.textileId === null || typeof x.textileId === 'string') &&
@@ -436,7 +440,7 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
   if (!output.familyRecipes.every((x) => x.family.trim() && x.name.trim() && validMaterials(x.materials))) {
     throw new Error('Hay recetas generales con materiales inválidos.');
   }
-  if (!output.productModels.every((x) => x.name.trim() && (x.collectionId === null || x.collectionId === undefined || productCollectionIds.has(x.collectionId)) && typeof x.baseModelId === 'string' && Array.isArray(x.components) && x.components.every((c) => componentIds.has(c.componentId) && Number.isFinite(c.quantity) && c.quantity > 0 && (c.materialSpecifications === undefined || (c.materialSpecifications && typeof c.materialSpecifications === 'object' && Object.entries(c.materialSpecifications).every(([materialId, spec]) => typeof materialId === 'string' && spec && typeof spec.label === 'string' && typeof spec.bySize === 'object' && validateSizeSpecification(spec, Object.keys(spec.bySize)) && Object.values(spec.bySize).every((value) => typeof value === 'string' && value.trim().length > 0))))) && validMaterials(x.additionalMaterials))) {
+  if (!output.productModels.every((x) => x.name.trim() && (x.collectionId === null || x.collectionId === undefined || productCollectionIds.has(x.collectionId)) && typeof x.baseModelId === 'string' && Array.isArray(x.components) && x.components.every((c) => componentIds.has(c.componentId) && Number.isFinite(c.quantity) && c.quantity > 0 && validPieceOverrides(c.pieceOverrides) && (c.materialSpecifications === undefined || (c.materialSpecifications && typeof c.materialSpecifications === 'object' && Object.entries(c.materialSpecifications).every(([materialId, spec]) => typeof materialId === 'string' && spec && typeof spec.label === 'string' && typeof spec.bySize === 'object' && validateSizeSpecification(spec, Object.keys(spec.bySize)) && Object.values(spec.bySize).every((value) => typeof value === 'string' && value.trim().length > 0))))) && validPieceOverrides(x.basePieceOverrides) && validMaterials(x.additionalMaterials))) {
     throw new Error('Hay modelos configurados con componentes o materiales inválidos.');
   }
   const productModelIds = new Set(output.productModels.map((product) => product.id));
@@ -2573,7 +2577,7 @@ export function ProductionModule({
             <div className="production-subheading"><strong>Inventario auxiliar · {product.name}</strong><span className="count-badge">{productPieces.length} piezas</span></div>
             <p className="production-muted">Tabla de tallas: <strong>{productSizeGroup?.name ?? 'No disponible'}</strong>. El saldo pertenece a este modelo y no se comparte con otras prendas que reutilicen el mismo componente.</p>
             {unassignedLegacyMovements > 0 && <div className="notice info">Hay {format(unassignedLegacyMovements)} movimientos anteriores de componentes sin modelo asociado. No se suman a este inventario para evitar mezclar prendas. Registra aquí el saldo inicial correcto de este modelo.</div>}
-            {productPieces.map(({ component, piece, selection, fabricDescription }) => <article className="production-component-stock-piece" key={selection.id + ':' + piece.id}>
+            {productPieces.map(({ component, piece, selection, fabricDescription, colorDescription }) => <article className="production-component-stock-piece" key={selection.id + ':' + piece.id}>
               <div className="production-component-stock-title">
                 <div><strong>{component.name} · {piece.name}</strong><small>{piece.laterality === 'simetrica' ? 'Control por izquierda / derecha' : 'Control por unidades'} · {piece.unitsPerGarment * selection.quantity} por prenda{fabricDescription ? ' · ' + fabricDescription : ''}{colorDescription ? ' · ' + colorDescription : ''}</small></div>
                 <button className="button secondary" onClick={() => openComponentPieceMovement(product.id, component, piece)}>Registrar movimiento</button>
