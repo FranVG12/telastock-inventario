@@ -431,7 +431,11 @@ const componentTypes = ['Cuello', 'Bolsillo', 'Puño', 'Pretina', 'Tapetera', 'C
 const unitLabel: Record<StockUnit, string> = { und: 'unidades', m: 'm', cm: 'cm', g: 'g', kg: 'kg', l: 'l', ml: 'ml' };
 const id = () => typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : 'prod-' + Date.now() + '-' + Math.random().toString(36).slice(2);
 const productFabricSlotsForBaseModel = (model: ManufacturingModel) => ['principal', ...Array.from({ length: Math.max(0, Math.floor(model.secondaryFabricSlots ?? 0)) }, (_, index) => 'secundaria_' + (index + 1))];
-const productFabricSlotLabel = (slot: string) => slot === 'principal' ? 'Tela principal 1' : slot.replace(/^secundaria_(\\d+)$/, 'Tela secundaria $1');
+const productFabricSlotLabel = (slot: string) => {
+  if (slot === 'principal') return 'Tela principal 1';
+  const match = /^secundaria_(\d+)$/.exec(slot);
+  return match ? 'Tela secundaria ' + Number(match[1]) : slot;
+};
 const now = () => new Date().toISOString();
 const numberOrNull = (value: string) => value.trim() === '' ? null : Number(value);
 const format = (value: number) => new Intl.NumberFormat('es-PE', { maximumFractionDigits: 3 }).format(value);
@@ -596,6 +600,9 @@ export function ProductionModule({
   const [showProductCollectionCreator, setShowProductCollectionCreator] = useState(false);
   const [newProductCollectionName, setNewProductCollectionName] = useState('');
   const [productBaseId, setProductBaseId] = useState('');
+  const [productFabricAssignments, setProductFabricAssignments] = useState<Record<string, string>>({});
+  const [editingProductFabricId, setEditingProductFabricId] = useState('');
+  const [editingProductFabricAssignments, setEditingProductFabricAssignments] = useState<Record<string, string>>({});
   const [productDescription, setProductDescription] = useState('');
   const [productComponentIds, setProductComponentIds] = useState<string[]>([]);
   const [selectedProductId, setSelectedProductId] = useState('');
@@ -1017,6 +1024,12 @@ export function ProductionModule({
 
   const textileName = (textileId: string | null | undefined) => textileId ? textileContext.telas.find((x) => x.id === textileId)?.nombreTela ?? '' : 'Ninguna';
   const componentColorName = (colorId: string | null | undefined) => colorId ? textileContext.colores.find((x) => x.id === colorId)?.nombre ?? 'Color no disponible' : 'Sin color';
+  const selectedProductBasePattern = baseModels.find((model) => model.id === productBaseId);
+  const selectedProductFabricSlots = selectedProductBasePattern ? productFabricSlotsForBaseModel(selectedProductBasePattern) : [];
+  const activeTextiles = textileContext.telas.filter((textile) => textile.activo !== false).slice().sort((a, b) => a.nombreTela.localeCompare(b.nombreTela, 'es'));
+  const editingFabricProduct = data.productModels.find((product) => product.id === editingProductFabricId);
+  const editingFabricBasePattern = editingFabricProduct ? baseModels.find((model) => model.id === editingFabricProduct.baseModelId) : undefined;
+  const editingFabricSlots = editingFabricBasePattern ? productFabricSlotsForBaseModel(editingFabricBasePattern) : [];
   const textileColorOptions = textileContext.telaColores.filter((x) => x.idTela === variantTextileId && x.activo);
   const activeProduct = data.productModels.find((x) => x.id === selectedProductId && x.active);
   const selectedStockProductModel = data.productModels.find((x) => x.id === selectedStockProductModelId && x.active);
