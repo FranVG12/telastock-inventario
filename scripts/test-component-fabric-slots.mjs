@@ -66,3 +66,57 @@ test('presenta etiquetas inequívocas para la posición seleccionada', () => {
   assert.equal(componentFabricSlotLabel('secundaria_2'), 'Tela secundaria 2');
   assert.equal(componentFabricSlotLabel('ninguna'), 'Sin tela vinculada');
 });
+
+const sizeSpecSource = readFileSync(new URL('../lib/material-size-specifications.ts', import.meta.url), 'utf8');
+const sizeSpecCompiled = ts.transpileModule(sizeSpecSource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText;
+const sizeSpecModule = { exports: {} };
+vm.runInNewContext(sizeSpecCompiled, { exports: sizeSpecModule.exports, module: sizeSpecModule });
+const { mapSizeSpecificationRules, validateSizeSpecification, describeSizeSpecification } = sizeSpecModule.exports;
+
+test('configura cierres por grupos de tallas sin convertirlos en inventario por variante', () => {
+  const sizes = ['4','6','8','10','12','14','16','S','M','L','XL'];
+  const rules = [
+    { value: '13 cm', sizeIds: ['4','6','8'] },
+    { value: '15 cm', sizeIds: ['10','12','14'] },
+    { value: '18 cm', sizeIds: ['16','S','M','L','XL'] },
+  ];
+  const mapped = mapSizeSpecificationRules(rules, sizes);
+  mapped.label = 'Longitud';
+  assert.equal(mapped.bySize['4'], '13 cm');
+  assert.equal(mapped.bySize['8'], '13 cm');
+  assert.equal(mapped.bySize['10'], '15 cm');
+  assert.equal(mapped.bySize['14'], '15 cm');
+  assert.equal(mapped.bySize['16'], '18 cm');
+  assert.equal(mapped.bySize.XL, '18 cm');
+  assert.equal(describeSizeSpecification(mapped, 'M'), 'Longitud: 18 cm');
+  assert.equal(validateSizeSpecification(mapped, sizes), true);
+});
+
+test('configura cinta elástica rígida por grupos sin mostrar tallas no incluidas', () => {
+  const sizes = ['4','6','8','10','12','14','16','S','M','L','XL'];
+  const mapped = mapSizeSpecificationRules([
+    { value: '2.5 cm', sizeIds: ['4','6','8'] },
+    { value: '3 cm', sizeIds: ['10','12','14'] },
+    { value: '3.5 cm', sizeIds: ['16','S','M'] },
+    { value: '4 cm', sizeIds: ['L','XL'] },
+  ], sizes);
+  assert.equal(mapped.bySize['4'], '2.5 cm');
+  assert.equal(mapped.bySize['14'], '3 cm');
+  assert.equal(mapped.bySize.S, '3.5 cm');
+  assert.equal(mapped.bySize.XL, '4 cm');
+});
+
+test('rechaza tallas duplicadas, faltantes y valores vacíos en reglas', () => {
+  assert.throws(() => mapSizeSpecificationRules([
+    { value: '13 cm', sizeIds: ['4','6'] },
+    { value: '15 cm', sizeIds: ['6','8'] },
+  ], ['4','6','8']), /dos grupos/);
+  assert.throws(() => mapSizeSpecificationRules([
+    { value: '13 cm', sizeIds: ['4','6'] },
+  ], ['4','6','8']), /Falta definir/);
+  assert.throws(() => mapSizeSpecificationRules([
+    { value: '', sizeIds: ['4'] },
+  ], ['4']), /medida/);
+});
