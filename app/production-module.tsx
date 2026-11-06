@@ -1001,7 +1001,11 @@ export function ProductionModule({
   const componentColorName = (colorId: string | null | undefined) => colorId ? textileContext.colores.find((x) => x.id === colorId)?.nombre ?? 'Color no disponible' : 'Sin color';
   const textileColorOptions = textileContext.telaColores.filter((x) => x.idTela === variantTextileId && x.activo);
   const activeProduct = data.productModels.find((x) => x.id === selectedProductId && x.active);
-  const selectedStockComponent = data.components.find((x) => x.id === selectedStockComponentId && x.active);
+  const selectedStockProductModel = data.productModels.find((x) => x.id === selectedStockProductModelId && x.active);
+  const selectedStockProductSizes = selectedStockProductModel ? productSizeOptions(selectedStockProductModel) : [];
+  const selectedStockComponent = selectedStockProductModel?.components.some((selection) => selection.componentId === selectedStockComponentId)
+    ? data.components.find((component) => component.id === selectedStockComponentId && component.active)
+    : undefined;
   const selectedComponentStockPiece = selectedStockComponent?.pieces.find((x) => x.id === componentStockPieceId);
   function getProductFabricableCapacity(product: ConfiguredProductModel, sizeId: string) {
     const baseModel = baseModels.find((item) => item.id === product.baseModelId);
@@ -1014,15 +1018,16 @@ export function ProductionModule({
     const baseCapacity = baseModel ? getCompleteUnits(baseModelPieces, effectiveBaseLedger, sizeId) : 0;
     let componentCapacity = Number.POSITIVE_INFINITY;
     let limitingComponent = '';
+    const productReservations = ordersHoldingStock.filter((order) => order.productModelId === product.id);
     product.components.forEach((selection) => {
       const component = data.components.find((item) => item.id === selection.componentId && item.active);
       if (!component || component.pieces.length === 0) return;
       let currentComponentCapacity = Number.POSITIVE_INFINITY;
       component.pieces.forEach((piece) => {
-        const reserved = ordersHoldingStock.flatMap((order) => order.componentPieces)
-          .filter((line) => line.pieceId === piece.id && line.sizeId === sizeId);
+        const reserved = productReservations.flatMap((order) => order.componentPieces)
+          .filter((line) => line.productModelId === product.id && line.pieceId === piece.id && line.sizeId === sizeId);
         const ledger: DomainPieceMovement[] = [
-          ...componentPieceDomainLedger(piece.id, sizeId),
+          ...componentPieceDomainLedger(product.id, piece.id, sizeId),
           ...reserved.map((line) => ({ id: line.id, pieceId: line.pieceId, sizeId: line.sizeId, delta: -line.quantity, kind: 'salida' as const, side: line.side ?? undefined, note: 'Reserva de orden de producción', date: '' })),
         ];
         const required = piece.unitsPerGarment * selection.quantity;
@@ -1188,11 +1193,11 @@ export function ProductionModule({
             if (!Number.isInteger(perGarment) || perGarment % 2 !== 0) throw new Error('La pieza simétrica "' + piece.name + '" necesita una cantidad par por prenda.');
             const eachSide = required / 2;
             if (eachSide > 0) {
-              auxiliary.push({ id: id(), componentId: component.id, pieceId: piece.id, sizeId, side: 'izquierda', quantity: eachSide });
-              auxiliary.push({ id: id(), componentId: component.id, pieceId: piece.id, sizeId, side: 'derecha', quantity: eachSide });
+              auxiliary.push({ id: id(), productModelId: product.id, componentId: component.id, pieceId: piece.id, sizeId, side: 'izquierda', quantity: eachSide });
+              auxiliary.push({ id: id(), productModelId: product.id, componentId: component.id, pieceId: piece.id, sizeId, side: 'derecha', quantity: eachSide });
             }
           } else if (required > 0) {
-            auxiliary.push({ id: id(), componentId: component.id, pieceId: piece.id, sizeId, side: null, quantity: required });
+            auxiliary.push({ id: id(), productModelId: product.id, componentId: component.id, pieceId: piece.id, sizeId, side: null, quantity: required });
           }
         }
       }
@@ -1294,10 +1299,10 @@ export function ProductionModule({
     return getPieceStock(baseMovements, piece.id, sizeId);
   }
 
-  function currentComponentPieceBalance(pieceId: string, sizeId: string, side: 'izquierda' | 'derecha' | null): number {
+  function currentComponentPieceBalance(productModelId: string, pieceId: string, sizeId: string, side: 'izquierda' | 'derecha' | null): number {
     const piece = data.components.flatMap((component) => component.pieces).find((item) => item.id === pieceId);
     if (!piece) return 0;
-    const ledger = componentPieceDomainLedger(pieceId, sizeId);
+    const ledger = componentPieceDomainLedger(productModelId, pieceId, sizeId);
     if (piece.laterality === 'simetrica') {
       const stock = getSymmetricStock(ledger, pieceId, sizeId);
       return side === 'derecha' ? stock.right : stock.left;
@@ -1370,8 +1375,8 @@ export function ProductionModule({
     }
     for (const line of order.componentPieces) {
       const piece = data.components.find((component) => component.id === line.componentId)?.pieces.find((item) => item.id === line.pieceId);
-      const balance = currentComponentPieceBalance(line.pieceId, line.sizeId, line.side);
-      const reserved = reservedPieceQuantity(otherOrders.flatMap((activeOrder) => activeOrder.componentPieces), line.pieceId, line.sizeId, line.side);
+      const balance = currentComponentPieceBalance(order.productModelId, line.pieceId, line.sizeId, line.side);
+      const reserved = reservedPieceQuantity(otherOrders.filter((activeOrder) => activeOrder.productModelId === order.productModelId).flatMap((activeOrder) => activeOrder.componentPieces), line.pieceId, line.sizeId, line.side);
       if (balance - reserved + 0.00001 < line.quantity) issues.push((piece?.name ?? 'Pieza auxiliar') + ' · ' + (sizes.find((size) => size.id === line.sizeId)?.label ?? 'Talla') + ': faltan ' + format(line.quantity - Math.max(0, balance - reserved)) + ' piezas' + (line.side ? ' ' + line.side : ''));
     }
     if (issues.length > 0) return tell('No se reservó ' + order.number + '. ' + issues.join(' · '), 'error');
@@ -1463,8 +1468,8 @@ export function ProductionModule({
     }
     for (const line of order.componentPieces) {
       const piece = data.components.find((component) => component.id === line.componentId)?.pieces.find((item) => item.id === line.pieceId);
-      const reserved = reservedPieceQuantity(otherOrders.flatMap((activeOrder) => activeOrder.componentPieces), line.pieceId, line.sizeId, line.side);
-      if (currentComponentPieceBalance(line.pieceId, line.sizeId, line.side) - reserved + 0.00001 < line.quantity) issues.push((piece?.name ?? 'Pieza auxiliar') + ': el stock reservado ya no está disponible.');
+      const reserved = reservedPieceQuantity(otherOrders.filter((activeOrder) => activeOrder.productModelId === order.productModelId).flatMap((activeOrder) => activeOrder.componentPieces), line.pieceId, line.sizeId, line.side);
+      if (currentComponentPieceBalance(order.productModelId, line.pieceId, line.sizeId, line.side) - reserved + 0.00001 < line.quantity) issues.push((piece?.name ?? 'Pieza auxiliar') + ': el stock reservado ya no está disponible.');
     }
     const textileMaterials = new Map<string, number>();
     actualMaterials.forEach((line) => {
@@ -1540,7 +1545,7 @@ export function ProductionModule({
       note: 'Consumo real de orden ' + order.number, date: timestamp, sourceProductionOrderId: order.id,
     }));
     const componentMovements: ComponentPieceMovement[] = order.componentPieces.map((line) => ({
-      id: id(), componentId: line.componentId, pieceId: line.pieceId, sizeId: line.sizeId,
+      id: id(), productModelId: order.productModelId, componentId: line.componentId, pieceId: line.pieceId, sizeId: line.sizeId,
       side: line.side ?? undefined, delta: -line.quantity, kind: 'salida',
       note: 'Consumo de orden ' + order.number, date: timestamp, sourceProductionOrderId: order.id,
     }));
