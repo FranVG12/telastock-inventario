@@ -1486,6 +1486,24 @@ export function ProductionModule({
     const rows: ProductColorAssignment[] = slots.map((colorSlot) => ({
       id: id(), productModelId: product.id, colorSlot, colorId: editingProductColorAssignments[colorSlot], createdAt: timestamp, updatedAt: timestamp,
     }));
+    const basePiecesForProduct = basePieces.filter((piece) => piece.modelId === base.id && !piece.archived);
+    basePiecesForProduct.forEach((piece) => {
+      const colorSlot = piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna');
+      const override = product.basePieceOverrides?.[piece.id];
+      const textileId = piece.fabricSlot === 'cualquiera' ? override?.textileId : data.productFabrics.find((assignment) => assignment.productModelId === product.id && assignment.fabricSlot === (piece.fabricSlot ?? 'principal'))?.textileId;
+      const colorId = colorSlot === 'cualquiera' ? override?.colorId : colorSlot === 'ninguna' ? null : editingProductColorAssignments[colorSlot];
+      ensureProductTextileColorAssociation(textileId, colorId);
+    });
+    product.components.forEach((selection) => {
+      const component = data.components.find((item) => item.id === selection.componentId);
+      component?.pieces.forEach((piece) => {
+        const colorSlot = piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna');
+        const override = selection.pieceOverrides?.[piece.id];
+        const textileId = piece.fabricSlot === 'cualquiera' ? override?.textileId : piece.fabricSlot === 'ninguna' ? null : data.productFabrics.find((assignment) => assignment.productModelId === product.id && assignment.fabricSlot === piece.fabricSlot)?.textileId;
+        const colorId = colorSlot === 'cualquiera' ? override?.colorId : colorSlot === 'ninguna' ? null : editingProductColorAssignments[colorSlot];
+        ensureProductTextileColorAssociation(textileId, colorId);
+      });
+    });
     setData((current) => ({
       ...current,
       productModels: current.productModels.map((item) => item.id === product.id ? { ...item, updatedAt: timestamp } : item),
