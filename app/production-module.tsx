@@ -2231,6 +2231,32 @@ export function ProductionModule({
         </form>
       </section>
     </div>}
+    {quickTextileDraft && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setQuickTextileDraft(null); }}>
+      <section className="modal production-modal product-fabrics-modal" role="dialog" aria-modal="true" aria-labelledby="quick-textile-title">
+        <div className="modal-heading"><div><h2 id="quick-textile-title">Nueva tela</h2><p>Se guardará en el catálogo general y quedará seleccionada donde la necesitas.</p></div><button className="icon-button" type="button" onClick={() => setQuickTextileDraft(null)}>×</button></div>
+        <form className="production-form" onSubmit={saveQuickTextile}>
+          <label className="field-label">Nombre de tela *<input className="large-input" value={quickTextileDraft.name} onChange={(event) => setQuickTextileDraft((current) => current ? { ...current, name: event.target.value } : current)} placeholder="Ej. Polinam" required autoFocus /></label>
+          <div className="production-form-grid">
+            <label className="field-label">Unidad habitual<select className="large-input" value={quickTextileDraft.unit} onChange={(event) => setQuickTextileDraft((current) => current ? { ...current, unit: event.target.value as 'KG' | 'M', theoreticalYield: '' } : current)}><option value="KG">Kilogramos (KG)</option><option value="M">Metros (M)</option></select></label>
+            <label className="field-label">Ancho nominal (m)<input className="large-input" type="number" min="0.001" step="0.001" value={quickTextileDraft.width} onChange={(event) => setQuickTextileDraft((current) => current ? { ...current, width: event.target.value } : current)} placeholder="Opcional" /></label>
+          </div>
+          <label className="field-label">Rendimiento teórico ({quickTextileDraft.unit === 'KG' ? 'm/kg' : 'kg/m'})<input className="large-input" type="number" min="0.000001" step="0.000001" value={quickTextileDraft.theoreticalYield} onChange={(event) => setQuickTextileDraft((current) => current ? { ...current, theoreticalYield: event.target.value } : current)} placeholder="Opcional" /></label>
+          <label className="field-label">Descripción<input className="large-input" value={quickTextileDraft.description} onChange={(event) => setQuickTextileDraft((current) => current ? { ...current, description: event.target.value } : current)} placeholder="Composición, acabado o uso (opcional)" /></label>
+          <div className="notice info">La tela se crea activa. Los colores se agregan después desde el catálogo, sin inventar variantes.</div>
+          <div className="form-actions"><button type="button" className="button secondary" onClick={() => setQuickTextileDraft(null)}>Cancelar</button><button className="button primary">Crear y seleccionar</button></div>
+        </form>
+      </section>
+    </div>}
+    {quickColorPieceId && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setQuickColorPieceId(''); }}>
+      <section className="modal production-modal product-fabrics-modal" role="dialog" aria-modal="true" aria-labelledby="quick-color-title">
+        <div className="modal-heading"><div><h2 id="quick-color-title">Nuevo color</h2><p>Se añadirá al catálogo global y quedará seleccionado en esta pieza.</p></div><button className="icon-button" type="button" onClick={() => setQuickColorPieceId('')}>×</button></div>
+        <form className="production-form" onSubmit={saveQuickColor}>
+          <label className="field-label">Nombre del color *<input className="large-input" value={quickColorName} onChange={(event) => setQuickColorName(event.target.value)} placeholder="Ej. Azul noche" required autoFocus /></label>
+          <small>Si el color ya existe, se reutilizará el registro existente.</small>
+          <div className="form-actions"><button type="button" className="button secondary" onClick={() => setQuickColorPieceId('')}>Cancelar</button><button className="button primary">Crear y seleccionar</button></div>
+        </form>
+      </section>
+    </div>}
     {completionDraft && (() => {
       const order = data.productionOrders.find((item) => item.id === completionDraft.orderId);
       if (!order) return null;
