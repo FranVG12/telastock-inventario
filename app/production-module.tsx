@@ -502,7 +502,15 @@ function MaterialEditor({
   onCreateSupplyVariant: (draft: QuickMaterialDraft) => QuickMaterialCreated | null;
   allowSizeSpecifications?: boolean;
 }) {
-  const variantOptions = variants.map((variant) => ({ variant, label: variantLabel(variant, variants, supplies) }));
+  const variantOptions = variants.filter((variant, index) => {
+    const supply = supplies.find((item) => item.id === variant.supplyId);
+    return supply?.stockMode !== 'none' || variants.findIndex((item) => item.supplyId === variant.supplyId && item.active) === index;
+  }).map((variant) => ({
+    variant,
+    label: supplies.find((item) => item.id === variant.supplyId)?.stockMode === 'none'
+      ? (supplies.find((item) => item.id === variant.supplyId)?.name ?? 'Insumo')
+      : variantLabel(variant, variants, supplies),
+  }));
   const [showQuickMaterial, setShowQuickMaterial] = useState(false);
   const [quickMaterialDraft, setQuickMaterialDraft] = useState<QuickMaterialDraft>({
     existingSupplyId: supplies.find((item) => item.active)?.id ?? '',
@@ -910,21 +918,21 @@ export function ProductionModule({
     if (draft.existingSupplyId && !existing) { tell('El insumo elegido ya no está disponible. Actualiza el formulario.', 'error'); return null; }
     const supplyName = draft.supplyName.trim();
     if (!existing && !supplyName) { tell('Escribe el nombre del nuevo insumo.', 'error'); return null; }
-    const variantNameValue = draft.variantName.trim();
-    if (!variantNameValue) { tell('Escribe el nombre de la variante inicial.', 'error'); return null; }
     if (!existing && supplies.some((item) => item.name.trim().toLocaleLowerCase('es') === supplyName.toLocaleLowerCase('es'))) {
-      tell('Ese insumo ya existe. Selecciónalo en «Usar insumo existente» para agregarle una variante.', 'error'); return null;
+      tell('Ese insumo ya existe. Selecciónalo en «Usar insumo existente».', 'error'); return null;
     }
     const supply = existing ?? {
       id: id(), name: supplyName, category: draft.category, baseUnit: draft.baseUnit,
-      stockMode: draft.stockMode, description: '', attributes: {}, active: true,
+      stockMode: 'none' as const, description: '', attributes: {}, active: true,
       createdAt: now(), updatedAt: now(),
     };
-    if (data.variants.some((item) => item.supplyId === supply.id && item.name.trim().toLocaleLowerCase('es') === variantNameValue.toLocaleLowerCase('es'))) {
-      tell('Esa variante ya existe para el insumo seleccionado.', 'error'); return null;
+    const existingVariant = data.variants.find((item) => item.supplyId === supply.id && item.active);
+    if (existingVariant) {
+      tell(existing ? 'Insumo seleccionado.' : 'Insumo creado sin inventario.');
+      return { supply, variant: existingVariant };
     }
     const variant: SupplyVariant = {
-      id: id(), supplyId: supply.id, name: variantNameValue, attributes: {},
+      id: id(), supplyId: supply.id, name: 'General', attributes: {},
       textileId: null, textileColorId: null, purchasePackQuantity: null,
       purchasePackLabel: '', active: true,
     };
@@ -933,7 +941,7 @@ export function ProductionModule({
       supplies: existing ? current.supplies : [...current.supplies, supply],
       variants: [...current.variants, variant],
     }));
-    tell(existing ? 'Variante creada para el insumo existente.' : 'Insumo y variante creados. Se añadieron a este consumo.');
+    tell(existing ? 'Insumo listo para configurar por talla.' : 'Insumo creado sin inventario. Se añadirá a este componente.');
     return { supply, variant };
   }
 
