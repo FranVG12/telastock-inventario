@@ -2332,7 +2332,7 @@ export function ProductionModule({
         <form className="production-form" onSubmit={saveQuickTextile}>
           <label className="field-label">Nombre de tela *<input className="large-input" value={quickTextileDraft.name} onChange={(event) => setQuickTextileDraft((current) => current ? { ...current, name: event.target.value } : current)} placeholder="Ej. Polinam" required autoFocus /></label>
           <div className="production-form-grid">
-            <label className="field-label">Unidad habitual<select className="large-input" value={quickTextileDraft.unit} onChange={(event) => setQuickTextileDraft((current) => current ? { ...current, unit: event.target.value as 'KG' | 'M', theoreticalYield: '' } : current)}><option value="KG">Kilogramos (KG)</option><option value="M">Metros (M)</option></select></label>
+            <label className="field-label">Unidad habitual<select className="large-input" value={quickTextileDraft.unit} disabled={quickTextileDraft.target.kind === 'variant'} onChange={(event) => setQuickTextileDraft((current) => current ? { ...current, unit: event.target.value as 'KG' | 'M', theoreticalYield: '' } : current)}><option value="KG">Kilogramos (KG)</option><option value="M">Metros (M)</option></select></label>
             <label className="field-label">Ancho nominal (m)<input className="large-input" type="number" min="0.001" step="0.001" value={quickTextileDraft.width} onChange={(event) => setQuickTextileDraft((current) => current ? { ...current, width: event.target.value } : current)} placeholder="Opcional" /></label>
           </div>
           <label className="field-label">Rendimiento teórico ({quickTextileDraft.unit === 'KG' ? 'm/kg' : 'kg/m'})<input className="large-input" type="number" min="0.000001" step="0.000001" value={quickTextileDraft.theoreticalYield} onChange={(event) => setQuickTextileDraft((current) => current ? { ...current, theoreticalYield: event.target.value } : current)} placeholder="Opcional" /></label>
@@ -2349,6 +2349,16 @@ export function ProductionModule({
           <label className="field-label">Nombre del color *<input className="large-input" value={quickColorName} onChange={(event) => setQuickColorName(event.target.value)} placeholder="Ej. Azul noche" required autoFocus /></label>
           <small>Si el color ya existe, se reutilizará el registro existente.</small>
           <div className="form-actions"><button type="button" className="button secondary" onClick={() => setQuickColorPieceId('')}>Cancelar</button><button className="button primary">Crear y seleccionar</button></div>
+        </form>
+      </section>
+    </div>}
+    {quickVariantColorTextileId && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setQuickVariantColorTextileId(''); }}>
+      <section className="modal production-modal product-fabrics-modal" role="dialog" aria-modal="true" aria-labelledby="quick-variant-color-title">
+        <div className="modal-heading"><div><h2 id="quick-variant-color-title">Color de tela</h2><p>{textileName(quickVariantColorTextileId)} · El color se asociará a esta tela y quedará seleccionado en la variante.</p></div><button className="icon-button" type="button" onClick={() => setQuickVariantColorTextileId('')}>×</button></div>
+        <form className="production-form" onSubmit={saveQuickVariantColor}>
+          <label className="field-label">Nombre del color *<input className="large-input" value={quickVariantColorName} onChange={(event) => setQuickVariantColorName(event.target.value)} placeholder="Ej. Azul noche" required autoFocus /></label>
+          <small>Se reutilizará el color global si ya existe y se creará su asociación con esta tela.</small>
+          <div className="form-actions"><button type="button" className="button secondary" onClick={() => setQuickVariantColorTextileId('')}>Cancelar</button><button className="button primary">Crear y seleccionar</button></div>
         </form>
       </section>
     </div>}
@@ -2402,9 +2412,24 @@ export function ProductionModule({
         <label className="field-label">Nombre de variante<input className="large-input" value={variantName} onChange={(e) => setVariantName(e.target.value)} placeholder="Ej. Negro · 3.5 cm" required /></label>
         <div className="production-form-grid"><label className="field-label">Cantidad por presentación<input className="large-input" type="number" min="0.001" step="0.001" value={variantPackQuantity} onChange={(e) => setVariantPackQuantity(e.target.value)} placeholder="Ej. 40" /></label><label className="field-label">Presentación<input className="large-input" value={variantPackLabel} onChange={(e) => setVariantPackLabel(e.target.value)} placeholder="Rollo, cono, docena…" /></label></div>
         <label className="field-label">Características de esta variante<textarea className="large-input" rows={3} value={variantAttributes} onChange={(e) => setVariantAttributes(e.target.value)} placeholder={'Una por línea. Ejemplo:\nColor: Negro\nAncho: 3.5 cm\nMaterial: Poliéster\nRigidez: Media'} /></label>
-        {textileContext.telas.length > 0 && <div className="production-link-textile"><strong>Vincular con una tela existente (opcional)</strong><label className="field-label">Tela<select className="large-input" value={variantTextileId} onChange={(e) => { setVariantTextileId(e.target.value); setVariantTextileColorId(''); }}><option value="">Sin vincular</option>{textileContext.telas.map((x) => <option key={x.id} value={x.id}>{x.nombreTela}</option>)}</select></label>
-          {variantTextileId && <label className="field-label">Color de esa tela<select className="large-input" value={variantTextileColorId} onChange={(e) => setVariantTextileColorId(e.target.value)}><option value="">Seleccionar color</option>{textileColorOptions.map((x) => <option key={x.id} value={x.id}>{textileContext.colores.find((c) => c.id === x.idColor)?.nombre ?? 'Color'}</option>)}</select></label>}
-        </div>}
+        <div className="production-link-textile">
+          <strong>Vincular con una tela existente (opcional)</strong>
+          <label className="field-label">Tela
+            <select className="large-input" value={variantTextileId} onChange={(e) => { setVariantTextileId(e.target.value); setVariantTextileColorId(''); }}>
+              <option value="">Sin vincular</option>
+              {textileContext.telas.filter((textile) => textile.activo !== false || textile.id === variantTextileId).map((textile) => <option key={textile.id} value={textile.id}>{textile.nombreTela}{textile.activo === false ? ' · archivada' : ''}</option>)}
+            </select>
+            <button type="button" className="text-action" disabled={!supplies.find((item) => item.id === variantSupplyId) || !['m', 'kg'].includes(supplies.find((item) => item.id === variantSupplyId)?.baseUnit ?? '')} onClick={() => openQuickTextile({ kind: 'variant' })}>＋ Crear tela y vincular</button>
+            <small>La unidad de la tela debe coincidir con la unidad de inventario de este insumo.</small>
+          </label>
+          {variantTextileId && <label className="field-label">Color de esa tela
+            <select className="large-input" value={variantTextileColorId} onChange={(e) => setVariantTextileColorId(e.target.value)}>
+              <option value="">Seleccionar color</option>
+              {textileColorOptions.map((x) => <option key={x.id} value={x.id}>{textileContext.colores.find((c) => c.id === x.idColor)?.nombre ?? 'Color'}</option>)}
+            </select>
+            <button type="button" className="text-action" onClick={openQuickVariantColor}>＋ Crear color para esta tela</button>
+          </label>}
+        </div>
         <div className="form-actions"><button type="button" className="button secondary" onClick={cancelVariantCreation}>Cancelar</button><button className="button primary">Guardar variante</button></div>
       </form></section></div>}
     {showComponentPieceMovement && selectedStockProductModel && selectedStockComponent && selectedComponentStockPiece && <div className="modal-backdrop">
