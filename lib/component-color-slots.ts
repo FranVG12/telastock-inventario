@@ -12,7 +12,7 @@ export function isComponentColorSlot(value: unknown): value is ComponentColorSlo
  */
 export function normalizeComponentColorSlot(value: unknown, legacyColorId?: unknown): ComponentColorSlot {
   if (isComponentColorSlot(value)) return value;
-  return typeof legacyColorId === 'string' && legacyColorId.trim() ? 'principal' : 'cualquiera';
+  return typeof legacyColorId === 'string' && legacyColorId.trim() ? 'principal' : 'ninguna';
 }
 
 export function secondaryColorSlotIndex(slot: string): number {
