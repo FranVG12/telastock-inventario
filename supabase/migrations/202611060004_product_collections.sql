@@ -36,6 +36,39 @@ $$;
 create index if not exists configured_product_models_collection_id_idx
   on public.configured_product_models(collection_id);
 
+create or replace function public.validate_configured_product_model_collection()
+returns trigger
+language plpgsql
+set search_path = public
+as $
+declare
+  v_active boolean;
+begin
+  if new.collection_id is null then
+    raise exception 'Selecciona una colección guardada antes de crear el modelo de prenda.';
+  end if;
+
+  select is_active into v_active
+  from public.product_collections
+  where id = new.collection_id;
+
+  if coalesce(v_active, false) is not true then
+    raise exception 'La colección seleccionada no existe o está archivada.';
+  end if;
+
+  return new;
+end;
+$;
+
+drop trigger if exists configured_product_models_require_collection
+  on public.configured_product_models;
+
+create trigger configured_product_models_require_collection
+before insert or update of collection_id
+on public.configured_product_models
+for each row
+execute function public.validate_configured_product_model_collection();
+
 alter table public.product_collections enable row level security;
 
 comment on table public.product_collections is
