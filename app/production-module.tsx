@@ -1716,7 +1716,7 @@ export function ProductionModule({
           {component.imageUrl && <img className="production-component-image" src={component.imageUrl} alt="" />}
           <div className="production-card-heading"><div><strong>{component.name}</strong><span>{component.type} · {component.pieces.length} piezas · {component.materials.length} materiales</span></div><div className="production-card-actions"><button className="button secondary" disabled={component.pieces.length === 0} onClick={() => setSelectedStockComponentId(component.id)}>Inventario de piezas</button><button className="button secondary" onClick={() => openComponent(component)}>Editar</button></div></div>
           {component.description && <p className="production-muted">{component.description}</p>}
-          <div className="production-attributes">{component.pieces.map((x) => <span key={x.id}>{x.name} ×{x.unitsPerGarment}{x.textileId || x.colorId ? ' · ' + textileName(x.textileId) + ' · ' + componentColorName(x.colorId) : ''}</span>)}</div>
+          <div className="production-attributes">{component.pieces.map((x) => <span key={x.id}>{x.name} ×{x.unitsPerGarment}{x.textileId ? ' · Tela: ' + textileName(x.textileId) : ''}{x.colorId ? ' · Color: ' + componentColorName(x.colorId) : ''}</span>)}</div>
         </article>)}
       </div>
       {selectedStockComponent && <section className="production-component-stock">
