@@ -10,8 +10,8 @@ const source = readFileSync(new URL('../lib/component-fabric-slots.ts', import.m
 const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
-const module = { exports: {} };
-vm.runInNewContext(compiled, { exports: module.exports, module });
+const compiledModule = { exports: {} };
+vm.runInNewContext(compiled, { exports: compiledModule.exports, module: compiledModule });
 const {
   componentFabricSlotLabel,
   isComponentFabricSlot,
@@ -19,7 +19,7 @@ const {
   normalizeComponentFabricSlot,
   resolveComponentPieceTextileId,
   secondaryFabricSlotIndex,
-} = module.exports;
+} = compiledModule.exports;
 
 test('normaliza vínculos directos antiguos a la tela principal', () => {
   assert.equal(normalizeComponentFabricSlot(undefined, 'textile-old-1'), 'principal');
