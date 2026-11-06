@@ -777,6 +777,38 @@ export function ProductionModule({
     setSupplyName(''); setSupplyDescription(''); setSupplyAttributes(''); setShowSupplyForm(false);
     tell('Insumo registrado. Ahora agrega sus variantes comerciales.');
   }
+  function createSupplyVariantFromMaterial(draft: QuickMaterialDraft): QuickMaterialCreated | null {
+    const existing = draft.existingSupplyId ? supplies.find((item) => item.id === draft.existingSupplyId && item.active) : undefined;
+    if (draft.existingSupplyId && !existing) { tell('El insumo elegido ya no está disponible. Actualiza el formulario.', 'error'); return null; }
+    const supplyName = draft.supplyName.trim();
+    if (!existing && !supplyName) { tell('Escribe el nombre del nuevo insumo.', 'error'); return null; }
+    const variantNameValue = draft.variantName.trim();
+    if (!variantNameValue) { tell('Escribe el nombre de la variante inicial.', 'error'); return null; }
+    if (!existing && supplies.some((item) => item.name.trim().toLocaleLowerCase('es') === supplyName.toLocaleLowerCase('es'))) {
+      tell('Ese insumo ya existe. Selecciónalo en «Usar insumo existente» para agregarle una variante.', 'error'); return null;
+    }
+    const supply = existing ?? {
+      id: id(), name: supplyName, category: draft.category, baseUnit: draft.baseUnit,
+      stockMode: draft.stockMode, description: '', attributes: {}, active: true,
+      createdAt: now(), updatedAt: now(),
+    };
+    if (data.variants.some((item) => item.supplyId === supply.id && item.name.trim().toLocaleLowerCase('es') === variantNameValue.toLocaleLowerCase('es'))) {
+      tell('Esa variante ya existe para el insumo seleccionado.', 'error'); return null;
+    }
+    const variant: SupplyVariant = {
+      id: id(), supplyId: supply.id, name: variantNameValue, attributes: {},
+      textileId: null, textileColorId: null, purchasePackQuantity: null,
+      purchasePackLabel: '', active: true,
+    };
+    setData((current) => ({
+      ...current,
+      supplies: existing ? current.supplies : [...current.supplies, supply],
+      variants: [...current.variants, variant],
+    }));
+    tell(existing ? 'Variante creada para el insumo existente.' : 'Insumo y variante creados. Se añadieron a este consumo.');
+    return { supply, variant };
+  }
+
   function openVariant(supplyId: string) {
     setVariantSupplyId(supplyId); setVariantName(''); setVariantPackQuantity(''); setVariantPackLabel(''); setVariantAttributes('');
     setVariantTextileId(''); setVariantTextileColorId(''); setShowVariantForm(true);
@@ -1881,7 +1913,7 @@ export function ProductionModule({
           <label className="field-label">Lateralidad<select className="large-input" value={piece.laterality} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, laterality: e.target.value as ComponentPiece['laterality'] } : x) })}><option value="ninguna">Sin lado</option><option value="simetrica">Simétrica</option><option value="izquierda">Izquierda</option><option value="derecha">Derecha</option></select></label>
           <button type="button" className="text-action danger-action" onClick={() => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.filter((_, i) => i !== index) })}>Quitar</button>
         </div>)}
-        <MaterialEditor materials={componentDraft.materials} onChange={(materials) => setComponentDraft({ ...componentDraft, materials })} variants={variants} sizes={sizes} title="Materiales y consumos del componente" />
+        <MaterialEditor materials={componentDraft.materials} onChange={(materials) => setComponentDraft({ ...componentDraft, materials })} variants={variants} supplies={supplies} sizes={sizes} title="Materiales y consumos del componente" onCreateSupplyVariant={createSupplyVariantFromMaterial} />
         <div className="form-actions"><button type="button" className="button secondary" onClick={() => setComponentDraft(null)}>Cancelar</button><button className="button primary">Guardar componente</button></div>
       </form>}
       <div className="production-component-grid">
@@ -1987,7 +2019,7 @@ export function ProductionModule({
       {recipeDraft && <form className="production-form" onSubmit={saveRecipe}>
         <div className="production-subheading"><strong>{recipeDraft.name}</strong><span>{families.find((x) => x.value === recipeDraft.family)?.label}</span></div>
         <label className="field-label">Nombre de la receta<input className="large-input" value={recipeDraft.name} onChange={(e) => setRecipeDraft({ ...recipeDraft, name: e.target.value })} /></label>
-        <MaterialEditor materials={recipeDraft.materials} onChange={(materials) => setRecipeDraft({ ...recipeDraft, materials })} variants={variants} sizes={sizes} title="Materiales generales de confección" />
+        <MaterialEditor materials={recipeDraft.materials} onChange={(materials) => setRecipeDraft({ ...recipeDraft, materials })} variants={variants} supplies={supplies} sizes={sizes} title="Materiales generales de confección" onCreateSupplyVariant={createSupplyVariantFromMaterial} />
         <div className="form-actions"><button type="button" className="button secondary" onClick={() => setRecipeDraft(null)}>Cancelar</button><button className="button primary">Guardar receta</button></div>
       </form>}
     </section>;
