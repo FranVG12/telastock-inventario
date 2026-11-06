@@ -1391,10 +1391,11 @@ export function ProductionModule({
 
     // Ensure every concrete textile/color pair used by this product has a textile-specific color variant.
     basePieces.filter((piece) => piece.modelId === selectedBaseModel.id && !piece.archived).forEach((piece) => {
-      const slot = piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna');
+      const fabricSlot = piece.fabricSlot ?? 'principal';
+      const colorSlot = piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna');
       const override = basePieceOverrides[piece.id];
-      const textileId = piece.fabricSlot === 'cualquiera' ? override?.textileId : productFabricAssignments[piece.fabricSlot];
-      const colorId = slot === 'cualquiera' ? override?.colorId : slot === 'ninguna' ? null : productColorAssignments[slot];
+      const textileId = fabricSlot === 'cualquiera' ? override?.textileId : productFabricAssignments[fabricSlot];
+      const colorId = colorSlot === 'cualquiera' ? override?.colorId : colorSlot === 'ninguna' ? null : productColorAssignments[colorSlot];
       ensureProductTextileColorAssociation(textileId, colorId);
     });
     selectedComponents.forEach((component) => component.pieces.forEach((piece) => {
