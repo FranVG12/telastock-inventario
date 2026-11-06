@@ -21,7 +21,7 @@ export function secondaryFabricSlotIndex(slot: string): number {
 }
 
 export function isComponentFabricSlotAvailableForModel(slot: string, secondarySlotCount: number): boolean {
-  if (slot === 'ninguna' || slot === 'principal') return true;
+  if (slot === 'ninguna' || slot === 'cualquiera' || slot === 'principal') return true;
   const index = secondaryFabricSlotIndex(slot);
   return index > 0 && index <= Math.max(0, Math.floor(secondarySlotCount));
 }
