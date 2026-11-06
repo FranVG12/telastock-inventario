@@ -78,6 +78,7 @@ export type ComponentPiece = {
   unitsPerGarment: number;
   laterality: 'ninguna' | 'simetrica' | 'izquierda' | 'derecha';
   fabricSlot: string;
+  textileId?: string | null;
   colorId: string | null;
 };
 
@@ -233,6 +234,10 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
     if (new Set(ids).size !== ids.length) throw new Error('Hay identificadores duplicados en "' + key + '".');
     (output as unknown as Record<string, unknown>)[key] = rows;
   }
+  output.components = output.components.map((component) => ({
+    ...component,
+    pieces: component.pieces.map((piece) => ({ ...piece, textileId: piece.textileId ?? null, colorId: piece.colorId ?? null })),
+  }));
   const variantIds = new Set(output.variants.map((x) => x.id));
   const componentIds = new Set(output.components.map((x) => x.id));
   if (!output.productCollections.every((x) => typeof x.name === 'string' && x.name.trim() && typeof x.active === 'boolean' && typeof x.createdAt === 'string' && typeof x.updatedAt === 'string')) {
@@ -334,7 +339,7 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
         typeof order.actualConsumption.recordedAt === 'string'
       ));
   })) throw new Error('Hay órdenes de producción con datos o relaciones inválidas.');
-  if (!output.components.every((x) => typeof x.name === 'string' && x.name.trim() && typeof x.type === 'string' && x.type.trim() && Array.isArray(x.pieces) && x.pieces.every((p) => p && typeof p.id === 'string' && p.id.trim() && typeof p.name === 'string' && p.name.trim() && Number.isInteger(p.unitsPerGarment) && p.unitsPerGarment > 0 && ['ninguna', 'simetrica', 'izquierda', 'derecha'].includes(p.laterality) && (p.laterality !== 'simetrica' || p.unitsPerGarment % 2 === 0)) && validMaterials(x.materials))) {
+  if (!output.components.every((x) => typeof x.name === 'string' && x.name.trim() && typeof x.type === 'string' && x.type.trim() && Array.isArray(x.pieces) && x.pieces.every((p) => p && typeof p.id === 'string' && p.id.trim() && typeof p.name === 'string' && p.name.trim() && Number.isInteger(p.unitsPerGarment) && p.unitsPerGarment > 0 && ['ninguna', 'simetrica', 'izquierda', 'derecha'].includes(p.laterality) && (p.laterality !== 'simetrica' || p.unitsPerGarment % 2 === 0) && (p.textileId === null || typeof p.textileId === 'string') && (p.colorId === null || typeof p.colorId === 'string')) && validMaterials(x.materials))) {
     throw new Error('Hay componentes con piezas o materiales inválidos.');
   }
   if (!output.componentPieceMovements.every((movement) => {
@@ -412,7 +417,7 @@ const conversionFactor = (from: StockUnit, to: StockUnit): number | null => {
   return a.factor / b.factor;
 };
 
-type TextileRow = { id: string; nombreTela: string; unidadVenta: 'KG' | 'M' };
+type TextileRow = { id: string; nombreTela: string; unidadVenta: 'KG' | 'M'; activo?: boolean };
 type TextileColorRow = { id: string; idTela: string; idColor: string; activo: boolean };
 type ColorRow = { id: string; nombre: string };
 type RollRow = { id: string; idTela: string; idTelaColor?: string | null; unidadIngreso?: 'KG' | 'M'; metros: number | null; pesoKg: number | null; estado: string; fechaIngreso?: string; updatedAt?: string; ubicacion?: string; idLote?: string };
@@ -576,7 +581,7 @@ export function ProductionModule({
     let safe = true;
     let warning = '';
     const version = Number(localStorage.getItem(PRODUCTION_STORAGE_KEYS.version) ?? '0');
-    if (version > 3) { safe = false; warning = 'Los datos de insumos fueron creados con una versión más reciente. Se evita sobrescribirlos.'; }
+    if (version > 4) { safe = false; warning = 'Los datos de insumos fueron creados con una versión más reciente. Se evita sobrescribirlos.'; }
     for (const key of Object.keys(empty) as (keyof ProductionBackupData)[]) {
       try {
         const raw = localStorage.getItem(PRODUCTION_STORAGE_KEYS[key]);
@@ -597,7 +602,7 @@ export function ProductionModule({
     const loaded = loadLocal();
     setData(loaded.data);
     setStorageSafe(loaded.safe);
-    if (loaded.safe) localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '3');
+    if (loaded.safe) localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '4');
     else setNotice({ text: loaded.warning, kind: 'error' });
     setReady(true);
     refreshTextiles();
@@ -640,7 +645,7 @@ export function ProductionModule({
     try {
       keys.forEach((key) => previous.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       keys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(data[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '3');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '4');
     } catch {
       previous.forEach((value, key) => {
         try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch { /* rollback best effort */ }
@@ -872,6 +877,15 @@ export function ProductionModule({
     if (!componentDraft || !componentDraft.name.trim()) return tell('Escribe el nombre del componente.', 'error');
     if (componentDraft.pieces.some((x) => !x.name.trim() || !Number.isInteger(x.unitsPerGarment) || x.unitsPerGarment <= 0 || (x.laterality === 'simetrica' && x.unitsPerGarment % 2 !== 0))) return tell('Revisa las piezas auxiliares. Una pieza simétrica requiere una cantidad par por prenda.', 'error');
     const previous = data.components.find((item) => item.id === componentDraft.id);
+    const invalidTextilePiece = componentDraft.pieces.find((piece) => {
+      if (!piece.textileId) return false;
+      const textile = textileContext.telas.find((item) => item.id === piece.textileId);
+      const oldPiece = previous?.pieces.find((item) => item.id === piece.id);
+      return !textile || (textile.activo === false && oldPiece?.textileId !== piece.textileId);
+    });
+    if (invalidTextilePiece) return tell('La tela seleccionada ya no está disponible. Selecciona otra tela o Ninguna.', 'error');
+    const invalidColorPiece = componentDraft.pieces.find((piece) => piece.colorId && !textileContext.colores.some((color) => color.id === piece.colorId));
+    if (invalidColorPiece) return tell('El color de una pieza ya no existe en el catálogo global. Selecciona un color vigente o Sin color.', 'error');
     const removedStockedPiece = previous?.pieces.find((oldPiece) =>
       (data.componentPieceMovements.some((movement) => movement.pieceId === oldPiece.id) ||
         data.productionOrders.some((order) => order.componentPieces.some((line) => line.pieceId === oldPiece.id))) &&
@@ -946,10 +960,11 @@ export function ProductionModule({
     setRecipeDraft(existing ? { ...existing, materials: existing.materials.map((x) => ({ ...x, bySize: { ...x.bySize } })) } : { id: id(), family, name: 'Receta general de ' + (families.find((x) => x.value === family)?.label ?? family), active: true, materials: [], updatedAt: now() });
   }
   function openComponent(component?: GarmentComponent) {
-    setComponentDraft(component ? { ...component, pieces: component.pieces.map((x) => ({ ...x })), materials: component.materials.map((x) => ({ ...x, bySize: { ...x.bySize } })) } : null);
+    setComponentDraft(component ? { ...component, pieces: component.pieces.map((x) => ({ ...x, textileId: x.textileId ?? null, colorId: x.colorId ?? null })), materials: component.materials.map((x) => ({ ...x, bySize: { ...x.bySize } })) } : null);
   }
 
-  const textileName = (textileId: string | null) => textileContext.telas.find((x) => x.id === textileId)?.nombreTela ?? '';
+  const textileName = (textileId: string | null | undefined) => textileId ? textileContext.telas.find((x) => x.id === textileId)?.nombreTela ?? '' : 'Ninguna';
+  const componentColorName = (colorId: string | null | undefined) => colorId ? textileContext.colores.find((x) => x.id === colorId)?.nombre ?? 'Color no disponible' : 'Sin color';
   const textileColorOptions = textileContext.telaColores.filter((x) => x.idTela === variantTextileId && x.activo);
   const activeProduct = data.productModels.find((x) => x.id === selectedProductId && x.active);
   const selectedStockComponent = data.components.find((x) => x.id === selectedStockComponentId && x.active);
@@ -1223,7 +1238,7 @@ export function ProductionModule({
     try {
       keys.forEach((key) => previous.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       keys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(next[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '3');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '4');
       setData(next);
       return true;
     } catch {
@@ -1524,7 +1539,7 @@ export function ProductionModule({
     try {
       productionKeys.forEach((key) => previousProduction.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       productionKeys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(nextData[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '3');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '4');
       localStorage.setItem(FABRIC_STORAGE_KEYS.rollos, JSON.stringify(updatedRolls));
       localStorage.setItem(FABRIC_STORAGE_KEYS.rolloMovimientos, JSON.stringify(nextRollMovements));
       const nextBase = [...baseMovements, ...baseEntries];
@@ -1684,9 +1699,11 @@ export function ProductionModule({
         </div>
         <label className="field-label">Fotografía de referencia (URL opcional)<input className="large-input" value={componentDraft.imageUrl} onChange={(e) => setComponentDraft({ ...componentDraft, imageUrl: e.target.value })} placeholder="https://…" /></label>
         <label className="field-label">Descripción<textarea className="large-input" rows={2} value={componentDraft.description} onChange={(e) => setComponentDraft({ ...componentDraft, description: e.target.value })} /></label>
-        <div className="production-subheading"><strong>Piezas auxiliares de patronaje</strong><button type="button" className="text-action" onClick={() => setComponentDraft({ ...componentDraft, pieces: [...componentDraft.pieces, { id: id(), name: '', unitsPerGarment: 1, laterality: 'ninguna', fabricSlot: 'principal', colorId: null }] })}>＋ Agregar pieza</button></div>
+        <div className="production-subheading"><strong>Piezas auxiliares de patronaje</strong><button type="button" className="text-action" onClick={() => setComponentDraft({ ...componentDraft, pieces: [...componentDraft.pieces, { id: id(), name: '', unitsPerGarment: 1, laterality: 'ninguna', fabricSlot: 'principal', textileId: null, colorId: null }] })}>＋ Agregar pieza</button></div>
         {componentDraft.pieces.map((piece, index) => <div className="production-piece-row" key={piece.id}>
           <label className="field-label">Nombre de pieza<input className="large-input" value={piece.name} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, name: e.target.value } : x) })} placeholder="Ej. Pechera" /></label>
+          <label className="field-label">Tela (opcional)<select className="large-input" value={piece.textileId ?? ''} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, textileId: e.target.value || null } : x) })}><option value="">Ninguna</option>{textileContext.telas.filter((textile) => textile.activo !== false).map((textile) => <option value={textile.id} key={textile.id}>{textile.nombreTela}</option>)}{piece.textileId && !textileContext.telas.some((textile) => textile.id === piece.textileId) && <option value={piece.textileId}>{textileName(piece.textileId)} · no disponible</option>}{piece.textileId && textileContext.telas.some((textile) => textile.id === piece.textileId && textile.activo === false) && <option value={piece.textileId}>{textileName(piece.textileId)} · archivada</option>}</select><small>Se toma del catálogo de telas existente; puede quedar sin tela.</small></label>
+          <label className="field-label">Color<select className="large-input" value={piece.colorId ?? ''} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, colorId: e.target.value || null } : x) })}><option value="">Sin color</option>{textileContext.colores.slice().sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')).map((color) => <option value={color.id} key={color.id}>{color.nombre}</option>)}{piece.colorId && !textileContext.colores.some((color) => color.id === piece.colorId) && <option value={piece.colorId}>{componentColorName(piece.colorId)} · no disponible</option>}</select><small>El color se vincula por ID al catálogo global de colores.</small></label>
           <label className="field-label">Piezas por prenda<input className="large-input" type="number" min="1" step="1" value={piece.unitsPerGarment} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, unitsPerGarment: Number(e.target.value) } : x) })} /></label>
           <label className="field-label">Lateralidad<select className="large-input" value={piece.laterality} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, laterality: e.target.value as ComponentPiece['laterality'] } : x) })}><option value="ninguna">Sin lado</option><option value="simetrica">Simétrica</option><option value="izquierda">Izquierda</option><option value="derecha">Derecha</option></select></label>
           <button type="button" className="text-action danger-action" onClick={() => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.filter((_, i) => i !== index) })}>Quitar</button>
@@ -1699,7 +1716,7 @@ export function ProductionModule({
           {component.imageUrl && <img className="production-component-image" src={component.imageUrl} alt="" />}
           <div className="production-card-heading"><div><strong>{component.name}</strong><span>{component.type} · {component.pieces.length} piezas · {component.materials.length} materiales</span></div><div className="production-card-actions"><button className="button secondary" disabled={component.pieces.length === 0} onClick={() => setSelectedStockComponentId(component.id)}>Inventario de piezas</button><button className="button secondary" onClick={() => openComponent(component)}>Editar</button></div></div>
           {component.description && <p className="production-muted">{component.description}</p>}
-          <div className="production-attributes">{component.pieces.map((x) => <span key={x.id}>{x.name} ×{x.unitsPerGarment}</span>)}</div>
+          <div className="production-attributes">{component.pieces.map((x) => <span key={x.id}>{x.name} ×{x.unitsPerGarment}{x.textileId || x.colorId ? ' · ' + textileName(x.textileId) + ' · ' + componentColorName(x.colorId) : ''}</span>)}</div>
         </article>)}
       </div>
       {selectedStockComponent && <section className="production-component-stock">
