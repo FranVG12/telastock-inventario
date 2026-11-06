@@ -999,15 +999,65 @@ export function ProductionModule({
     if (!selectedCollection) return tell('Selecciona una colección guardada o crea una nueva antes de guardar el modelo.', 'error');
     if (!selectedBaseModel.family) return tell('El patrón base no tiene familia asignada. Edítalo en Modelos antes de crear el modelo comercial.', 'error');
     if (data.productModels.some((x) => x.name.toLocaleLowerCase('es') === productName.trim().toLocaleLowerCase('es'))) return tell('Ya existe un modelo configurado con ese nombre.', 'error');
+
+    const requiredFabricSlots = productFabricSlotsForBaseModel(selectedBaseModel);
+    const activeTextileIds = new Set(textileContext.telas.filter((textile) => textile.activo !== false).map((textile) => textile.id));
+    const missingSlots = requiredFabricSlots.filter((slot) => !activeTextileIds.has(productFabricAssignments[slot] ?? ''));
+    if (missingSlots.length > 0) return tell('Asigna una tela del catálogo a: ' + missingSlots.map(productFabricSlotLabel).join(', ') + '.', 'error');
+
+    const timestamp = now();
     const row: ConfiguredProductModel = {
       id: id(), name: productName.trim(), collectionId: selectedCollection.id, baseModelId: productBaseId, description: productDescription.trim(),
       components: productComponentIds.map((componentId) => ({ id: id(), componentId, quantity: 1, location: '', variantOverrides: {} })),
-      additionalMaterials: [], active: true, createdAt: now(), updatedAt: now(),
+      additionalMaterials: [], active: true, createdAt: timestamp, updatedAt: timestamp,
     };
-    setData((current) => ({ ...current, productModels: [...current.productModels, row] }));
-    setSelectedProductId(row.id); setSelectedStockProductModelId(row.id); setProductName(''); setProductCollectionId(''); setShowProductCollectionCreator(false); setNewProductCollectionName(''); setProductDescription(''); setProductComponentIds([]);
-    tell('Modelo configurado guardado. Se conservó intacto el patrón base.');
+    const fabricRows: ProductFabricAssignment[] = requiredFabricSlots.map((fabricSlot) => ({
+      id: id(), productModelId: row.id, fabricSlot, textileId: productFabricAssignments[fabricSlot], createdAt: timestamp, updatedAt: timestamp,
+    }));
+    setData((current) => ({
+      ...current,
+      productModels: [...current.productModels, row],
+      productFabrics: [...current.productFabrics, ...fabricRows],
+    }));
+    setSelectedProductId(row.id); setSelectedStockProductModelId(row.id); setProductName(''); setProductCollectionId(''); setShowProductCollectionCreator(false); setNewProductCollectionName(''); setProductBaseId(''); setProductFabricAssignments({}); setProductDescription(''); setProductComponentIds([]);
+    tell('Modelo configurado guardado con sus telas asignadas. Se conservó intacto el patrón base.');
   }
+
+  function openProductFabricEditor(product: ConfiguredProductModel) {
+    const base = baseModels.find((model) => model.id === product.baseModelId);
+    if (!base) return tell('No se encontró el patrón base de este modelo.', 'error');
+    const slots = productFabricSlotsForBaseModel(base);
+    const selected = Object.fromEntries(slots.map((slot) => [
+      slot,
+      data.productFabrics.find((assignment) => assignment.productModelId === product.id && assignment.fabricSlot === slot)?.textileId ?? '',
+    ]));
+    setEditingProductFabricId(product.id);
+    setEditingProductFabricAssignments(selected);
+  }
+
+  function saveProductFabricEditor(event: FormEvent) {
+    event.preventDefault();
+    const product = data.productModels.find((item) => item.id === editingProductFabricId && item.active);
+    const base = product ? baseModels.find((model) => model.id === product.baseModelId) : undefined;
+    if (!product || !base) return tell('No se encontró el modelo o su patrón base.', 'error');
+    const slots = productFabricSlotsForBaseModel(base);
+    const activeTextileIds = new Set(textileContext.telas.filter((textile) => textile.activo !== false).map((textile) => textile.id));
+    const missingSlots = slots.filter((slot) => !activeTextileIds.has(editingProductFabricAssignments[slot] ?? ''));
+    if (missingSlots.length > 0) return tell('Asigna una tela del catálogo a: ' + missingSlots.map(productFabricSlotLabel).join(', ') + '.', 'error');
+    const timestamp = now();
+    const rows: ProductFabricAssignment[] = slots.map((fabricSlot) => ({
+      id: id(), productModelId: product.id, fabricSlot, textileId: editingProductFabricAssignments[fabricSlot], createdAt: timestamp, updatedAt: timestamp,
+    }));
+    setData((current) => ({
+      ...current,
+      productModels: current.productModels.map((item) => item.id === product.id ? { ...item, updatedAt: timestamp } : item),
+      productFabrics: [...current.productFabrics.filter((item) => item.productModelId !== product.id), ...rows],
+    }));
+    setEditingProductFabricId('');
+    setEditingProductFabricAssignments({});
+    tell('Telas del modelo actualizadas.');
+  }
+
   function deleteProduct(product: ConfiguredProductModel) {
     if (!window.confirm('¿Archivar el modelo configurado "' + product.name + '"? No se eliminará el patrón base ni el historial de piezas.')) return;
     setData((current) => ({ ...current, productModels: current.productModels.map((x) => x.id === product.id ? { ...x, active: false, updatedAt: now() } : x) }));
