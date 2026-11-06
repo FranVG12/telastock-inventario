@@ -1435,8 +1435,10 @@ export function ProductionModule({
   const ordersHoldingStock = data.productionOrders.filter((order) => holdingStatuses.includes(order.status));
 
   const plan = useMemo(() => {
-    if (!activeProduct) return { rows: [] as Array<{ variantId: string; total: number; bySize: Record<string, number>; missingSizes: string[]; available: number; shortage: number; packs: number | null }>, unresolved: [] as string[] };
-    const requirements: MaterialRequirement[] = [];
+    type PlannedMaterial = MaterialRequirement & { productSpecification?: SizeSpecification };
+    type PlannedRow = { bySize: Record<string, number>; missingSizes: string[]; specificationsBySize: Record<string, string[]> };
+    if (!activeProduct) return { rows: [] as Array<{ variantId: string; total: number; bySize: Record<string, number>; missingSizes: string[]; specificationsBySize: Record<string, string[]>; available: number | null; shortage: number | null; packs: number | null }>, unresolved: [] as string[] };
+    const requirements: PlannedMaterial[] = [];
     const multipliers = new Map<string, number>();
     const inheritedFamily = baseModels.find((model) => model.id === activeProduct.baseModelId)?.family ?? '';
     const recipes = inheritedFamily ? data.familyRecipes.filter((x) => x.active && x.family === inheritedFamily) : [];
@@ -1445,28 +1447,42 @@ export function ProductionModule({
       const component = data.components.find((x) => x.id === selected.componentId && x.active);
       if (!component) return;
       component.materials.forEach((material) => {
-        const copy = { ...material, variantId: selected.variantOverrides[material.id] ?? material.variantId };
+        const copy: PlannedMaterial = {
+          ...material,
+          variantId: selected.variantOverrides[material.id] ?? material.variantId,
+          productSpecification: selected.materialSpecifications?.[material.id],
+        };
         requirements.push(copy); multipliers.set(copy.id, selected.quantity);
       });
     });
     activeProduct.additionalMaterials.forEach((material) => { requirements.push(material); multipliers.set(material.id, 1); });
-    const grouped = new Map<string, { bySize: Record<string, number>; missingSizes: string[] }>();
+    const grouped = new Map<string, PlannedRow>();
     const unresolved: string[] = [];
+    const productSizeGroupId = baseModels.find((model) => model.id === activeProduct.baseModelId)?.sizeGroupId;
+    const productSizes = sizes.filter((size) => size.groupId === productSizeGroupId);
     for (const material of requirements) {
       const variant = variantsBySupply.get(material.variantId);
       const supply = variant ? supplies.find((x) => x.id === variant.supplyId) : undefined;
       if (!variant || !supply) { unresolved.push('Variante de insumo no disponible.'); continue; }
       const factor = conversionFactor(material.unit, supply.baseUnit);
       if (factor === null) { unresolved.push(supply.name + ': no se puede convertir ' + material.unit + ' a ' + supply.baseUnit + '.'); continue; }
-      const row = grouped.get(variant.id) ?? { bySize: {}, missingSizes: [] };
-      for (const size of sizes.filter((x) => x.groupId === baseModels.find((m) => m.id === activeProduct.baseModelId)?.sizeGroupId)) {
+      const row = grouped.get(variant.id) ?? { bySize: {}, missingSizes: [], specificationsBySize: {} };
+      for (const size of productSizes) {
         const count = Number(planCounts[size.id] ?? 0);
-        if (!Number.isFinite(count) || count < 0) continue;
-        if (count === 0) continue;
+        if (!Number.isFinite(count) || count < 0 || count === 0) continue;
         const consumption = material.mode === 'fixed' ? material.fixedQuantity : material.bySize[size.id];
         if (consumption === undefined || consumption === null || !Number.isFinite(consumption) || consumption < 0) {
-          row.missingSizes.push(size.label);
+          row.missingSizes.push(size.label + ' (consumo)');
           continue;
+        }
+        if (material.specificationLabel?.trim()) {
+          const specification = material.productSpecification;
+          const value = specification?.bySize?.[size.id]?.trim();
+          if (!value) row.missingSizes.push(size.label + ' (falta ' + material.specificationLabel + ')');
+          else {
+            const entry = material.specificationLabel.trim() + ': ' + value;
+            row.specificationsBySize[size.id] = [...(row.specificationsBySize[size.id] ?? []), entry];
+          }
         }
         const multiplier = multipliers.get(material.id) ?? 1;
         const amount = consumption * factor * count * multiplier * (1 + material.wastePercent / 100);
@@ -1478,35 +1494,45 @@ export function ProductionModule({
       const variant = variantsBySupply.get(variantId)!;
       const supply = supplies.find((x) => x.id === variant.supplyId)!;
       const total = Object.values(value.bySize).reduce((sum, x) => sum + x, 0);
-      let available = 0;
-      let shortage = 0;
-      if (variant.textileId) {
-        const unit: 'M' | 'KG' = supply.baseUnit === 'm' ? 'M' : 'KG';
-        const matchingRolls = textileContext.rollos.filter((roll) =>
-          roll.idTela === variant.textileId && (!variant.textileColorId || roll.idTelaColor === variant.textileColorId) && roll.estado === 'disponible'
-        );
-        available = matchingRolls.reduce((sum, roll) => {
-          const physical = unit === 'M' ? roll.metros ?? 0 : roll.pesoKg ?? 0;
-          const reserved = ordersHoldingStock.reduce((totalReserved, order) =>
-            totalReserved + order.rollAllocations.filter((allocation) => allocation.rollId === roll.id && allocation.unit === unit)
-              .reduce((totalForRoll, allocation) => totalForRoll + allocation.quantity, 0), 0);
-          return sum + Math.max(0, physical - reserved);
-        }, 0);
-        shortage = Math.max(0, total - available);
-      } else if (supply.stockMode === 'total') {
-        const reserved = reservedSupplyQuantity(variant.id, null);
-        available = Math.max(0, stockForVariant(variant, null) - reserved);
-        shortage = Math.max(0, total - available);
-      } else {
-        for (const [sizeId, needed] of Object.entries(value.bySize)) {
-          const reserved = reservedSupplyQuantity(variant.id, sizeId);
-          const stock = Math.max(0, stockForVariant(variant, sizeId) - reserved);
-          available += stock;
-          shortage += Math.max(0, needed - stock);
+      let available: number | null = null;
+      let shortage: number | null = null;
+      if (supply.stockMode !== 'none') {
+        available = 0;
+        shortage = 0;
+        if (variant.textileId) {
+          const unit: 'M' | 'KG' = supply.baseUnit === 'm' ? 'M' : 'KG';
+          const matchingRolls = textileContext.rollos.filter((roll) =>
+            roll.idTela === variant.textileId && (!variant.textileColorId || roll.idTelaColor === variant.textileColorId) && roll.estado === 'disponible'
+          );
+          available = matchingRolls.reduce((sum, roll) => {
+            const physical = unit === 'M' ? roll.metros ?? 0 : roll.pesoKg ?? 0;
+            const reserved = ordersHoldingStock.reduce((totalReserved, order) =>
+              totalReserved + order.rollAllocations.filter((allocation) => allocation.rollId === roll.id && allocation.unit === unit)
+                .reduce((totalForRoll, allocation) => totalForRoll + allocation.quantity, 0), 0);
+            return sum + Math.max(0, physical - reserved);
+          }, 0);
+          shortage = Math.max(0, total - available);
+        } else if (supply.stockMode === 'total') {
+          const reserved = reservedSupplyQuantity(variant.id, null);
+          available = Math.max(0, stockForVariant(variant, null) - reserved);
+          shortage = Math.max(0, total - available);
+        } else {
+          for (const [sizeId, needed] of Object.entries(value.bySize)) {
+            const reserved = reservedSupplyQuantity(variant.id, sizeId);
+            const stock = Math.max(0, stockForVariant(variant, sizeId) - reserved);
+            available += stock;
+            shortage += Math.max(0, needed - stock);
+          }
         }
       }
-      const packs = variant.purchasePackQuantity ? Math.ceil(shortage / variant.purchasePackQuantity) : null;
-      return { variantId, total, bySize: value.bySize, missingSizes: [...new Set(value.missingSizes)], available, shortage, packs };
+      const packs = supply.stockMode !== 'none' && variant.purchasePackQuantity && shortage !== null
+        ? Math.ceil(shortage / variant.purchasePackQuantity) : null;
+      return {
+        variantId, total, bySize: value.bySize,
+        missingSizes: [...new Set(value.missingSizes)],
+        specificationsBySize: value.specificationsBySize,
+        available, shortage, packs,
+      };
     });
     return { rows, unresolved };
   }, [activeProduct, data.familyRecipes, data.components, data.productionOrders, variantsBySupply, supplies, sizes, baseModels, basePieces, baseMovements, planCounts, textileContext, data.supplyMovements, stockForVariant, ordersHoldingStock, reservedSupplyQuantity]);
