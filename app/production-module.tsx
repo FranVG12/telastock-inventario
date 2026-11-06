@@ -1453,6 +1453,65 @@ export function ProductionModule({
     tell('Telas del modelo actualizadas.');
   }
 
+  function openProductColorEditor(product: ConfiguredProductModel) {
+    const base = baseModels.find((model) => model.id === product.baseModelId);
+    if (!base) return tell('No se encontró el patrón base de este modelo.', 'error');
+    const slots = productColorSlotsForBaseModel(base);
+    const selected = Object.fromEntries(slots.map((slot) => [
+      slot,
+      data.productColors.find((assignment) => assignment.productModelId === product.id && assignment.colorSlot === slot)?.colorId ?? '',
+    ]));
+    setEditingProductColorId(product.id);
+    setEditingProductColorAssignments(selected);
+  }
+
+  function saveProductColorEditor(event: FormEvent) {
+    event.preventDefault();
+    const product = data.productModels.find((item) => item.id === editingProductColorId && item.active);
+    const base = product ? baseModels.find((model) => model.id === product.baseModelId) : undefined;
+    if (!product || !base) return tell('No se encontró el modelo o su patrón base.', 'error');
+    const slots = productColorSlotsForBaseModel(base);
+    const activeColorIds = new Set(textileContext.colores.map((color) => color.id));
+    const missing = slots.filter((slot) => !activeColorIds.has(editingProductColorAssignments[slot] ?? ''));
+    if (missing.length > 0) return tell('Asigna un color del catálogo a: ' + missing.map(productColorSlotLabel).join(', ') + '.', 'error');
+    const timestamp = now();
+    const rows: ProductColorAssignment[] = slots.map((colorSlot) => ({
+      id: id(), productModelId: product.id, colorSlot, colorId: editingProductColorAssignments[colorSlot], createdAt: timestamp, updatedAt: timestamp,
+    }));
+    setData((current) => ({
+      ...current,
+      productModels: current.productModels.map((item) => item.id === product.id ? { ...item, updatedAt: timestamp } : item),
+      productColors: [...current.productColors.filter((item) => item.productModelId !== product.id), ...rows],
+    }));
+    setEditingProductColorId('');
+    setEditingProductColorAssignments({});
+    tell('Colores del modelo actualizados.');
+  }
+
+  function openQuickProductColor(slot: string, scope: 'new' | 'edit' = 'new') {
+    setQuickProductColorSlot(scope + ':' + slot);
+    setQuickProductColorName('');
+  }
+
+  function saveQuickProductColor(event: FormEvent) {
+    event.preventDefault();
+    if (!quickProductColorSlot) return;
+    try {
+      const color = createGlobalColorQuickly(quickProductColorName);
+      refreshTextiles();
+      const separator = quickProductColorSlot.indexOf(':');
+      const scope = quickProductColorSlot.slice(0, separator);
+      const slot = quickProductColorSlot.slice(separator + 1);
+      if (scope === 'edit') setEditingProductColorAssignments((current) => ({ ...current, [slot]: color.id }));
+      else setProductColorAssignments((current) => ({ ...current, [slot]: color.id }));
+      setQuickProductColorSlot('');
+      setQuickProductColorName('');
+      tell('Color creado y asignado a la posición del modelo.');
+    } catch (error) {
+      tell(error instanceof Error ? error.message : 'No se pudo crear el color.', 'error');
+    }
+  }
+
   function deleteProduct(product: ConfiguredProductModel) {
     if (!window.confirm('¿Archivar el modelo configurado "' + product.name + '"? No se eliminará el patrón base ni el historial de piezas.')) return;
     setData((current) => ({ ...current, productModels: current.productModels.map((x) => x.id === product.id ? { ...x, active: false, updatedAt: now() } : x) }));
