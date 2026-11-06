@@ -60,6 +60,60 @@ export const FABRIC_STORAGE_KEYS = {
   telaColores: 'telastock-fabric-tela-colores-v2',
 } as const;
 
+/** Crea una tela mínima desde otro formulario sin abandonar el trabajo actual.
+ * Mantiene el mismo catálogo local y publica el evento que refresca los módulos abiertos.
+ */
+export function createTextileQuickly(input: {
+  name: string;
+  unit: FabricUnit;
+  width?: number | null;
+  theoreticalYield?: number | null;
+  description?: string;
+}): Textile {
+  const name = input.name.trim();
+  if (!name) throw new Error('Escribe el nombre de la tela.');
+  if (!['KG', 'M'].includes(input.unit)) throw new Error('Selecciona una unidad de venta válida.');
+  if (input.width != null && (!Number.isFinite(input.width) || input.width <= 0)) throw new Error('El ancho debe ser mayor que cero.');
+  if (input.theoreticalYield != null && (!Number.isFinite(input.theoreticalYield) || input.theoreticalYield <= 0)) throw new Error('El rendimiento debe ser mayor que cero.');
+  const raw = localStorage.getItem(FABRIC_STORAGE_KEYS.telas);
+  const current: unknown = raw ? JSON.parse(raw) : [];
+  if (!Array.isArray(current) || !current.every((row) => row && typeof row === 'object' && typeof (row as { id?: unknown }).id === 'string' && typeof (row as { nombreTela?: unknown }).nombreTela === 'string')) {
+    throw new Error('El catálogo de telas tiene datos no válidos. Restaura un respaldo antes de modificarlo.');
+  }
+  const rows = current as Textile[];
+  if (rows.some((row) => row.nombreTela.trim().toLocaleLowerCase('es') === name.toLocaleLowerCase('es'))) {
+    throw new Error('Ya existe una tela con ese nombre. Selecciónala del catálogo.');
+  }
+  const timestamp = new Date().toISOString();
+  const created: Textile = {
+    id: id(), nombreTela: name, unidadVenta: input.unit,
+    anchoNominalM: input.width ?? null, rendimientoTeorico: input.theoreticalYield ?? null,
+    descripcion: input.description?.trim() ?? '', activo: true, createdAt: timestamp, updatedAt: timestamp,
+  };
+  localStorage.setItem(FABRIC_STORAGE_KEYS.telas, JSON.stringify([...rows, created]));
+  window.dispatchEvent(new Event('telastock-fabric-data-updated'));
+  return created;
+}
+
+/** Añade un color al diccionario global, sin obligar a asociarlo primero a una tela. */
+export function createGlobalColorQuickly(nameValue: string): ColorDefinition {
+  const name = nameValue.trim();
+  if (!name) throw new Error('Escribe el nombre del color.');
+  const raw = localStorage.getItem(FABRIC_STORAGE_KEYS.colores);
+  const current: unknown = raw ? JSON.parse(raw) : [];
+  if (!Array.isArray(current) || !current.every((row) => row && typeof row === 'object' && typeof (row as { id?: unknown }).id === 'string' && typeof (row as { nombre?: unknown }).nombre === 'string')) {
+    throw new Error('El catálogo de colores tiene datos no válidos. Restaura un respaldo antes de modificarlo.');
+  }
+  const rows = current as ColorDefinition[];
+  const existing = rows.find((row) => row.nombre.trim().toLocaleLowerCase('es') === name.toLocaleLowerCase('es'));
+  if (existing) return existing;
+  const timestamp = new Date().toISOString();
+  const created: ColorDefinition = { id: id(), nombre: name, createdAt: timestamp, updatedAt: timestamp };
+  localStorage.setItem(FABRIC_STORAGE_KEYS.colores, JSON.stringify([...rows, created]));
+  window.dispatchEvent(new Event('telastock-fabric-data-updated'));
+  return created;
+}
+
 export function emptyFabricBackupData(): FabricBackupData {
   return { telas: [], rollos: [], rolloMovimientos: [], proveedores: [], proveedorTelefonos: [], proveedorCategorias: [], compras: [], detalleCompra: [], colores: [], telaColores: [] };
 }
