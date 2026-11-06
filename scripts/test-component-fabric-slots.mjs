@@ -88,7 +88,7 @@ const {
 
 test('los componentes usan posiciones de color y admiten el comodín', () => {
   assert.equal(normalizeComponentColorSlot(undefined, 'legacy-blue'), 'principal');
-  assert.equal(normalizeComponentColorSlot(undefined, null), 'cualquiera');
+  assert.equal(normalizeComponentColorSlot(undefined, null), 'ninguna');
   assert.equal(isComponentColorSlot('cualquiera'), true);
   assert.equal(isComponentColorSlot('principal'), true);
   assert.equal(isComponentColorSlot('secundaria_4'), true);
