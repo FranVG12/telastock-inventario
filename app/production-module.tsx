@@ -1285,10 +1285,30 @@ export function ProductionModule({
       if (incompatiblePiece) return tell('El componente "' + component.name + '" tiene la pieza "' + incompatiblePiece.name + '" vinculada a ' + componentFabricSlotLabel(incompatiblePiece.fabricSlot) + ', pero el patrón base "' + selectedBaseModel.name + '" no define esa posición. Añade esa tela secundaria al patrón base o cambia la posición de la pieza.', 'error');
     }
 
+    const productSizes = sizes.filter((size) => size.groupId === selectedBaseModel.sizeGroupId);
+    const componentSelections: ProductComponentSelection[] = [];
+    for (const component of selectedComponents) {
+      const materialSpecifications: Record<string, SizeSpecification> = {};
+      for (const material of component.materials.filter((item) => item.specificationLabel?.trim())) {
+        const draft = productMaterialSpecsDraft[material.id];
+        if (!draft || !draft.label.trim()) return tell(component.name + ' · ' + variantLabel(variantsBySupply.get(material.variantId)!, data.variants, supplies) + ': indica el nombre de la característica por talla.', 'error');
+        try {
+          const mapped = mapSizeSpecificationRules(draft.rules, productSizes.map((size) => size.id));
+          materialSpecifications[material.id] = { label: draft.label.trim(), bySize: mapped.bySize };
+        } catch (error) {
+          return tell(component.name + ' · ' + (supplies.find((supply) => supply.id === variantsBySupply.get(material.variantId)?.supplyId)?.name ?? 'Material') + ': ' + (error instanceof Error ? error.message : 'revisa sus grupos de tallas.'), 'error');
+        }
+      }
+      componentSelections.push({
+        id: id(), componentId: component.id, quantity: 1, location: '', variantOverrides: {},
+        materialSpecifications,
+      });
+    }
+
     const timestamp = now();
     const row: ConfiguredProductModel = {
       id: id(), name: productName.trim(), collectionId: selectedCollection.id, baseModelId: productBaseId, description: productDescription.trim(),
-      components: productComponentIds.map((componentId) => ({ id: id(), componentId, quantity: 1, location: '', variantOverrides: {} })),
+      components: componentSelections,
       additionalMaterials: [], active: true, createdAt: timestamp, updatedAt: timestamp,
     };
     const fabricRows: ProductFabricAssignment[] = requiredFabricSlots.map((fabricSlot) => ({
@@ -1299,7 +1319,7 @@ export function ProductionModule({
       productModels: [...current.productModels, row],
       productFabrics: [...current.productFabrics, ...fabricRows],
     }));
-    setSelectedProductId(row.id); setSelectedStockProductModelId(row.id); setProductName(''); setProductCollectionId(''); setShowProductCollectionCreator(false); setNewProductCollectionName(''); setProductBaseId(''); setProductFabricAssignments({}); setProductDescription(''); setProductComponentIds([]);
+    setSelectedProductId(row.id); setSelectedStockProductModelId(row.id); setProductName(''); setProductCollectionId(''); setShowProductCollectionCreator(false); setNewProductCollectionName(''); setProductBaseId(''); setProductFabricAssignments({}); setProductDescription(''); setProductComponentIds([]); setProductMaterialSpecsDraft({});
     tell('Modelo configurado guardado con sus telas asignadas. Se conservó intacto el patrón base.');
   }
 
