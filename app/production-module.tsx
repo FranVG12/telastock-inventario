@@ -600,7 +600,7 @@ export function ProductionModule({
     let safe = true;
     let warning = '';
     const version = Number(localStorage.getItem(PRODUCTION_STORAGE_KEYS.version) ?? '0');
-    if (version > 4) { safe = false; warning = 'Los datos de insumos fueron creados con una versión más reciente. Se evita sobrescribirlos.'; }
+    if (version > 5) { safe = false; warning = 'Los datos de insumos fueron creados con una versión más reciente. Se evita sobrescribirlos.'; }
     for (const key of Object.keys(empty) as (keyof ProductionBackupData)[]) {
       try {
         const raw = localStorage.getItem(PRODUCTION_STORAGE_KEYS[key]);
@@ -621,7 +621,7 @@ export function ProductionModule({
     const loaded = loadLocal();
     setData(loaded.data);
     setStorageSafe(loaded.safe);
-    if (loaded.safe) localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '4');
+    if (loaded.safe) localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '5');
     else setNotice({ text: loaded.warning, kind: 'error' });
     setReady(true);
     refreshTextiles();
@@ -664,7 +664,7 @@ export function ProductionModule({
     try {
       keys.forEach((key) => previous.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       keys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(data[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '4');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '5');
     } catch {
       previous.forEach((value, key) => {
         try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch { /* rollback best effort */ }
@@ -980,7 +980,7 @@ export function ProductionModule({
       additionalMaterials: [], active: true, createdAt: now(), updatedAt: now(),
     };
     setData((current) => ({ ...current, productModels: [...current.productModels, row] }));
-    setSelectedProductId(row.id); setProductName(''); setProductCollectionId(''); setShowProductCollectionCreator(false); setNewProductCollectionName(''); setProductDescription(''); setProductComponentIds([]);
+    setSelectedProductId(row.id); setSelectedStockProductModelId(row.id); setProductName(''); setProductCollectionId(''); setShowProductCollectionCreator(false); setNewProductCollectionName(''); setProductDescription(''); setProductComponentIds([]);
     tell('Modelo configurado guardado. Se conservó intacto el patrón base.');
   }
   function deleteProduct(product: ConfiguredProductModel) {
@@ -1277,7 +1277,7 @@ export function ProductionModule({
     try {
       keys.forEach((key) => previous.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       keys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(next[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '4');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '5');
       setData(next);
       return true;
     } catch {
@@ -1578,7 +1578,7 @@ export function ProductionModule({
     try {
       productionKeys.forEach((key) => previousProduction.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       productionKeys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(nextData[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '4');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '5');
       localStorage.setItem(FABRIC_STORAGE_KEYS.rollos, JSON.stringify(updatedRolls));
       localStorage.setItem(FABRIC_STORAGE_KEYS.rolloMovimientos, JSON.stringify(nextRollMovements));
       const nextBase = [...baseMovements, ...baseEntries];
@@ -1792,6 +1792,9 @@ export function ProductionModule({
           return component ? component.pieces.map((piece) => ({ component, piece, selection })) : [];
         });
         const inventoryOpen = selectedStockProductModelId === product.id;
+        const unassignedLegacyMovements = data.componentPieceMovements.filter((movement) =>
+          !movement.productModelId && product.components.some((selection) => selection.componentId === movement.componentId)
+        ).length;
         return <article className="production-card" key={product.id}>
           <div className="production-card-heading"><div><strong>{product.name}</strong><div className="production-model-meta"><span className="production-family-tag">{familyLabel}</span><span>Colección: {collectionName}</span><span>Patrón: {base?.name ?? 'No disponible'}</span><span>Tallas: {productSizeGroup?.name ?? 'No disponible'}</span></div></div></div>
           <div className="production-attributes">{product.components.map((x) => <span key={x.id}>{data.components.find((c) => c.id === x.componentId)?.name ?? 'Componente archivado'} ×{x.quantity}</span>)}</div>
@@ -1804,6 +1807,7 @@ export function ProductionModule({
           {inventoryOpen && <section className="production-product-piece-stock">
             <div className="production-subheading"><strong>Inventario auxiliar · {product.name}</strong><span className="count-badge">{productPieces.length} piezas</span></div>
             <p className="production-muted">Tabla de tallas: <strong>{productSizeGroup?.name ?? 'No disponible'}</strong>. El saldo pertenece a este modelo y no se comparte con otras prendas que reutilicen el mismo componente.</p>
+            {unassignedLegacyMovements > 0 && <div className="notice info">Hay {format(unassignedLegacyMovements)} movimientos anteriores de componentes sin modelo asociado. No se suman a este inventario para evitar mezclar prendas. Registra aquí el saldo inicial correcto de este modelo.</div>}
             {productPieces.map(({ component, piece, selection }) => <article className="production-component-stock-piece" key={selection.id + ':' + piece.id}>
               <div className="production-component-stock-title">
                 <div><strong>{component.name} · {piece.name}</strong><small>{piece.laterality === 'simetrica' ? 'Control por izquierda / derecha' : 'Control por unidades'} · {piece.unitsPerGarment * selection.quantity} por prenda{piece.textileId ? ' · ' + textileName(piece.textileId) : ''}{piece.colorId ? ' · ' + componentColorName(piece.colorId) : ''}</small></div>
