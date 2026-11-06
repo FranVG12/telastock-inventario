@@ -635,6 +635,8 @@ export function ProductionModule({
   const [supplyDescription, setSupplyDescription] = useState('');
   const [supplyAttributes, setSupplyAttributes] = useState('');
   const [showSupplyForm, setShowSupplyForm] = useState(false);
+  const [supplyReturnToPurchase, setSupplyReturnToPurchase] = useState(false);
+  const [purchaseQuickSupplyId, setPurchaseQuickSupplyId] = useState('');
   const [variantSupplyId, setVariantSupplyId] = useState('');
   const [variantName, setVariantName] = useState('');
   const [variantPackQuantity, setVariantPackQuantity] = useState('');
@@ -650,6 +652,7 @@ export function ProductionModule({
   const [stockDirection, setStockDirection] = useState<'entrada' | 'salida'>('entrada');
   const [showStockForm, setShowStockForm] = useState(false);
   const [componentDraft, setComponentDraft] = useState<GarmentComponent | null>(null);
+  const [returnToProductAfterComponentCreate, setReturnToProductAfterComponentCreate] = useState(false);
   const [recipeDraft, setRecipeDraft] = useState<FamilyRecipe | null>(null);
   const [productName, setProductName] = useState('');
   const [productCollectionId, setProductCollectionId] = useState('');
@@ -781,6 +784,7 @@ export function ProductionModule({
     const row: Supply = { id: id(), name, category: supplyCategory, baseUnit: supplyUnit, stockMode, description: supplyDescription.trim(), attributes: parseAttributes(supplyAttributes), active: true, createdAt: now(), updatedAt: now() };
     setData((current) => ({ ...current, supplies: [...current.supplies, row] }));
     setSupplyName(''); setSupplyDescription(''); setSupplyAttributes(''); setShowSupplyForm(false);
+    if (supplyReturnToPurchase) { openVariant(row.id); tell('Insumo creado. Ahora registra su variante para volver a la compra.'); return; }
     tell('Insumo registrado. Ahora agrega sus variantes comerciales.');
   }
   function openQuickTextile(target: QuickTextileTarget) {
@@ -891,7 +895,16 @@ export function ProductionModule({
     if (data.variants.some((x) => x.supplyId === variantSupplyId && x.name.toLocaleLowerCase('es') === variantName.trim().toLocaleLowerCase('es'))) return tell('Esa variante ya existe para el insumo.', 'error');
     const row: SupplyVariant = { id: id(), supplyId: variantSupplyId, name: variantName.trim(), attributes: parseAttributes(variantAttributes), textileId: variantTextileId || null, textileColorId: variantTextileColorId || null, purchasePackQuantity: packQuantity, purchasePackLabel: variantPackLabel.trim(), active: true };
     setData((current) => ({ ...current, variants: [...current.variants, row] }));
-    setShowVariantForm(false); tell('Variante registrada.');
+    setShowVariantForm(false);
+    if (supplyReturnToPurchase) {
+      setPurchaseLines((current) => current.map((line, index) => index === 0 && !line.variantId ? { ...line, variantId: row.id, sizeId: '' } : line));
+      setSupplyReturnToPurchase(false);
+      setShowPurchaseForm(true);
+      onNavigate('compras-avios');
+      tell('Variante creada y añadida a la compra que estabas preparando.');
+      return;
+    }
+    tell('Variante registrada.');
   }
   function stockForVariant(variant: SupplyVariant, sizeId: string | null): number {
     const supply = supplies.find((x) => x.id === variant.supplyId);
@@ -1104,10 +1117,37 @@ export function ProductionModule({
     const draftPieceIds = row.pieces.map((piece) => piece.id);
     if (new Set(draftPieceIds).size !== draftPieceIds.length || row.pieces.some((piece) => otherPieceIds.has(piece.id))) return tell('Cada pieza necesita un identificador propio. Vuelve a agregar la pieza duplicada.', 'error');
     setData((current) => ({ ...current, components: current.components.some((x) => x.id === row.id) ? current.components.map((x) => x.id === row.id ? row : x) : [...current.components, row] }));
-    setComponentDraft(null); tell('Componente guardado.');
+    setComponentDraft(null);
+    if (returnToProductAfterComponentCreate) {
+      setProductComponentIds((current) => current.includes(row.id) ? current : [...current, row.id]);
+      setReturnToProductAfterComponentCreate(false);
+      onNavigate('modelos-producto');
+      tell('Componente creado, añadido a la prenda y listo para continuar.');
+      return;
+    }
+    tell('Componente guardado.');
   }
   function newComponent() {
     setComponentDraft({ id: id(), type: 'Cuello', name: '', description: '', imageUrl: '', active: true, pieces: [], materials: [], createdAt: now(), updatedAt: now() });
+  }
+  function createComponentFromProduct() {
+    setReturnToProductAfterComponentCreate(true);
+    newComponent();
+    onNavigate('componentes');
+  }
+  function startSupplyCreationForPurchase() {
+    setSupplyReturnToPurchase(true);
+    setSupplyName(''); setSupplyCategory('Otros avíos'); setSupplyUnit('und'); setStockMode('total'); setSupplyDescription(''); setSupplyAttributes('');
+    setShowSupplyForm(true);
+    onNavigate('insumos');
+  }
+  function cancelVariantCreation() {
+    setShowVariantForm(false);
+    if (supplyReturnToPurchase) {
+      setSupplyReturnToPurchase(false);
+      setShowPurchaseForm(true);
+      onNavigate('compras-avios');
+    }
   }
   function saveRecipe(event: FormEvent) {
     event.preventDefault();
