@@ -491,7 +491,7 @@ type QuickTextileTarget = { kind: 'product'; slot: string } | { kind: 'existingP
 type QuickTextileDraft = { target: QuickTextileTarget; name: string; unit: 'KG' | 'M'; width: string; theoreticalYield: string; description: string };
 
 function MaterialEditor({
-  materials, onChange, variants, supplies, sizes, title, onCreateSupplyVariant,
+  materials, onChange, variants, supplies, sizes, title, onCreateSupplyVariant, allowSizeSpecifications = false,
 }: {
   materials: MaterialRequirement[];
   onChange: (items: MaterialRequirement[]) => void;
@@ -500,17 +500,18 @@ function MaterialEditor({
   sizes: Size[];
   title: string;
   onCreateSupplyVariant: (draft: QuickMaterialDraft) => QuickMaterialCreated | null;
+  allowSizeSpecifications?: boolean;
 }) {
   const variantOptions = variants.map((variant) => ({ variant, label: variantLabel(variant, variants, supplies) }));
   const [showQuickMaterial, setShowQuickMaterial] = useState(false);
   const [quickMaterialDraft, setQuickMaterialDraft] = useState<QuickMaterialDraft>({
     existingSupplyId: supplies.find((item) => item.active)?.id ?? '',
-    supplyName: '', category: 'Otros avíos', baseUnit: 'und', stockMode: 'total', variantName: '',
+    supplyName: '', category: 'Otros avíos', baseUnit: 'und', stockMode: 'none', variantName: 'General',
   });
   function openQuickMaterial() {
     setQuickMaterialDraft({
       existingSupplyId: supplies.find((item) => item.active)?.id ?? '',
-      supplyName: '', category: 'Otros avíos', baseUnit: 'und', stockMode: 'total', variantName: '',
+      supplyName: '', category: 'Otros avíos', baseUnit: 'und', stockMode: 'none', variantName: 'General',
     });
     setShowQuickMaterial((current) => !current);
   }
@@ -543,15 +544,13 @@ function MaterialEditor({
         </select>
       </label>}
       {!quickMaterialDraft.existingSupplyId && <>
-        <label className="field-label">Nombre del insumo<input className="large-input" value={quickMaterialDraft.supplyName} onChange={(event) => setQuickMaterialDraft((current) => ({ ...current, supplyName: event.target.value }))} placeholder="Ej. Cinta elástica" /></label>
+        <label className="field-label">Nombre del insumo<input className="large-input" value={quickMaterialDraft.supplyName} onChange={(event) => setQuickMaterialDraft((current) => ({ ...current, supplyName: event.target.value }))} placeholder="Ej. Cinta elástica rígida" required /></label>
         <div className="production-form-grid">
           <label className="field-label">Categoría<select className="large-input" value={quickMaterialDraft.category} onChange={(event) => setQuickMaterialDraft((current) => ({ ...current, category: event.target.value as SupplyCategory }))}>{categories.map((category) => <option key={category}>{category}</option>)}</select></label>
-          <label className="field-label">Unidad de inventario<select className="large-input" value={quickMaterialDraft.baseUnit} onChange={(event) => setQuickMaterialDraft((current) => ({ ...current, baseUnit: event.target.value as StockUnit }))}>{units.map((unit) => <option key={unit} value={unit}>{unitLabel[unit]}</option>)}</select></label>
+          <label className="field-label">Unidad base<select className="large-input" value={quickMaterialDraft.baseUnit} onChange={(event) => setQuickMaterialDraft((current) => ({ ...current, baseUnit: event.target.value as StockUnit }))}>{units.map((unit) => <option key={unit} value={unit}>{unitLabel[unit]}</option>)}</select></label>
         </div>
-        <label className="field-label">Control de stock<select className="large-input" value={quickMaterialDraft.stockMode} onChange={(event) => setQuickMaterialDraft((current) => ({ ...current, stockMode: event.target.value as 'total' | 'talla' }))}><option value="total">Cantidad total</option><option value="talla">Separado por talla</option></select></label>
       </>}
-      <label className="field-label">Variante inicial<input className="large-input" value={quickMaterialDraft.variantName} onChange={(event) => setQuickMaterialDraft((current) => ({ ...current, variantName: event.target.value }))} placeholder="Ej. Negro · 3.5 cm · Estándar" /></label>
-      <small>Se creará y se añadirá directamente a esta receta o componente. Después podrás completar sus detalles y presentaciones en Insumos y avíos.</small>
+      <small>El insumo se crea sin inventario. Su medida o característica por talla se define después al crear cada modelo; no se crearán variantes de stock de 13 cm, 15 cm, etc.</small>
       <div className="production-quick-material-actions"><button type="button" className="button secondary" onClick={() => setShowQuickMaterial(false)}>Cancelar</button><button type="button" className="button primary" onClick={saveQuickMaterial}>Guardar y usar</button></div>
     </div>}
     {materials.length === 0 && <p className="production-muted">Todavía no has agregado materiales.</p>}
@@ -582,6 +581,10 @@ function MaterialEditor({
           <label className="field-label">Desperdicio %
             <input className="large-input" type="number" min="0" step="0.1" value={material.wastePercent} onChange={(event) => update(index, { wastePercent: Number(event.target.value) })} />
           </label>
+          {allowSizeSpecifications && <label className="field-label">Característica que variará por talla (opcional)
+            <input className="large-input" value={material.specificationLabel ?? ''} onChange={(event) => update(index, { specificationLabel: event.target.value })} placeholder="Ej. Longitud, ancho, grosor" />
+            <small>El valor concreto se asigna por grupos de tallas al crear el modelo comercial.</small>
+          </label>}
         </div>
         {material.mode === 'per_size' && <div className="production-size-consumption">
           <strong>Consumo por talla</strong>
@@ -1963,13 +1966,13 @@ export function ProductionModule({
           <label className="field-label">Nombre<input className="large-input" value={supplyName} onChange={(e) => setSupplyName(e.target.value)} placeholder="Ej. Hilo de remalle" required /></label>
           <label className="field-label">Categoría<select className="large-input" value={supplyCategory} onChange={(e) => setSupplyCategory(e.target.value as SupplyCategory)}>{categories.map((x) => <option key={x}>{x}</option>)}</select></label>
           <label className="field-label">Unidad de inventario<select className="large-input" value={supplyUnit} onChange={(e) => setSupplyUnit(e.target.value as StockUnit)}>{units.map((x) => <option key={x} value={x}>{unitLabel[x]}</option>)}</select></label>
-          <label className="field-label">Control de existencias<select className="large-input" value={stockMode} onChange={(e) => setStockMode(e.target.value as 'total' | 'talla')}><option value="total">Cantidad total</option><option value="talla">Separada por talla</option></select></label>
+          <label className="field-label">Control de existencias<select className="large-input" value={stockMode} onChange={(e) => setStockMode(e.target.value as 'none' | 'total' | 'talla')}><option value="none">Sin inventario · definir por modelo</option><option value="total">Cantidad total</option><option value="talla">Separada por talla</option></select><small>Para cierres y cintas cuya medida depende de la talla, selecciona «Sin inventario».</small></label>
         </div>
         <label className="field-label">Descripción<textarea className="large-input" rows={2} value={supplyDescription} onChange={(e) => setSupplyDescription(e.target.value)} placeholder="Uso habitual, especificaciones…" /></label>
         <label className="field-label">Características adicionales<textarea className="large-input" rows={2} value={supplyAttributes} onChange={(e) => setSupplyAttributes(e.target.value)} placeholder={'Una por línea. Ejemplo:\nAncho: 3.5 cm\nMaterial: Poliéster\nRigidez: Rígida'} /></label>
         <div className="form-actions"><button type="button" className="button secondary" onClick={cancelSupplyCreation}>Cancelar</button><button className="button primary">Guardar insumo</button></div>
       </form>}
-      {supplies.length === 0 && <div className="empty">Todavía no hay insumos. Registra el primero para crear sus variantes.</div>}
+      {supplies.length === 0 && <div className="empty">Todavía no hay insumos. Registra el primero; sus características por talla se definen al crear el modelo.</div>}
       <div className="production-list">{supplies.filter((x) => x.active).map((supply) => {
         const ownVariants = data.variants.filter((x) => x.supplyId === supply.id && x.active);
         return <article className="production-card" key={supply.id}>
