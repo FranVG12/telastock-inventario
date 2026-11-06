@@ -472,7 +472,7 @@ export default function Home() {
       setModelForm((previous) => ({
         ...previous,
         pieces: previous.pieces.map((piece, pieceIndex) => {
-          if (piece.id === quickPatternColorTarget.pieceId) return { ...piece, colorId: color.id, color: color.nombre, colorOverride: pieceIndex !== 0 };
+          if (pieceIndex === quickPatternColorTarget.index) return { ...piece, colorId: color.id, color: color.nombre, colorOverride: pieceIndex !== 0 };
           if (quickPatternColorTarget.index === 0 && !piece.colorOverride) return { ...piece, colorId: color.id, color: color.nombre };
           return piece;
         }),
