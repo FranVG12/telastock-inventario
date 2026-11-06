@@ -799,17 +799,20 @@ export function ProductionModule({
     if (quickTextileDraft.width.trim() && (width === null || !Number.isFinite(width) || width <= 0)) return tell('El ancho debe ser un número mayor que cero o quedar vacío.', 'error');
     if (quickTextileDraft.theoreticalYield.trim() && (theoreticalYield === null || !Number.isFinite(theoreticalYield) || theoreticalYield <= 0)) return tell('El rendimiento teórico debe ser mayor que cero o quedar vacío.', 'error');
     try {
+      const target = quickTextileDraft.target;
       const textile = createTextileQuickly({
         name: quickTextileDraft.name, unit: quickTextileDraft.unit,
         width, theoreticalYield, description: quickTextileDraft.description,
       });
       refreshTextiles();
-      if (quickTextileDraft.target.kind === 'product') {
-        setProductFabricAssignments((current) => ({ ...current, [quickTextileDraft.target.slot]: textile.id }));
+      if (target.kind === 'product') {
+        const slot = target.slot;
+        setProductFabricAssignments((current) => ({ ...current, [slot]: textile.id }));
       } else {
+        const pieceId = target.pieceId;
         setComponentDraft((current) => current ? {
           ...current,
-          pieces: current.pieces.map((piece) => piece.id === quickTextileDraft.target.pieceId ? { ...piece, textileId: textile.id } : piece),
+          pieces: current.pieces.map((piece) => piece.id === pieceId ? { ...piece, textileId: textile.id } : piece),
         } : current);
       }
       setQuickTextileDraft(null);
