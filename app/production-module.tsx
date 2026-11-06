@@ -2419,7 +2419,7 @@ export function ProductionModule({
               <option value="">Sin vincular</option>
               {textileContext.telas.filter((textile) => textile.activo !== false || textile.id === variantTextileId).map((textile) => <option key={textile.id} value={textile.id}>{textile.nombreTela}{textile.activo === false ? ' · archivada' : ''}</option>)}
             </select>
-            <button type="button" className="text-action" disabled={!supplies.find((item) => item.id === variantSupplyId) || !['m', 'kg'].includes(supplies.find((item) => item.id === variantSupplyId)?.baseUnit ?? '')} onClick={() => openQuickTextile({ kind: 'variant' })}>＋ Crear tela y vincular</button>
+            <button type="button" className="text-action" disabled={!supplies.find((item) => item.id === variantSupplyId) || supplies.find((item) => item.id === variantSupplyId)?.stockMode === 'talla' || !['m', 'kg'].includes(supplies.find((item) => item.id === variantSupplyId)?.baseUnit ?? '')} onClick={() => openQuickTextile({ kind: 'variant' })}>＋ Crear tela y vincular</button>
             <small>La unidad de la tela debe coincidir con la unidad de inventario de este insumo.</small>
           </label>
           {variantTextileId && <label className="field-label">Color de esa tela
@@ -2427,7 +2427,7 @@ export function ProductionModule({
               <option value="">Seleccionar color</option>
               {textileColorOptions.map((x) => <option key={x.id} value={x.id}>{textileContext.colores.find((c) => c.id === x.idColor)?.nombre ?? 'Color'}</option>)}
             </select>
-            <button type="button" className="text-action" onClick={openQuickVariantColor}>＋ Crear color para esta tela</button>
+            <button type="button" className="text-action" disabled={!textileContext.telas.some((textile) => textile.id === variantTextileId && textile.activo !== false)} onClick={openQuickVariantColor}>＋ Crear color para esta tela</button>
           </label>}
         </div>
         <div className="form-actions"><button type="button" className="button secondary" onClick={cancelVariantCreation}>Cancelar</button><button className="button primary">Guardar variante</button></div>
