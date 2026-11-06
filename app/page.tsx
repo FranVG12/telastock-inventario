@@ -681,7 +681,7 @@ export default function Home() {
       const payload = {
         app: 'TelaStock',
         backupType: 'full',
-        schemaVersion: 9,
+        schemaVersion: 10,
         exportedAt: new Date().toISOString(),
         data: {
           sizeGroups, sizes, models, pieces, movements, fabricInventory,
@@ -712,7 +712,7 @@ export default function Home() {
       const raw = JSON.parse(await file.text()) as unknown;
       const isRecord = (value: unknown): value is Record<string, unknown> =>
         Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-      if (!isRecord(raw) || raw.app !== 'TelaStock' || raw.backupType !== 'full' || ![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(Number(raw.schemaVersion)) || !isRecord(raw.data)) {
+      if (!isRecord(raw) || raw.app !== 'TelaStock' || raw.backupType !== 'full' || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(Number(raw.schemaVersion)) || !isRecord(raw.data)) {
         throw new Error('Este no es un respaldo completo de TelaStock compatible.');
       }
       const data = raw.data;
@@ -742,6 +742,13 @@ export default function Home() {
       const sizeIds = new Set(importedSizes.map((item) => item.id));
       const modelIds = new Set(importedModels.map((item) => item.id));
       const pieceIds = new Set(importedPieces.map((item) => item.id));
+      const productFabricLinksValid = importedProduction.productFabrics.every((assignment) => {
+        const product = importedProduction.productModels.find((item) => item.id === assignment.productModelId);
+        const baseModel = product ? importedModels.find((item) => item.id === product.baseModelId) : undefined;
+        return Boolean(product && baseModel &&
+          isValidFabricSlot(assignment.fabricSlot, baseModel.secondaryFabricSlots ?? 0) &&
+          importedFabric.telas.some((textile) => textile.id === assignment.textileId));
+      });
       const productionSizeLinksValid =
         importedProduction.supplyMovements.every((movement) => movement.sizeId === null || sizeIds.has(movement.sizeId)) &&
         importedProduction.supplyPurchaseDetails.every((detail) => detail.sizeId === null || sizeIds.has(detail.sizeId)) &&
@@ -761,7 +768,7 @@ export default function Home() {
           (piece.colorId == null || importedFabric.colores.some((color) => color.id === piece.colorId))
         )
       );
-      if (!productionSizeLinksValid || !componentPieceCatalogLinksValid) throw new Error('Hay órdenes, movimientos o piezas auxiliares vinculados a tallas, moldes, telas o colores que no existen en este respaldo.');
+      if (!productionSizeLinksValid || !componentPieceCatalogLinksValid || !productFabricLinksValid) throw new Error('Hay órdenes, movimientos, piezas auxiliares o telas de modelos vinculados a registros que no existen en este respaldo.');
       const importedColorMap = new Map(importedFabric.colores.map((color) => [color.nombre.toLocaleLowerCase('es'), color]));
       importedPieces.forEach((piece) => {
         const legacyName = (piece.color ?? '').trim();
@@ -829,7 +836,7 @@ export default function Home() {
       (Object.keys(emptyProductionBackupData()) as (keyof ReturnType<typeof emptyProductionBackupData>)[]).forEach((key) => {
         localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(importedProduction[key]));
       });
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '2');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '6');
       window.dispatchEvent(new Event('telastock-production-data-restored'));
       window.dispatchEvent(new Event('telastock-fabric-data-updated'));
       window.dispatchEvent(new Event('telastock-fabric-data-restored'));
