@@ -1753,41 +1753,12 @@ export function ProductionModule({
       <div className="production-component-grid">
         {data.components.filter((x) => x.active).map((component) => <article className="production-card" key={component.id}>
           {component.imageUrl && <img className="production-component-image" src={component.imageUrl} alt="" />}
-          <div className="production-card-heading"><div><strong>{component.name}</strong><span>{component.type} · {component.pieces.length} piezas · {component.materials.length} materiales</span></div><div className="production-card-actions"><button className="button secondary" disabled={component.pieces.length === 0} onClick={() => setSelectedStockComponentId(component.id)}>Inventario de piezas</button><button className="button secondary" onClick={() => openComponent(component)}>Editar</button></div></div>
+          <div className="production-card-heading"><div><strong>{component.name}</strong><span>{component.type} · {component.pieces.length} piezas de patronaje · {component.materials.length} materiales</span></div><button className="button secondary" onClick={() => openComponent(component)}>Editar</button></div>
           {component.description && <p className="production-muted">{component.description}</p>}
           <div className="production-attributes">{component.pieces.map((x) => <span key={x.id}>{x.name} ×{x.unitsPerGarment}{x.textileId ? ' · Tela: ' + textileName(x.textileId) : ''}{x.colorId ? ' · Color: ' + componentColorName(x.colorId) : ''}</span>)}</div>
+          <small className="production-muted">Molde auxiliar reutilizable. El inventario se crea dentro de cada modelo de prenda.</small>
         </article>)}
       </div>
-      {selectedStockComponent && <section className="production-component-stock">
-        <div className="panel-heading">
-          <div><h2>Inventario de piezas · {selectedStockComponent.name}</h2><p>Existencias independientes del inventario de moldes base.</p></div>
-          <button className="text-action" onClick={() => setSelectedStockComponentId('')}>Cerrar</button>
-        </div>
-        {selectedStockComponent.pieces.map((piece) => <article className="production-component-stock-piece" key={piece.id}>
-          <div className="production-component-stock-title">
-            <div><strong>{piece.name}</strong><small>{piece.laterality === 'simetrica' ? 'Control por izquierda / derecha' : 'Control por unidades'} · {piece.unitsPerGarment} por prenda</small></div>
-            <button className="button secondary" onClick={() => openComponentPieceMovement(selectedStockComponent, piece)}>Registrar movimiento</button>
-          </div>
-          <div className="production-component-stock-sizes">
-            {sizes.map((size) => <div key={size.id}><span>{size.label}</span><small>{sizeGroups.find((group) => group.id === size.groupId)?.name ?? 'Grupo'}</small><strong>{componentPieceStockLabel(piece, size.id)}</strong></div>)}
-          </div>
-        </article>)}
-        {selectedStockComponent.pieces.length === 0 && <div className="empty">Este componente todavía no tiene piezas de patronaje.</div>}
-        <div className="production-subheading"><strong>Últimos movimientos</strong><span className="count-badge">{data.componentPieceMovements.filter((movement) => movement.componentId === selectedStockComponent.id).length}</span></div>
-        <div className="production-component-movement-history">
-          {[...data.componentPieceMovements].filter((movement) => movement.componentId === selectedStockComponent.id).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 25).map((movement) => {
-            const piece = selectedStockComponent.pieces.find((item) => item.id === movement.pieceId);
-            const size = sizes.find((item) => item.id === movement.sizeId);
-            const side = movement.side ? ' · ' + movement.side : '';
-            return <div className="production-component-movement-row" key={movement.id}>
-              <span className={'movement-icon ' + (movement.delta < 0 ? 'movement-out' : '')}>{movement.delta < 0 ? '−' : '＋'}</span>
-              <div><strong>{piece?.name ?? 'Pieza auxiliar'}</strong><small>{size ? sizeDisplay(size) : 'Talla no disponible'}{side} · {movement.kind.toLocaleUpperCase('es')} · {movement.note}</small></div>
-              <div><strong>{movement.delta > 0 ? '+' : ''}{format(movement.delta)}</strong><small>{new Date(movement.date).toLocaleDateString('es-PE')}</small></div>
-            </div>;
-          })}
-          {data.componentPieceMovements.every((movement) => movement.componentId !== selectedStockComponent.id) && <small className="production-muted">Todavía no hay movimientos para este componente.</small>}
-        </div>
-      </section>}
       {data.components.length === 0 && <div className="empty">Crea tu primer cuello, bolsillo o acabado reutilizable.</div>}
     </section>;
 
@@ -1798,6 +1769,7 @@ export function ProductionModule({
           <label className="field-label">Nombre comercial<input className="large-input" value={productName} onChange={(e) => setProductName(e.target.value)} placeholder="Ej. Polo escolar cuello camisero" required /></label>
           <div className="field-label production-span-2"><span>Colección *</span><div className="production-collection-control"><select className="large-input" value={productCollectionId} onChange={(e) => setProductCollectionId(e.target.value)} required><option value="">Seleccionar colección guardada</option>{data.productCollections.filter((x) => x.active).slice().sort((a, b) => a.name.localeCompare(b.name, 'es')).map((collection) => <option value={collection.id} key={collection.id}>{collection.name}</option>)}</select><button type="button" className="button secondary" onClick={() => setShowProductCollectionCreator((current) => !current)}>＋ Nueva colección</button></div>{showProductCollectionCreator && <div className="production-collection-create"><input className="large-input" value={newProductCollectionName} onChange={(e) => setNewProductCollectionName(e.target.value)} placeholder="Nombre de la nueva colección" aria-label="Nombre de la nueva colección" /><div className="production-collection-actions"><button type="button" className="button primary" onClick={createProductCollection}>Guardar colección</button><button type="button" className="button secondary" onClick={() => { setShowProductCollectionCreator(false); setNewProductCollectionName(''); }}>Cancelar</button></div></div>}{data.productCollections.filter((x) => x.active).length === 0 && !showProductCollectionCreator && <small>Primero crea una colección; después podrás reutilizarla en otros modelos.</small>}</div>
           <label className="field-label">Patrón base<select className="large-input" value={productBaseId} onChange={(e) => setProductBaseId(e.target.value)} required><option value="">Seleccionar patrón existente</option>{baseModels.map((x) => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label>
+          <label className="field-label">Tabla de tallas<input className="large-input" value={sizeGroups.find((group) => group.id === baseModels.find((model) => model.id === productBaseId)?.sizeGroupId)?.name ?? 'Se hereda del patrón base'} readOnly /><small>Esta tabla define las tallas del inventario del patrón base y de las piezas auxiliares de este modelo.</small></label>
         </div>
         <label className="field-label">Descripción (opcional)<input className="large-input" value={productDescription} onChange={(e) => setProductDescription(e.target.value)} placeholder="Color, temporada, cliente…" /></label>
         <div className="production-subheading"><strong>Componentes y acabados</strong><span className="production-muted">Selecciona los que lleva esta prenda</span></div>
@@ -1813,10 +1785,35 @@ export function ProductionModule({
         const base = baseModels.find((x) => x.id === product.baseModelId);
         const familyLabel = families.find((x) => x.value === base?.family)?.label ?? (base?.family || 'Familia sin definir');
         const collectionName = data.productCollections.find((collection) => collection.id === product.collectionId)?.name ?? 'Sin colección';
+        const productSizeGroup = sizeGroups.find((group) => group.id === base?.sizeGroupId);
+        const productSizes = productSizeOptions(product);
+        const productPieces = product.components.flatMap((selection) => {
+          const component = data.components.find((item) => item.id === selection.componentId && item.active);
+          return component ? component.pieces.map((piece) => ({ component, piece, selection })) : [];
+        });
+        const inventoryOpen = selectedStockProductModelId === product.id;
         return <article className="production-card" key={product.id}>
-          <div className="production-card-heading"><div><strong>{product.name}</strong><div className="production-model-meta"><span className="production-family-tag">{familyLabel}</span><span>Colección: {collectionName}</span><span>Patrón: {base?.name ?? 'No disponible'}</span></div></div><button className="text-action danger-action" onClick={() => deleteProduct(product)}>Archivar</button></div>
+          <div className="production-card-heading"><div><strong>{product.name}</strong><div className="production-model-meta"><span className="production-family-tag">{familyLabel}</span><span>Colección: {collectionName}</span><span>Patrón: {base?.name ?? 'No disponible'}</span><span>Tallas: {productSizeGroup?.name ?? 'No disponible'}</span></div></div></div>
           <div className="production-attributes">{product.components.map((x) => <span key={x.id}>{data.components.find((c) => c.id === x.componentId)?.name ?? 'Componente archivado'} ×{x.quantity}</span>)}</div>
-          <small className="production-muted">El patrón base y su inventario de piezas permanecen independientes.</small>
+          <div className="production-card-actions">
+            <button className="button secondary" disabled={productPieces.length === 0 || productSizes.length === 0} onClick={() => { setSelectedStockProductModelId(inventoryOpen ? '' : product.id); setSelectedStockComponentId(''); setComponentStockPieceId(''); }}>
+              {inventoryOpen ? 'Ocultar inventario auxiliar' : 'Inventario auxiliar'}
+            </button>
+            <button className="text-action danger-action" onClick={() => deleteProduct(product)}>Archivar</button>
+          </div>
+          {inventoryOpen && <section className="production-product-piece-stock">
+            <div className="production-subheading"><strong>Inventario auxiliar · {product.name}</strong><span className="count-badge">{productPieces.length} piezas</span></div>
+            <p className="production-muted">Tabla de tallas: <strong>{productSizeGroup?.name ?? 'No disponible'}</strong>. El saldo pertenece a este modelo y no se comparte con otras prendas que reutilicen el mismo componente.</p>
+            {productPieces.map(({ component, piece, selection }) => <article className="production-component-stock-piece" key={selection.id + ':' + piece.id}>
+              <div className="production-component-stock-title">
+                <div><strong>{component.name} · {piece.name}</strong><small>{piece.laterality === 'simetrica' ? 'Control por izquierda / derecha' : 'Control por unidades'} · {piece.unitsPerGarment * selection.quantity} por prenda{piece.textileId ? ' · ' + textileName(piece.textileId) : ''}{piece.colorId ? ' · ' + componentColorName(piece.colorId) : ''}</small></div>
+                <button className="button secondary" onClick={() => openComponentPieceMovement(product.id, component, piece)}>Registrar movimiento</button>
+              </div>
+              {productSizes.length > 0 ? <div className="production-component-stock-sizes">
+                {productSizes.map((size) => <div key={size.id}><span>{size.label}</span><small>{productSizeGroup?.name ?? 'Tabla de tallas'}</small><strong>{componentPieceStockLabel(product.id, piece, size.id)}</strong></div>)}
+              </div> : <small className="production-muted">El patrón base no tiene tallas disponibles.</small>}
+            </article>)}
+          </section>}
         </article>;
       })}</div>
     </section>;
