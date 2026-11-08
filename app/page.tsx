@@ -19,8 +19,8 @@ import {
   type SizeGroup,
 } from '@/lib/inventory-domain';
 import { demoModels, demoMovements, demoPieces, demoSizes, demoSizeGroups } from '@/lib/demo-data';
-import { isComponentFabricSlotAvailableForModel } from '@/lib/component-fabric-slots';
-import { isComponentColorSlotAvailableForModel } from '@/lib/component-color-slots';
+import { isComponentFabricSlotAvailableForModel, secondaryFabricSlotIndex } from '@/lib/component-fabric-slots';
+import { isComponentColorSlotAvailableForModel, secondaryColorSlotIndex } from '@/lib/component-color-slots';
 import { validateSizeSpecification } from '@/lib/material-size-specifications';
 import { FabricModule, FABRIC_STORAGE_KEYS, emptyFabricBackupData, validateFabricBackupData, type FabricView, type ColorDefinition } from '@/app/fabric-module';
 import { ProductionModule, PRODUCTION_STORAGE_KEYS, emptyProductionBackupData, validateProductionBackupData, type ProductionView } from '@/app/production-module';
@@ -67,8 +67,8 @@ const newId = () => typeof crypto !== 'undefined' && 'randomUUID' in crypto ? cr
 const fabricSlotLabel = (slot: FabricSlot) => {
   if (slot === 'cualquiera') return 'Cualquier tela';
   if (slot === 'principal') return 'Tela principal 1';
-  const match = /^secundaria_(\d+)$/.exec(slot);
-  return match ? `Tela secundaria ${Number(match[1])}` : slot;
+  const index = secondaryFabricSlotIndex(slot);
+  return index > 0 ? `Tela secundaria ${index}` : slot;
 };
 const fabricSlotOptions = (secondaryCount: number): FabricSlot[] =>
   ['cualquiera', 'principal', ...Array.from({ length: secondaryCount }, (_, index) => `secundaria_${index + 1}`)];
@@ -76,24 +76,14 @@ const colorSlotLabel = (slot: string) => {
   if (slot === 'ninguna') return 'Sin color';
   if (slot === 'cualquiera') return 'Cualquier color';
   if (slot === 'principal') return 'Color principal 1';
-  const match = /^secundaria_(\d+)$/.exec(slot);
-  return match ? `Color secundario ${Number(match[1])}` : 'Posición de color inválida';
+  const index = secondaryColorSlotIndex(slot);
+  return index > 0 ? `Color secundario ${index}` : 'Posición de color inválida';
 };
 const colorSlotOptions = (secondaryCount: number) => [
   'ninguna', 'cualquiera', 'principal', ...Array.from({ length: secondaryCount }, (_, index) => `secundaria_${index + 1}`),
 ];
-const secondaryColorSlotIndex = (slot?: string) => {
-  const match = /^secundaria_(\d+)$/.exec(slot ?? '');
-  return match ? Number(match[1]) : 0;
-};
-const secondarySlotIndex = (slot?: string) => {
-  const match = /^secundaria_(\d+)$/.exec(slot ?? '');
-  return match ? Number(match[1]) : 0;
-};
-const isValidFabricSlot = (slot: string, secondaryCount: number) =>
-  slot === 'cualquiera' || slot === 'principal' || (secondarySlotIndex(slot) > 0 && secondarySlotIndex(slot) <= secondaryCount);
-const isValidColorSlot = (slot: string, secondaryCount: number) =>
-  slot === 'ninguna' || slot === 'cualquiera' || slot === 'principal' || (secondaryColorSlotIndex(slot) > 0 && secondaryColorSlotIndex(slot) <= secondaryCount);
+const isValidFabricSlot = (slot: string, secondaryCount: number) => isComponentFabricSlotAvailableForModel(slot, secondaryCount);
+const isValidColorSlot = (slot: string, secondaryCount: number) => isComponentColorSlotAvailableForModel(slot, secondaryCount);
 const secondarySlotCountForModel = (model: ManufacturingModel, modelPieces: ModelPiece[]) =>
   Math.max(model.secondaryFabricSlots ?? 0, ...modelPieces.filter((piece) => piece.modelId === model.id).map((piece) => secondarySlotIndex(piece.fabricSlot)), 0);
 const secondaryColorSlotCountForModel = (model: ManufacturingModel, modelPieces: ModelPiece[]) =>
