@@ -132,6 +132,8 @@ export default function Home() {
   const [missingTarget, setMissingTarget] = useState<{ modelId: string; sizeId: string; targetUnits?: number } | null>(null);
   const [showModelForm, setShowModelForm] = useState(false);
   const [showSizeManager, setShowSizeManager] = useState(false);
+  const [draftSizeGroups, setDraftSizeGroups] = useState<SizeGroup[]>([]);
+  const [draftSizes, setDraftSizes] = useState<Size[]>([]);
   const [sizeNameDrafts, setSizeNameDrafts] = useState<Record<string, string>>({});
   const [expandedPatternIds, setExpandedPatternIds] = useState<string[]>([]);
   const [patternSearch, setPatternSearch] = useState('');
@@ -212,6 +214,9 @@ export default function Home() {
   const fabricColorById = useMemo(() => new Map(fabricColors.map((color) => [color.id, color])), [fabricColors]);
   const modelPieces = (modelId: string) => pieces.filter((piece) => piece.modelId === modelId && !piece.archived).sort((a, b) => a.sortOrder - b.sortOrder);
   const groupSizes = (groupId: string) => sizes.filter((size) => size.groupId === groupId).sort((a, b) => a.sortOrder - b.sortOrder);
+  const managerGroupSizes = (groupId: string) => draftSizes.filter((size) => size.groupId === groupId).sort((a, b) => a.sortOrder - b.sortOrder);
+  const selectedManagerGroup = draftSizeGroups.find((group) => group.id === sizeManagerGroupId);
+  const hasPendingSizeManagerChanges = JSON.stringify(draftSizeGroups) !== JSON.stringify(sizeGroups) || JSON.stringify(draftSizes) !== JSON.stringify(sizes);
   const modelSizes = (model: ManufacturingModel) => {
     const excluded = new Set(model.excludedSizeIds ?? []);
     return groupSizes(model.sizeGroupId).filter((size) => !excluded.has(size.id));
@@ -589,40 +594,48 @@ export default function Home() {
     });
   }
 
+  function beginSizeManager(groupId: string, returnToModelForm: boolean) {
+    setDraftSizeGroups(sizeGroups.map((group) => ({ ...group })));
+    setDraftSizes(sizes.map((size) => ({ ...size })));
+    setReturnToModelFormAfterSizeManager(returnToModelForm);
+    setSizeManagerGroupId(groupId || sizeGroups[0]?.id || '');
+    setNewSizeLabel('');
+    setNewGroupName('');
+    setShowSizeManager(true);
+  }
+
   function addSize() {
     const label = newSizeLabel.trim();
     if (!label || !sizeManagerGroupId) return;
-    if (sizes.some((size) => size.groupId === sizeManagerGroupId && size.label.toLocaleLowerCase('es') === label.toLocaleLowerCase('es'))) {
+    if (draftSizes.some((size) => size.groupId === sizeManagerGroupId && size.label.trim().toLocaleLowerCase('es') === label.toLocaleLowerCase('es'))) {
       setNoticeMessage('Ya existe esa talla en el grupo seleccionado.', 'error'); return;
     }
-    const sortOrder = Math.max(0, ...sizes.filter((size) => size.groupId === sizeManagerGroupId).map((size) => size.sortOrder)) + 1;
-    setSizes((previous) => [...previous, { id: newId(), groupId: sizeManagerGroupId, label, sortOrder }]);
+    const sortOrder = Math.max(0, ...managerGroupSizes(sizeManagerGroupId).map((size) => size.sortOrder)) + 1;
+    setDraftSizes((previous) => [...previous, { id: newId(), groupId: sizeManagerGroupId, label, sortOrder }]);
     setNewSizeLabel('');
-    setNoticeMessage(`Talla ${label} creada.`);
   }
 
   function saveSizeName(sizeId: string) {
-    const current = sizes.find((size) => size.id === sizeId);
+    const current = draftSizes.find((size) => size.id === sizeId);
     const draft = sizeNameDrafts[sizeId];
     if (!current || draft === undefined) return;
     const label = draft.trim();
     if (!label) { setNoticeMessage('El nombre de la talla no puede quedar vacío.', 'error'); return; }
-    if (sizes.some((size) => size.id !== sizeId && size.groupId === current.groupId && size.label.trim().toLocaleLowerCase('es') === label.toLocaleLowerCase('es'))) {
+    if (draftSizes.some((size) => size.id !== sizeId && size.groupId === current.groupId && size.label.trim().toLocaleLowerCase('es') === label.toLocaleLowerCase('es'))) {
       setNoticeMessage('Ya existe una talla con ese nombre en este grupo.', 'error'); return;
     }
-    setSizes((previous) => previous.map((size) => size.id === sizeId ? { ...size, label } : size));
+    setDraftSizes((previous) => previous.map((size) => size.id === sizeId ? { ...size, label } : size));
     setSizeNameDrafts((previous) => { const next = { ...previous }; delete next[sizeId]; return next; });
-    setNoticeMessage(`Talla renombrada a ${label}. Las relaciones históricas se conservan.`);
   }
 
   function reorderSize(sizeId: string, direction: -1 | 1) {
-    const ordered = groupSizes(sizeManagerGroupId);
+    const ordered = managerGroupSizes(sizeManagerGroupId);
     const index = ordered.findIndex((size) => size.id === sizeId);
     const destination = index + direction;
     if (index < 0 || destination < 0 || destination >= ordered.length) return;
     const reordered = [...ordered];
     [reordered[index], reordered[destination]] = [reordered[destination], reordered[index]];
-    setSizes((previous) => previous.map((size) => {
+    setDraftSizes((previous) => previous.map((size) => {
       const position = reordered.findIndex((item) => item.id === size.id);
       return position >= 0 ? { ...size, sortOrder: position + 1 } : size;
     }));
@@ -643,36 +656,81 @@ export default function Home() {
     if (referencedInProduction) {
       setNoticeMessage(`No se puede borrar la talla ${size.label}: está referenciada por una orden de producción. Renómbrala o déjala sin usar para conservar la trazabilidad.`, 'error'); return;
     }
-    setSizes((previous) => previous.filter((item) => item.id !== size.id));
-    setNoticeMessage(`Talla ${size.label} eliminada.`);
+    setDraftSizes((previous) => previous.filter((item) => item.id !== size.id));
+    setSizeNameDrafts((previous) => { const next = { ...previous }; delete next[size.id]; return next; });
   }
 
   function openSizeManagerFromModelForm() {
-    setReturnToModelFormAfterSizeManager(true);
-    setSizeManagerGroupId(modelForm.sizeGroupId || sizeGroups[0]?.id || '');
-    setShowSizeManager(true);
+    beginSizeManager(modelForm.sizeGroupId || sizeGroups[0]?.id || '', true);
   }
 
-  function closeSizeManager() {
+  function cancelSizeManager() {
     setShowSizeManager(false);
-    if (returnToModelFormAfterSizeManager && sizeManagerGroupId && sizeGroups.some((group) => group.id === sizeManagerGroupId)) {
-      setModelForm((previous) => ({ ...previous, sizeGroupId: sizeManagerGroupId, excludedSizeIds: previous.excludedSizeIds.filter((sizeId) => sizes.some((size) => size.id === sizeId && size.groupId === sizeManagerGroupId)) }));
-    }
+    setDraftSizeGroups([]);
+    setDraftSizes([]);
+    setSizeNameDrafts({});
+    setNewSizeLabel('');
+    setNewGroupName('');
     setReturnToModelFormAfterSizeManager(false);
+  }
+
+  function applySizeManager() {
+    const invalidGroup = draftSizeGroups.find((group) => !group.name.trim());
+    if (invalidGroup) { setNoticeMessage('Todos los grupos deben tener un nombre.', 'error'); return; }
+    const groupNames = draftSizeGroups.map((group) => group.name.trim().toLocaleLowerCase('es'));
+    if (new Set(groupNames).size !== groupNames.length) { setNoticeMessage('Ya existe un grupo con ese nombre.', 'error'); return; }
+    const invalidSize = draftSizes.find((size) => !size.label.trim());
+    if (invalidSize) { setNoticeMessage('Todas las tallas deben tener un nombre.', 'error'); return; }
+    for (const group of draftSizeGroups) {
+      const labels = draftSizes.filter((size) => size.groupId === group.id).map((size) => size.label.trim().toLocaleLowerCase('es'));
+      if (new Set(labels).size !== labels.length) { setNoticeMessage(`Hay nombres de talla duplicados en el grupo «${group.name}».`, 'error'); return; }
+    }
+    const removedIds = sizes.filter((size) => !draftSizes.some((draft) => draft.id === size.id)).map((size) => size.id);
+    if (removedIds.some((sizeId) => movements.some((movement) => movement.sizeId === sizeId))) {
+      setNoticeMessage('No se puede aplicar: una talla pendiente de eliminar tiene movimientos históricos.', 'error'); return;
+    }
+    const orders = productionOrdersSnapshot();
+    if (!orders) { setNoticeMessage('No se pudo verificar las órdenes guardadas. Exporta un respaldo válido antes de aplicar los cambios.', 'error'); return; }
+    const referencedSize = removedIds.find((sizeId) => orders.some((order) =>
+      Boolean(order.quantities?.[sizeId]) ||
+      order.materials?.some((line) => line.sizeId === sizeId) ||
+      order.basePieces?.some((line) => line.sizeId === sizeId) ||
+      order.componentPieces?.some((line) => line.sizeId === sizeId)
+    ));
+    if (referencedSize) { setNoticeMessage('No se puede aplicar: una talla pendiente de eliminar está referenciada por una orden.', 'error'); return; }
+
+    const nextGroups = draftSizeGroups.map((group) => ({ ...group, name: group.name.trim() }));
+    const nextSizes = draftSizes.map((size) => ({ ...size, label: size.label.trim() }));
+    const selectedGroupId = sizeManagerGroupId;
+    setSizeGroups(nextGroups);
+    setSizes(nextSizes);
+    setShowSizeManager(false);
+    if (returnToModelFormAfterSizeManager && nextGroups.some((group) => group.id === selectedGroupId)) {
+      setModelForm((previous) => ({
+        ...previous,
+        sizeGroupId: selectedGroupId,
+        excludedSizeIds: previous.excludedSizeIds.filter((sizeId) => nextSizes.some((size) => size.id === sizeId && size.groupId === selectedGroupId)),
+      }));
+    }
+    setDraftSizeGroups([]);
+    setDraftSizes([]);
+    setSizeNameDrafts({});
+    setNewSizeLabel('');
+    setNewGroupName('');
+    setReturnToModelFormAfterSizeManager(false);
+    setNoticeMessage('Cambios de grupos y tallas guardados correctamente.');
   }
 
   function addSizeGroup() {
     const name = newGroupName.trim();
     if (!name) return;
-    if (sizeGroups.some((group) => group.name.toLocaleLowerCase('es') === name.toLocaleLowerCase('es'))) {
+    if (draftSizeGroups.some((group) => group.name.trim().toLocaleLowerCase('es') === name.toLocaleLowerCase('es'))) {
       setNoticeMessage('Ya existe un grupo con ese nombre.', 'error'); return;
     }
     const group = { id: newId(), name };
-    setSizeGroups((previous) => [...previous, group]);
+    setDraftSizeGroups((previous) => [...previous, group]);
     setSizeManagerGroupId(group.id);
-    if (returnToModelFormAfterSizeManager) setModelForm((previous) => ({ ...previous, sizeGroupId: group.id, excludedSizeIds: [] }));
     setNewGroupName('');
-    setNoticeMessage(`Grupo de tallas ${name} creado.`);
   }
 
   function exportConfiguration() {
@@ -1102,7 +1160,7 @@ export default function Home() {
               {false && view === 'inventario' && <button className="button secondary" onClick={exportCsv}>↧ <span>Exportar</span></button>}
               {false && view === 'inventario' && <button className="button secondary" onClick={() => openStockForm('salida')}>− <span>Retirar / merma</span></button>}
               {false && view === 'inventario' && <button className="button primary" onClick={() => openStockForm('entrada')}>＋ <span>Registrar stock</span></button>}
-              {view === 'modelos' && <><button className="button secondary" onClick={() => { setSizeManagerGroupId(sizeGroups[0]?.id ?? ''); setShowSizeManager(true); }}>↕ <span>Editar tallas</span></button><button className="button secondary" onClick={exportConfiguration}>↧ <span>Exportar moldes/tallas</span></button><button className="button secondary" onClick={() => importInputRef.current?.click()}>↥ <span>Importar</span></button><input ref={importInputRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importConfiguration(event.target.files?.[0])} /><button className="button primary" onClick={() => openCreateModel()}>＋ <span>Nuevo patrón</span></button></>}
+              {view === 'modelos' && <><button className="button secondary" onClick={() => beginSizeManager(sizeGroups[0]?.id ?? '', false)}>↕ <span>Editar tallas</span></button><button className="button secondary" onClick={exportConfiguration}>↧ <span>Exportar moldes/tallas</span></button><button className="button secondary" onClick={() => importInputRef.current?.click()}>↥ <span>Importar</span></button><input ref={importInputRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importConfiguration(event.target.files?.[0])} /><button className="button primary" onClick={() => openCreateModel()}>＋ <span>Nuevo patrón</span></button></>}
               {view === 'historial' && <button className="button secondary" onClick={exportCsv}>↧ <span>Exportar inventario</span></button>}
             </div>
           </div>
@@ -1444,9 +1502,9 @@ export default function Home() {
         </section>
       </div>}
 
-      {showSizeManager && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeSizeManager(); }}>
+      {showSizeManager && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) cancelSizeManager(); }}>
         <section className="modal size-manager-modal" role="dialog" aria-modal="true" aria-labelledby="size-manager-title">
-          <div className="modal-heading"><div><div className="eyebrow">CONFIGURACIÓN DE TALLAS</div><h2 id="size-manager-title">Editar grupos y tallas</h2><p>Las tallas se comparten entre modelos del mismo grupo. El orden aquí se usa en los selectores y en el inventario.</p></div><button className="icon-button" onClick={closeSizeManager} aria-label="Cerrar">×</button></div>
+          <div className="modal-heading"><div><div className="eyebrow">CONFIGURACIÓN DE TALLAS</div><h2 id="size-manager-title">Editar grupos y tallas</h2><p>Las tallas se comparten entre modelos del mismo grupo. El orden aquí se usa en los selectores y en el inventario.</p></div><button className="icon-button" onClick={cancelSizeManager} aria-label="Cerrar">×</button></div>
           <div className="size-manager-groups"><label className="field-label">Grupo de tallas<select className="large-input" value={sizeManagerGroupId} onChange={(event) => setSizeManagerGroupId(event.target.value)}>{sizeGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label><div className="add-group-row"><input className="large-input" value={newGroupName} onChange={(event) => setNewGroupName(event.target.value)} placeholder="Nuevo grupo: p. ej. Medias" /><button type="button" className="button secondary" onClick={addSizeGroup}>Crear grupo</button></div></div>
           <div className="add-size-row"><input className="large-input" value={newSizeLabel} onChange={(event) => setNewSizeLabel(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addSize(); } }} placeholder="Nueva talla: T4, S, M, 6 a 9 años…" /><button type="button" className="button primary" onClick={addSize}>＋ Agregar talla</button></div>
           <div className="size-manager-list">{groupSizes(sizeManagerGroupId).map((size, index) => {
@@ -1455,7 +1513,7 @@ export default function Home() {
              return <div className="size-manager-row" key={size.id}><span className="size-order">{index + 1}</span><div className="size-name-editor"><label className="size-name-label">Nombre visible<input className="large-input" aria-label={`Editar nombre de talla ${size.label}`} title="Puedes cambiar este nombre; el ID histórico de la talla se conserva." value={draft ?? size.label} onChange={(event) => setSizeNameDrafts((previous) => ({ ...previous, [size.id]: event.target.value }))} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); saveSizeName(size.id); } if (event.key === 'Escape') setSizeNameDrafts((previous) => { const next = { ...previous }; delete next[size.id]; return next; }); }} /></label>{changed && <button type="button" className="text-action size-save-name" onClick={() => saveSizeName(size.id)}>Guardar nombre</button>}</div><div className="size-manager-actions"><button type="button" className="order-mold" disabled={index === 0} onClick={() => reorderSize(size.id, -1)} aria-label="Subir talla">↑</button><button type="button" className="order-mold" disabled={index === groupSizes(sizeManagerGroupId).length - 1} onClick={() => reorderSize(size.id, 1)} aria-label="Bajar talla">↓</button><button type="button" className="remove-piece" onClick={() => deleteSize(size)}>Eliminar</button></div></div>;
            })}{groupSizes(sizeManagerGroupId).length === 0 && <div className="empty">Este grupo todavía no tiene tallas. Agrega la primera arriba.</div>}</div>
           <div className="symmetry-help">Para cambiar un nombre, edítalo y pulsa «Guardar nombre». El orden se guarda automáticamente. Renombrar una talla conserva su identificador y su historial; si tiene movimientos, no se puede eliminar físicamente.</div>
-          <div className="form-actions"><button type="button" className="button primary" onClick={closeSizeManager}>Listo</button></div>
+          <div className="form-actions"><button type="button" className="button primary" onClick={cancelSizeManager}>Listo</button></div>
         </section>
       </div>}
 
