@@ -143,7 +143,7 @@ export type ProductComponentSelection = {
   location: string;
   variantOverrides: Record<string, string>;
   materialSpecifications?: Record<string, SizeSpecification>;
-  /** Per-product concrete choices for wildcard component pieces. */
+  /** Per-product, per-piece textile/color choices for this component selection. */
   pieceOverrides?: Record<string, ProductPieceOverride>;
 };
 
@@ -200,7 +200,7 @@ export type ConfiguredProductModel = {
   description: string;
   components: ProductComponentSelection[];
   additionalMaterials: MaterialRequirement[];
-  /** Model-specific concrete choices for wildcard base-pattern pieces. */
+  /** Model-specific textile/color overrides for individual base-pattern pieces. */
   basePieceOverrides?: Record<string, ProductPieceOverride>;
   active: boolean;
   createdAt: string;
