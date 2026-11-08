@@ -3378,7 +3378,7 @@ export function ProductionModule({
             <button type="button" className="text-action" onClick={() => onQuickCreateBaseModel((modelId) => { setProductBaseId(modelId); setProductFabricAssignments({}); setProductColorAssignments({}); setProductPieceOverrides({}); })}>＋ Crear patrón base</button>
             {baseModels.length === 0 && <small>No hay patrones disponibles. Crea uno aquí; al guardarlo aparecerá en esta lista.</small>}
           </div>
-          <div className="product-inherited-size-tag"><span>Tallas heredadas</span><strong>{sizeGroups.find((group) => group.id === selectedProductBasePattern?.sizeGroupId)?.name ?? 'Selecciona un patrón base'}</strong></div>
+          <div className="product-inherited-size-tag"><span>Tallas habilitadas por el patrón</span><strong>{sizeGroups.find((group) => group.id === selectedProductBasePattern?.sizeGroupId)?.name ?? 'Selecciona un patrón base'}{selectedProductBasePattern ? ` · ${selectedProductBaseSizes.length} tallas` : ''}</strong></div>
         </div>
         {selectedProductBasePattern && <section className="product-fabric-assignment-section">
           <div className="production-subheading"><strong>Telas del modelo</strong><span className="production-muted">Asigna una tela a cada posición del patrón</span></div>
@@ -3694,7 +3694,7 @@ export function ProductionModule({
           <button className="icon-button" onClick={() => { setEditingProductFabricId(''); setEditingProductFabricAssignments({}); }}>×</button>
         </div>
         <form className="production-form" onSubmit={saveProductFabricEditor}>
-          <div className="product-inherited-size-tag"><span>Tabla de tallas heredada</span><strong>{sizeGroups.find((group) => group.id === editingFabricBasePattern.sizeGroupId)?.name ?? 'No disponible'}</strong></div>
+          <div className="product-inherited-size-tag"><span>Tallas habilitadas por el patrón</span><strong>{sizeGroups.find((group) => group.id === editingFabricBasePattern.sizeGroupId)?.name ?? 'No disponible'} · {basePatternSizeOptions(editingFabricBasePattern).length} tallas</strong></div>
           <div className="product-fabric-slots">{editingFabricSlots.map((slot) => {
             const selectedTextileId = editingProductFabricAssignments[slot] ?? '';
             const archivedTextile = selectedTextileId ? textileContext.telas.find((textile) => textile.id === selectedTextileId && textile.activo === false) : undefined;
