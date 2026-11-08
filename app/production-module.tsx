@@ -2571,7 +2571,7 @@ export function ProductionModule({
             hasColorOverride,
           };
         });
-        return [{ selection, component, rows }];
+        return rows.length > 0 ? [{ selection, component, rows }] : [];
       });
       const totalPieces = basePieceRows.length + componentPieceGroups.reduce((sum, group) => sum + group.rows.length, 0);
       const renderMaterialPiece = (row: ProductMaterialPieceRow) => <article className="piece-material-card" key={row.key}>
@@ -2584,6 +2584,7 @@ export function ProductionModule({
             <span>Tela asignada</span>
             <select className="large-input" value={row.textileId ?? ''} onChange={(event) => updateProductPieceOverride(product.id, row.scope, row.selectionId, row.pieceId, 'textileId', event.target.value || null)}>
               <option value="">Sin tela asignada</option>
+              {row.textileId && !activeTextiles.some((textile) => textile.id === row.textileId) && <option value={row.textileId}>{textileContext.telas.find((textile) => textile.id === row.textileId)?.nombreTela ?? 'Tela fuera del catálogo'} · inactiva</option>}
               {activeTextiles.map((textile) => <option value={textile.id} key={textile.id}>{textile.nombreTela}</option>)}
             </select>
             <small>{row.textileStatus}</small>
@@ -2593,6 +2594,7 @@ export function ProductionModule({
             <span>Color asignado</span>
             <select className="large-input" value={row.colorId ?? ''} onChange={(event) => updateProductPieceOverride(product.id, row.scope, row.selectionId, row.pieceId, 'colorId', event.target.value || null)}>
               <option value="">Sin color asignado</option>
+              {row.colorId && !textileContext.colores.some((color) => color.id === row.colorId) && <option value={row.colorId}>{componentColorName(row.colorId)} · no disponible</option>}
               {textileContext.colores.slice().sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')).map((color) => <option value={color.id} key={color.id}>{color.nombre}</option>)}
             </select>
             <small>{row.colorStatus}</small>
@@ -2792,7 +2794,7 @@ export function ProductionModule({
           <div className="production-card-actions">
             <button className="button secondary" onClick={() => openProductFabricEditor(product)}>Configurar telas</button>
             <button className="button secondary" onClick={() => openProductColorEditor(product)}>Configurar colores</button>
-            <button className="button primary" onClick={() => setSelectedPieceConfigurationProductId(product.id)}>Piezas y materiales</button>
+            <button className="button primary" onClick={() => setSelectedPieceConfigurationProductId(product.id)}>Ver piezas y materiales</button>
             <button className="text-action danger-action" onClick={() => deleteProduct(product)}>Archivar</button>
           </div>
         </article>;
