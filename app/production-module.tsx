@@ -3308,8 +3308,8 @@ export function ProductionModule({
             colorSlot,
             textileId: hasTextileOverride ? override?.textileId ?? null : defaultTextileId,
             colorId: hasColorOverride ? override?.colorId ?? null : defaultColorId,
-            textileStatus: hasTextileOverride ? 'Personalizada para este modelo' : fabricSlot === 'cualquiera' ? 'Elegir para este modelo' : fabricSlot === 'ninguna' ? 'Sin posición definida' : 'Heredada · ' + componentFabricSlotLabel(fabricSlot),
-            colorStatus: hasColorOverride ? 'Personalizada para este modelo' : colorSlot === 'cualquiera' ? 'Elegir para este modelo' : colorSlot === 'ninguna' ? 'Sin posición definida' : 'Heredado · ' + componentColorSlotLabel(colorSlot),
+            textileStatus: hasTextileOverride ? 'Personalizada para este modelo' : fabricSlot === 'cualquiera' ? 'Elegir para este modelo' : fabricSlot === 'ninguna' ? 'Sin posición definida' : defaultTextileId ? 'Heredada · ' + componentFabricSlotLabel(fabricSlot) : 'Sin asignar · ' + componentFabricSlotLabel(fabricSlot),
+            colorStatus: hasColorOverride ? 'Personalizada para este modelo' : colorSlot === 'cualquiera' ? 'Elegir para este modelo' : colorSlot === 'ninguna' ? 'Sin posición definida' : defaultColorId ? 'Heredado · ' + componentColorSlotLabel(colorSlot) : 'Sin asignar · ' + componentColorSlotLabel(colorSlot),
             hasTextileOverride,
             hasColorOverride,
           };
@@ -3341,8 +3341,8 @@ export function ProductionModule({
             colorSlot,
             textileId: hasTextileOverride ? override?.textileId ?? null : defaultTextileId,
             colorId: hasColorOverride ? override?.colorId ?? null : defaultColorId,
-            textileStatus: hasTextileOverride ? 'Personalizada para este modelo' : piece.fabricSlot === 'cualquiera' ? 'Elegir para este modelo' : piece.fabricSlot === 'ninguna' ? 'Sin posición definida' : 'Heredada · ' + componentFabricSlotLabel(piece.fabricSlot),
-            colorStatus: hasColorOverride ? 'Personalizada para este modelo' : colorSlot === 'cualquiera' ? 'Elegir para este modelo' : colorSlot === 'ninguna' ? 'Sin posición definida' : 'Heredado · ' + componentColorSlotLabel(colorSlot),
+            textileStatus: hasTextileOverride ? 'Personalizada para este modelo' : piece.fabricSlot === 'cualquiera' ? 'Elegir para este modelo' : piece.fabricSlot === 'ninguna' ? 'Sin posición definida' : defaultTextileId ? 'Heredada · ' + componentFabricSlotLabel(piece.fabricSlot) : 'Sin asignar · ' + componentFabricSlotLabel(piece.fabricSlot),
+            colorStatus: hasColorOverride ? 'Personalizada para este modelo' : colorSlot === 'cualquiera' ? 'Elegir para este modelo' : colorSlot === 'ninguna' ? 'Sin posición definida' : defaultColorId ? 'Heredado · ' + componentColorSlotLabel(colorSlot) : 'Sin asignar · ' + componentColorSlotLabel(colorSlot),
             hasTextileOverride,
             hasColorOverride,
           };
