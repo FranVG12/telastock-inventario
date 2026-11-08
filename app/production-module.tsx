@@ -144,7 +144,7 @@ export type ProductComponentSelection = {
   variantOverrides: Record<string, string>;
   materialSpecifications?: Record<string, SizeSpecification>;
   /** Per-product concrete choices for wildcard component pieces. */
-  pieceOverrides?: Record<string, { textileId: string | null; colorId: string | null }>;
+  pieceOverrides?: Record<string, ProductPieceOverride>;
 };
 
 export type ProductCollection = {
@@ -173,7 +173,24 @@ export type ProductColorAssignment = {
   updatedAt: string;
 };
 
-export type ProductPieceOverride = { textileId: string | null; colorId: string | null };
+export type ProductPieceOverride = { textileId?: string | null; colorId?: string | null };
+type ProductPieceOverrideField = 'textileId' | 'colorId';
+type ProductMaterialPieceRow = {
+  key: string;
+  pieceId: string;
+  scope: 'base' | 'component';
+  selectionId: string;
+  pieceName: string;
+  groupName: string;
+  fabricSlot: string;
+  colorSlot: ComponentColorSlot;
+  textileId: string | null;
+  colorId: string | null;
+  textileStatus: string;
+  colorStatus: string;
+  hasTextileOverride: boolean;
+  hasColorOverride: boolean;
+};
 
 export type ConfiguredProductModel = {
   id: string;
@@ -319,8 +336,8 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
   );
   const validPieceOverrides = (value: unknown) => value === undefined || Boolean(value && typeof value === 'object' && !Array.isArray(value) &&
     Object.values(value as Record<string, unknown>).every((entry) => Boolean(entry && typeof entry === 'object' && !Array.isArray(entry) &&
-      ((entry as { textileId?: unknown }).textileId === null || typeof (entry as { textileId?: unknown }).textileId === 'string') &&
-      ((entry as { colorId?: unknown }).colorId === null || typeof (entry as { colorId?: unknown }).colorId === 'string'))));
+      ((entry as { textileId?: unknown }).textileId === undefined || (entry as { textileId?: unknown }).textileId === null || typeof (entry as { textileId?: unknown }).textileId === 'string') &&
+      ((entry as { colorId?: unknown }).colorId === undefined || (entry as { colorId?: unknown }).colorId === null || typeof (entry as { colorId?: unknown }).colorId === 'string'))));
   if (!output.variants.every((x) => {
     const supply = output.supplies.find((item) => item.id === x.supplyId);
     return Boolean(supply && x.name.trim() && (x.textileId === null || typeof x.textileId === 'string') &&
@@ -673,6 +690,7 @@ export function ProductionModule({
   const [textileContext, setTextileContext] = useState<TextileContext>({ telas: [], rollos: [], telaColores: [], colores: [], proveedores: [] });
   const [showPurchaseForm, setShowPurchaseForm] = useState(false);
   const [selectedStockProductModelId, setSelectedStockProductModelId] = useState('');
+  const [selectedPieceConfigurationProductId, setSelectedPieceConfigurationProductId] = useState('');
   const [selectedStockComponentId, setSelectedStockComponentId] = useState('');
   const [showComponentPieceMovement, setShowComponentPieceMovement] = useState(false);
   const [componentStockPieceId, setComponentStockPieceId] = useState('');
@@ -1460,6 +1478,45 @@ export function ProductionModule({
     setEditingProductFabricId('');
     setEditingProductFabricAssignments({});
     tell('Telas del modelo actualizadas.');
+  }
+
+  function updateProductPieceOverride(
+    productModelId: string,
+    scope: 'base' | 'component',
+    selectionId: string,
+    pieceId: string,
+    field: ProductPieceOverrideField,
+    value: string | null | undefined,
+  ) {
+    setData((current) => ({
+      ...current,
+      productModels: current.productModels.map((product) => {
+        if (product.id !== productModelId) return product;
+        const updateRecord = (source: Record<string, ProductPieceOverride> | undefined) => {
+          const next = { ...(source ?? {}) };
+          const override = { ...(next[pieceId] ?? {}) };
+          if (value === undefined) delete override[field];
+          else override[field] = value;
+          if (Object.keys(override).length > 0) next[pieceId] = override;
+          else delete next[pieceId];
+          return Object.keys(next).length > 0 ? next : undefined;
+        };
+        if (scope === 'base') {
+          return {
+            ...product,
+            basePieceOverrides: updateRecord(product.basePieceOverrides),
+            updatedAt: now(),
+          };
+        }
+        return {
+          ...product,
+          components: product.components.map((selection) => selection.id === selectionId
+            ? { ...selection, pieceOverrides: updateRecord(selection.pieceOverrides) }
+            : selection),
+          updatedAt: now(),
+        };
+      }),
+    }));
   }
 
   function openProductColorEditor(product: ConfiguredProductModel) {
@@ -2436,11 +2493,135 @@ export function ProductionModule({
           <div className="production-card-heading"><div><strong>{component.name}</strong><span>{component.type} · {component.pieces.length} piezas de patronaje · {component.materials.length} materiales</span></div><button className="button secondary" onClick={() => openComponent(component)}>Editar</button></div>
           {component.description && <p className="production-muted">{component.description}</p>}
           <div className="production-attributes">{component.pieces.map((x) => <span key={x.id}>{x.name} ×{x.unitsPerGarment}{x.fabricSlot !== 'ninguna' ? ' · ' + componentFabricSlotLabel(x.fabricSlot) : ''}{' · ' + componentColorSlotLabel(x.colorSlot ?? (x.colorId ? 'principal' : 'cualquiera'))}</span>)}</div>
-          <small className="production-muted">Molde auxiliar reutilizable. El inventario se crea dentro de cada modelo de prenda.</small>
+          <small className="production-muted">Molde auxiliar reutilizable. La tela y el color se concretan al configurar cada modelo; el control de existencias se incorporará en una etapa posterior.</small>
         </article>)}
       </div>
       {data.components.length === 0 && <div className="empty">Crea tu primer cuello, bolsillo o acabado reutilizable.</div>}
     </section>;
+
+    if (view === 'modelos-producto' && selectedPieceConfigurationProductId) {
+      const product = data.productModels.find((item) => item.id === selectedPieceConfigurationProductId && item.active);
+      const base = product ? baseModels.find((item) => item.id === product.baseModelId) : undefined;
+      if (!product || !base) return <section className="panel production-panel">
+        <div className="panel-heading"><div><h2>Materiales por pieza</h2><p>No se encontró el modelo seleccionado.</p></div></div>
+        <button className="button secondary" onClick={() => setSelectedPieceConfigurationProductId('')}>Volver a modelos</button>
+      </section>;
+
+      const assignedTextile = (slot: string) => {
+        if (slot === 'ninguna' || slot === 'cualquiera') return null;
+        return data.productFabrics.find((assignment) => assignment.productModelId === product.id && assignment.fabricSlot === slot)?.textileId ?? null;
+      };
+      const assignedColor = (slot: string) => {
+        if (slot === 'ninguna' || slot === 'cualquiera') return null;
+        return resolveComponentPieceColorId(product.id, slot, data.productColors);
+      };
+      const basePieceRows: ProductMaterialPieceRow[] = basePieces
+        .filter((piece) => piece.modelId === base.id && !piece.archived)
+        .slice()
+        .sort((a, b) => a.sortOrder - b.sortOrder)
+        .map((piece) => {
+          const override = product.basePieceOverrides?.[piece.id];
+          const fabricSlot = piece.fabricSlot ?? 'principal';
+          const colorSlot = normalizeComponentColorSlot(piece.colorSlot, piece.colorId);
+          const hasTextileOverride = Boolean(override && Object.prototype.hasOwnProperty.call(override, 'textileId'));
+          const hasColorOverride = Boolean(override && Object.prototype.hasOwnProperty.call(override, 'colorId'));
+          const defaultTextileId = assignedTextile(fabricSlot);
+          const defaultColorId = assignedColor(colorSlot) ?? (colorSlot === 'ninguna' ? piece.colorId ?? null : null);
+          return {
+            key: 'base:' + piece.id,
+            pieceId: piece.id,
+            scope: 'base',
+            selectionId: '',
+            pieceName: piece.name,
+            groupName: 'Molde del patrón base',
+            fabricSlot,
+            colorSlot,
+            textileId: hasTextileOverride ? override?.textileId ?? null : defaultTextileId,
+            colorId: hasColorOverride ? override?.colorId ?? null : defaultColorId,
+            textileStatus: hasTextileOverride ? 'Personalizada para este modelo' : fabricSlot === 'cualquiera' ? 'Elegir para este modelo' : fabricSlot === 'ninguna' ? 'Sin posición definida' : 'Heredada · ' + componentFabricSlotLabel(fabricSlot),
+            colorStatus: hasColorOverride ? 'Personalizada para este modelo' : colorSlot === 'cualquiera' ? 'Elegir para este modelo' : colorSlot === 'ninguna' ? 'Sin posición definida' : 'Heredado · ' + componentColorSlotLabel(colorSlot),
+            hasTextileOverride,
+            hasColorOverride,
+          };
+        });
+      const componentPieceGroups = product.components.flatMap((selection) => {
+        const component = data.components.find((item) => item.id === selection.componentId);
+        if (!component) return [];
+        const rows: ProductMaterialPieceRow[] = component.pieces.map((piece) => {
+          const override = selection.pieceOverrides?.[piece.id];
+          const colorSlot = normalizeComponentColorSlot(piece.colorSlot, piece.colorId);
+          const hasTextileOverride = Boolean(override && Object.prototype.hasOwnProperty.call(override, 'textileId'));
+          const hasColorOverride = Boolean(override && Object.prototype.hasOwnProperty.call(override, 'colorId'));
+          const defaultTextileId = resolveComponentPieceTextileId(product.id, piece.fabricSlot, data.productFabrics);
+          const defaultColorId = assignedColor(colorSlot) ?? (colorSlot === 'ninguna' ? piece.colorId : null) ?? null;
+          return {
+            key: 'component:' + selection.id + ':' + piece.id,
+            pieceId: piece.id,
+            scope: 'component',
+            selectionId: selection.id,
+            pieceName: piece.name,
+            groupName: component.name,
+            fabricSlot: piece.fabricSlot,
+            colorSlot,
+            textileId: hasTextileOverride ? override?.textileId ?? null : defaultTextileId,
+            colorId: hasColorOverride ? override?.colorId ?? null : defaultColorId,
+            textileStatus: hasTextileOverride ? 'Personalizada para este modelo' : piece.fabricSlot === 'cualquiera' ? 'Elegir para este modelo' : piece.fabricSlot === 'ninguna' ? 'Sin posición definida' : 'Heredada · ' + componentFabricSlotLabel(piece.fabricSlot),
+            colorStatus: hasColorOverride ? 'Personalizada para este modelo' : colorSlot === 'cualquiera' ? 'Elegir para este modelo' : colorSlot === 'ninguna' ? 'Sin posición definida' : 'Heredado · ' + componentColorSlotLabel(colorSlot),
+            hasTextileOverride,
+            hasColorOverride,
+          };
+        });
+        return [{ selection, component, rows }];
+      });
+      const totalPieces = basePieceRows.length + componentPieceGroups.reduce((sum, group) => sum + group.rows.length, 0);
+      const renderMaterialPiece = (row: ProductMaterialPieceRow) => <article className="piece-material-card" key={row.key}>
+        <div className="piece-material-card-heading">
+          <div className="piece-material-icon"><span>◇</span></div>
+          <div className="piece-material-card-title"><strong>{row.pieceName}</strong><small>{row.groupName}</small></div>
+        </div>
+        <div className="piece-material-fields">
+          <label className="field-label">
+            <span>Tela asignada</span>
+            <select className="large-input" value={row.textileId ?? ''} onChange={(event) => updateProductPieceOverride(product.id, row.scope, row.selectionId, row.pieceId, 'textileId', event.target.value || null)}>
+              <option value="">Sin tela asignada</option>
+              {activeTextiles.map((textile) => <option value={textile.id} key={textile.id}>{textile.nombreTela}</option>)}
+            </select>
+            <small>{row.textileStatus}</small>
+            {row.hasTextileOverride && <button type="button" className="piece-material-reset" onClick={() => updateProductPieceOverride(product.id, row.scope, row.selectionId, row.pieceId, 'textileId', undefined)}>Restablecer posición heredada</button>}
+          </label>
+          <label className="field-label">
+            <span>Color asignado</span>
+            <select className="large-input" value={row.colorId ?? ''} onChange={(event) => updateProductPieceOverride(product.id, row.scope, row.selectionId, row.pieceId, 'colorId', event.target.value || null)}>
+              <option value="">Sin color asignado</option>
+              {textileContext.colores.slice().sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')).map((color) => <option value={color.id} key={color.id}>{color.nombre}</option>)}
+            </select>
+            <small>{row.colorStatus}</small>
+            {row.hasColorOverride && <button type="button" className="piece-material-reset" onClick={() => updateProductPieceOverride(product.id, row.scope, row.selectionId, row.pieceId, 'colorId', undefined)}>Restablecer posición heredada</button>}
+          </label>
+        </div>
+      </article>;
+
+      return <section className="panel production-panel piece-material-view">
+        <div className="piece-material-view-header">
+          <button type="button" className="button secondary piece-material-back" onClick={() => setSelectedPieceConfigurationProductId('')}>← Volver a modelos</button>
+          <div className="eyebrow">CONFIGURACIÓN DEL MODELO</div>
+          <h2>Materiales por pieza</h2>
+          <p><strong>{product.name}</strong> · {base.name}</p>
+          <span className="piece-material-help">Cambia la tela o el color de una pieza sin modificar el patrón base ni la biblioteca de componentes. Los cambios se guardan automáticamente en este modelo.</span>
+          <div className="piece-material-summary"><span>{basePieceRows.length} moldes base</span><span>{componentPieceGroups.reduce((sum, group) => sum + group.rows.length, 0)} piezas auxiliares</span><span>{totalPieces} piezas en total</span></div>
+        </div>
+        {basePieceRows.length > 0 && <section className="piece-material-group">
+          <div className="piece-material-group-heading"><h3>Moldes del patrón base</h3><span>{basePieceRows.length}</span></div>
+          {basePieceRows.map(renderMaterialPiece)}
+        </section>}
+        {componentPieceGroups.map(({ selection, component, rows }) => <section className="piece-material-group" key={selection.id}>
+          <div className="piece-material-group-heading"><h3>{component.name}</h3><span>{rows.length} piezas</span></div>
+          {rows.map(renderMaterialPiece)}
+        </section>)}
+        {totalPieces === 0 && <div className="empty">Este modelo todavía no tiene moldes ni piezas auxiliares.</div>}
+        <div className="piece-material-view-footer"><button type="button" className="button secondary" onClick={() => setSelectedPieceConfigurationProductId('')}>Volver a modelos</button></div>
+      </section>;
+    }
 
     if (view === 'modelos-producto') return <section className="panel production-panel">
       <div className="panel-heading"><div><h2>Crear modelo de prenda</h2><p>Selecciona un patrón base y agrega los componentes que distinguen el diseño.</p></div></div>
@@ -2589,7 +2770,6 @@ export function ProductionModule({
         const familyLabel = families.find((x) => x.value === base?.family)?.label ?? (base?.family || 'Familia sin definir');
         const collectionName = data.productCollections.find((collection) => collection.id === product.collectionId)?.name ?? 'Sin colección';
         const productSizeGroup = sizeGroups.find((group) => group.id === base?.sizeGroupId);
-        const productSizes = productSizeOptions(product);
         const productFabricRows = data.productFabrics.filter((assignment) => assignment.productModelId === product.id);
         const productFabricSummary = base ? productFabricSlotsForBaseModel(base).map((slot) => {
           const assignment = productFabricRows.find((item) => item.fabricSlot === slot);
@@ -2606,53 +2786,15 @@ export function ProductionModule({
           const color = assignment ? textileContext.colores.find((item) => item.id === assignment.colorId) : undefined;
           return productColorSlotLabel(slot) + ': ' + (color?.nombre ?? 'Sin asignar');
         }).join(' · ') : '';
-        const productPieces = product.components.flatMap((selection) => {
-          const component = data.components.find((item) => item.id === selection.componentId && item.active);
-          return component ? component.pieces.map((piece) => {
-            const override = selection.pieceOverrides?.[piece.id];
-            const textileId = piece.fabricSlot === 'cualquiera'
-              ? override?.textileId ?? null
-              : resolveComponentPieceTextileId(product.id, piece.fabricSlot, data.productFabrics);
-            const textile = textileId ? textileContext.telas.find((item) => item.id === textileId) : undefined;
-            const fabricDescription = piece.fabricSlot === 'ninguna' ? '' : (piece.fabricSlot === 'cualquiera' ? 'Tela elegida' : componentFabricSlotLabel(piece.fabricSlot)) + ': ' + (textile?.nombreTela ?? 'Sin asignar');
-            const colorSlot = normalizeComponentColorSlot(piece.colorSlot, piece.colorId);
-            const resolvedColorId = colorSlot === 'cualquiera'
-              ? override?.colorId ?? null
-              : resolveComponentPieceColorId(product.id, colorSlot, data.productColors);
-            const resolvedColorName = resolvedColorId ? componentColorName(resolvedColorId) : (piece.colorId ? componentColorName(piece.colorId) : '');
-            const colorDescription = colorSlot === 'ninguna' ? '' : 'Color: ' + (resolvedColorName || componentColorSlotLabel(colorSlot));
-            return { component, piece, selection, fabricDescription, colorDescription };
-          }) : [];
-        });
-        const inventoryOpen = selectedStockProductModelId === product.id;
-        const unassignedLegacyMovements = data.componentPieceMovements.filter((movement) =>
-          !movement.productModelId && product.components.some((selection) => selection.componentId === movement.componentId)
-        ).length;
         return <article className="production-card" key={product.id}>
           <div className="production-card-heading"><div><strong>{product.name}</strong><div className="production-model-meta"><span className="production-family-tag">{familyLabel}</span><span>Colección: {collectionName}</span><span>Patrón: {base?.name ?? 'No disponible'}</span><span>Tallas: {productSizeGroup?.name ?? 'No disponible'}</span></div><small className="production-product-fabric-summary">{productFabricSummary}</small><small className="production-product-fabric-summary">{productColorSummary}</small></div></div>
           <div className="production-attributes">{product.components.map((x) => <span key={x.id}>{data.components.find((c) => c.id === x.componentId)?.name ?? 'Componente archivado'} ×{x.quantity}</span>)}</div>
           <div className="production-card-actions">
             <button className="button secondary" onClick={() => openProductFabricEditor(product)}>Configurar telas</button>
             <button className="button secondary" onClick={() => openProductColorEditor(product)}>Configurar colores</button>
-            <button className="button secondary" disabled={productPieces.length === 0 || productSizes.length === 0} onClick={() => { setSelectedStockProductModelId(inventoryOpen ? '' : product.id); setSelectedStockComponentId(''); setComponentStockPieceId(''); }}>
-              {inventoryOpen ? 'Ocultar inventario auxiliar' : 'Inventario auxiliar'}
-            </button>
+            <button className="button primary" onClick={() => setSelectedPieceConfigurationProductId(product.id)}>Piezas y materiales</button>
             <button className="text-action danger-action" onClick={() => deleteProduct(product)}>Archivar</button>
           </div>
-          {inventoryOpen && <section className="production-product-piece-stock">
-            <div className="production-subheading"><strong>Inventario auxiliar · {product.name}</strong><span className="count-badge">{productPieces.length} piezas</span></div>
-            <p className="production-muted">Tabla de tallas: <strong>{productSizeGroup?.name ?? 'No disponible'}</strong>. El saldo pertenece a este modelo y no se comparte con otras prendas que reutilicen el mismo componente.</p>
-            {unassignedLegacyMovements > 0 && <div className="notice info">Hay {format(unassignedLegacyMovements)} movimientos anteriores de componentes sin modelo asociado. No se suman a este inventario para evitar mezclar prendas. Registra aquí el saldo inicial correcto de este modelo.</div>}
-            {productPieces.map(({ component, piece, selection, fabricDescription, colorDescription }) => <article className="production-component-stock-piece" key={selection.id + ':' + piece.id}>
-              <div className="production-component-stock-title">
-                <div><strong>{component.name} · {piece.name}</strong><small>{piece.laterality === 'simetrica' ? 'Control por izquierda / derecha' : 'Control por unidades'} · {piece.unitsPerGarment * selection.quantity} por prenda{fabricDescription ? ' · ' + fabricDescription : ''}{colorDescription ? ' · ' + colorDescription : ''}</small></div>
-                <button className="button secondary" onClick={() => openComponentPieceMovement(product.id, component, piece)}>Registrar movimiento</button>
-              </div>
-              {productSizes.length > 0 ? <div className="production-component-stock-sizes">
-                {productSizes.map((size) => <div key={size.id}><span>{size.label}</span><small>{productSizeGroup?.name ?? 'Tabla de tallas'}</small><strong>{componentPieceStockLabel(product.id, piece, size.id)}</strong></div>)}
-              </div> : <small className="production-muted">El patrón base no tiene tallas disponibles.</small>}
-            </article>)}
-          </section>}
         </article>;
       })}</div>
     </section>;
