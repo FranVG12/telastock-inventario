@@ -2679,6 +2679,131 @@ export function ProductionModule({
   }
 
   const mainPanel = (() => {
+    if (view === 'inventario-piezas') return <section className="panel production-panel product-model-inventory">
+      <div className="panel-heading">
+        <div><h2>Inventario por modelo comercial</h2><p>Cada modelo lleva su propio stock de moldes base y piezas auxiliares, con la tabla de tallas, telas y colores que realmente utiliza.</p></div>
+        <span className="count-badge">{activeInventoryProducts.length} modelos</span>
+      </div>
+      <div className="production-card-actions inventory-model-actions">
+        <button className="button secondary" onClick={exportProductInventoryCsv}>↧ Exportar inventario</button>
+        <button className="button secondary" disabled={activeInventoryProducts.length === 0} onClick={() => openProductInventoryForm('salida')}>− Retirar / merma</button>
+        <button className="button primary" disabled={activeInventoryProducts.length === 0} onClick={() => openProductInventoryForm('entrada')}>＋ Registrar stock</button>
+      </div>
+      <div className="stats-grid piece-stats product-inventory-stats">
+        <article className="stat-card"><div className="stat-top"><span>Modelos con stock</span><span className="stat-icon purple">▦</span></div><strong>{inventoryModelsWithStock}</strong><small>De {activeInventoryProducts.length} modelos registrados</small></article>
+        <article className="stat-card"><div className="stat-top"><span>Piezas disponibles</span><span className="stat-icon blue">▤</span></div><strong>{format(inventoryPhysicalTotal)}</strong><small>Moldes y piezas auxiliares físicas</small></article>
+        <article className="stat-card"><div className="stat-top"><span>Prendas fabricables</span><span className="stat-icon green">✓</span></div><strong>{format(inventoryCompleteUnits)}</strong><small>Por modelo y talla, descontando reservas</small></article>
+      </div>
+      {activeInventoryProducts.length === 0 && <div className="empty">
+        <p>Primero crea un modelo comercial combinando un patrón base, sus telas y colores, y los componentes auxiliares que llevará la prenda.</p>
+        <button className="button primary" onClick={() => onNavigate('modelos-producto')}>＋ Crear modelo comercial</button>
+      </div>}
+      {activeInventoryProducts.length > 0 && <>
+        <div className="filters inventory-filters">
+          <label className="search-box"><span aria-hidden="true">⌕</span><input value={inventorySearch} onChange={(event) => setInventorySearch(event.target.value)} placeholder="Buscar modelo, pieza o tela…" aria-label="Buscar modelo, pieza o tela" /></label>
+          <div className="filter-segment" aria-label="Filtrar por stock">{(['Con stock', 'Vacío', 'Todos'] as const).map((filter) => <button key={filter} className={inventoryFilter === filter ? 'selected' : ''} onClick={() => setInventoryFilter(filter)}>{filter}</button>)}</div>
+        </div>
+        <label className="toggle-empty"><input type="checkbox" checked={inventoryIncludeEmptySizes} onChange={(event) => setInventoryIncludeEmptySizes(event.target.checked)} /><span>Mostrar también tallas vacías en cada modelo</span></label>
+        <div className="model-list product-model-inventory-list">
+          {filteredInventoryProducts.map(({ product, base, productPieces, productSizes, hasStock }) => {
+            const expanded = inventoryExpandedProducts.includes(product.id);
+            const collection = data.productCollections.find((item) => item.id === product.collectionId)?.name ?? 'Sin colección';
+            const sizeGroup = sizeGroups.find((group) => group.id === base?.sizeGroupId)?.name ?? 'Grupo de tallas no disponible';
+            const sizesWithStock = productSizes.filter((size) => productPieces.some((piece) =>
+              getPieceStock(productPieceDomainLedger(product.id, piece, size.id), piece.id, size.id) > 0
+            ));
+            const visibleSizes = inventoryIncludeEmptySizes ? productSizes : sizesWithStock;
+            const legacyMovements = unassignedLegacyBaseMovements(product);
+            const fabrics = [...new Set(productPieces.map((piece) => piece.textileName).filter((name) => name && name !== 'Sin asignar' && name !== 'Sin tela definida'))];
+            const colors = [...new Set(productPieces.map((piece) => piece.colorName).filter((name) => name && name !== 'Sin asignar' && name !== 'Sin color'))];
+            return <article className={'model-card product-model-inventory-card ' + (expanded ? 'expanded' : '')} key={product.id}>
+              <button className="model-card-trigger" onClick={() => setInventoryExpandedProducts((previous) => previous.includes(product.id) ? previous.filter((id) => id !== product.id) : [...previous, product.id])} aria-expanded={expanded}>
+                <span className="model-symbol" aria-hidden="true">▧</span>
+                <span className="model-main">
+                  <strong>{product.name}</strong>
+                  <small>{base?.name ?? 'Patrón no disponible'} · {collection} · {sizeGroup}</small>
+                  <span className="model-tags"><span>{productPieces.length} piezas</span><span>{sizesWithStock.length} tallas con stock</span><span>{hasStock ? 'Con existencias' : 'Sin existencias'}</span></span>
+                  <small className="inventory-product-material-summary">{fabrics.length ? 'Telas: ' + fabrics.join(' · ') : 'Telas sin asignar'}{colors.length ? ' · Colores: ' + colors.join(' · ') : ''}</small>
+                </span>
+                <span className={'chevron ' + (expanded ? 'up' : '')} aria-hidden="true">⌄</span>
+              </button>
+              {expanded && <div className="model-details product-model-inventory-details">
+                <div className="production-card-actions inventory-model-actions">
+                  <button className="button secondary" onClick={() => openProductInventoryForm('entrada', product.id)}>＋ Registrar stock</button>
+                  <button className="button secondary" onClick={() => openProductInventoryForm('salida', product.id)}>− Retirar / merma</button>
+                </div>
+                {legacyMovements.length > 0 && <div className="notice info inventory-legacy-notice">
+                  <span>Hay {legacyMovements.length} movimientos históricos del patrón base que todavía no pertenecen a un modelo comercial. Elige a qué modelo asignarlos; no se copiarán a los demás.</span>
+                  <button type="button" className="button secondary" onClick={() => importLegacyBaseStock(product)}>Asignar stock antiguo a este modelo</button>
+                </div>}
+                {visibleSizes.length === 0 ? <div className="empty size-empty">Este modelo todavía no tiene piezas registradas en ninguna talla. <button className="text-action" onClick={() => openProductInventoryForm('entrada', product.id)}>Registrar stock</button></div> : <div className="size-list">
+                  {visibleSizes.map((size) => {
+                    const ledger = productInventoryEffectiveLedger(product, productPieces, size.id);
+                    const complete = getCompleteUnits(productPieces, ledger, size.id);
+                    const physicalTotal = productPieces.reduce((sum, piece) => {
+                      const pieceLedger = productPieceDomainLedger(product.id, piece, size.id);
+                      return sum + (piece.laterality === 'simetrica'
+                        ? getSymmetricStock(pieceLedger, piece.id, size.id).physicalTotal
+                        : Math.max(0, getPieceStock(pieceLedger, piece.id, size.id)));
+                    }, 0);
+                    const shortages = getPieceShortages(productPieces, ledger, size.id, complete + 1);
+                    const baseRows = productPieces.filter((piece) => piece.scope === 'base');
+                    const componentGroups = product.components.flatMap((selection) => {
+                      const component = data.components.find((item) => item.id === selection.componentId);
+                      if (!component) return [];
+                      const rows = productPieces.filter((piece) => piece.scope === 'component' && piece.selectionId === selection.id);
+                      return rows.length > 0 ? [{ selection, component, rows }] : [];
+                    });
+                    const renderPiece = (piece: ProductInventoryPiece) => {
+                      const pieceLedger = productPieceDomainLedger(product.id, piece, size.id);
+                      const stock = piece.laterality === 'simetrica' ? getSymmetricStock(pieceLedger, piece.id, size.id) : undefined;
+                      const availableStock = piece.laterality === 'simetrica'
+                        ? Math.max(0, Math.min(stock?.left ?? 0, stock?.right ?? 0) - Math.max(inventoryReservedPieceQuantity(product.id, piece, size.id, 'izquierda'), inventoryReservedPieceQuantity(product.id, piece, size.id, 'derecha')))
+                        : Math.max(0, getPieceStock(pieceLedger, piece.id, size.id) - inventoryReservedPieceQuantity(product.id, piece, size.id, null));
+                      const shortage = shortages.find((item) => item.piece.id === piece.id);
+                      const missingText = shortage && shortage.missing > 0
+                        ? shortage.symmetricStock
+                          ? 'Faltan I:' + format(shortage.missingLeft ?? 0) + ' · D:' + format(shortage.missingRight ?? 0) + ' para otra prenda'
+                          : 'Faltan ' + format(shortage.missing) + ' para otra prenda'
+                        : 'Stock suficiente para la siguiente prenda';
+                      return <article className="inventory-product-piece-row" key={piece.id}>
+                        <div className="inventory-product-piece-main">
+                          <strong>{piece.name}</strong>
+                          <small>{piece.scope === 'base' ? 'Molde del patrón base' : piece.componentName}</small>
+                        </div>
+                        <div className="inventory-product-piece-materials">
+                          <span><small>Tela</small><strong>{piece.textileName || 'Sin asignar'}</strong></span>
+                          <span><small>Color</small><strong>{piece.colorName || 'Sin asignar'}</strong></span>
+                          <span><small>Necesita por prenda</small><strong>{piece.unitsPerGarment} {piece.laterality === 'simetrica' ? 'piezas (' + piece.unitsPerGarment / 2 + ' por lado)' : 'piezas'}</strong></span>
+                        </div>
+                        <div className="inventory-product-piece-stock">
+                          <strong>{piece.laterality === 'simetrica'
+                            ? (stock?.left === stock?.right ? format(stock?.parity ?? 0) + ' par.' : format(stock?.left ?? 0) + '/' + format(stock?.right ?? 0))
+                            : format(Math.max(0, getPieceStock(pieceLedger, piece.id, size.id)))}</strong>
+                          <small>{availableStock > 0 ? format(availableStock) + ' disponibles tras reservas' : 'Sin saldo libre'}</small>
+                          <small className={shortage && shortage.missing > 0 ? 'inventory-shortage' : 'inventory-stock-ok'}>{missingText}</small>
+                        </div>
+                      </article>;
+                    };
+                    return <div className="size-card product-inventory-size-card" key={size.id}>
+                      <div className="size-card-main">
+                        <div className="size-label-block"><span className="size-pill">{size.label}</span><span className="size-stock-note">{format(physicalTotal)} piezas físicas</span></div>
+                        <div className="complete-count"><strong>{format(complete)}</strong><span>prendas fabricables</span></div>
+                      </div>
+                      <div className="completion-status-row"><span className={'completion-status ' + (complete > 0 ? 'ready' : physicalTotal > 0 ? 'partial' : 'empty-status')}><i />{complete > 0 ? 'Fabricable' : physicalTotal > 0 ? 'Incompleto' : 'Vacío'}</span></div>
+                      {baseRows.length > 0 && <section className="inventory-product-piece-group"><h4>Moldes del patrón base <span>{baseRows.length}</span></h4>{baseRows.map(renderPiece)}</section>}
+                      {componentGroups.map(({ selection, component, rows }) => <section className="inventory-product-piece-group" key={selection.id}><h4>{component.name} <span>{rows.length} piezas</span></h4>{rows.map(renderPiece)}</section>)}
+                    </div>;
+                  })}
+                </div>}
+              </div>}
+            </article>;
+          })}
+          {filteredInventoryProducts.length === 0 && <div className="empty">No hay modelos que coincidan con la búsqueda o el filtro.</div>}
+        </div>
+      </>}
+    </section>;
+
     if (view === 'insumos') return <section className="panel production-panel">
       <div className="panel-heading"><div><h2>Catálogo de avíos</h2><p>Registra cada tipo de material una sola vez. Sus medidas por talla se configuran en cada modelo.</p></div><button className="button primary" onClick={() => setShowSupplyForm((x) => !x)}>＋ Nuevo insumo</button></div>
       {showSupplyForm && <form className="production-form" onSubmit={saveSupply}>
