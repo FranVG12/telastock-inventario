@@ -162,7 +162,7 @@ La rama de trabajo feature/componentes-insumos incorpora un módulo local-first 
 - **Variantes y existencias:** el stock se registra mediante movimientos de entrada/salida. Las presentaciones comerciales guardan su equivalencia declarada; no se inventan conversiones entre unidades incompatibles.
 - **Vinculación textil:** una variante puede referenciar una tela y un color ya existentes. Si se vincula a un rollo, el stock se consulta desde el inventario de rollos; el nuevo módulo no crea un saldo paralelo ni consume rollos automáticamente.
 - **Componentes reutilizables:** biblioteca de cuellos, bolsillos, puños, pretinas, tapeteras y otros acabados, con piezas auxiliares, lateralidad y consumos de materiales. Cada pieza auxiliar referencia una posición de tela del patrón (`principal`, `secundaria_1..N`) o «ninguna»; no guarda una tela comercial fija. El color se mantiene enlazado al catálogo global por identificador. La biblioteca es solo una definición de molde: no tiene inventario ni movimientos de stock. Los datos antiguos con `textileId` fijo se normalizan a la posición `principal` (o conservan su posición válida existente) y dejan de almacenar una tela concreta en la biblioteca.
-- **Modelos configurados:** una prenda comercial referencia un patrón base, elige una colección guardada, selecciona componentes y asigna una tela del catálogo a cada posición que define el patrón. La colección y las asignaciones de tela viven en relaciones normalizadas. La familia se hereda del patrón base y se muestra como etiqueta compacta; la tabla de tallas también se presenta como etiqueta pequeña, no como un campo editable. El inventario de piezas auxiliares se crea dentro de cada modelo comercial y usa únicamente la tabla de tallas del patrón base; los saldos no se comparten entre modelos aunque reutilicen el mismo componente.
+- **Modelos configurados:** una prenda comercial referencia un patrón base, elige una colección guardada, selecciona componentes y asigna una tela del catálogo a cada posición que define el patrón. La colección y las asignaciones de tela viven en relaciones normalizadas. La familia se hereda del patrón base y se muestra como etiqueta compacta; la tabla de tallas también se presenta como etiqueta pequeña, no como un campo editable. La pantalla del modelo configura materiales por pieza; el control de existencias auxiliares no forma parte de esta etapa.
 - **Recetas estándar:** consumos compartidos por familia (polo, buzo y casaca), con consumo fijo o diferenciado por talla y porcentaje de desperdicio.
 - **Asignación de telas por modelo:** al elegir un patrón base se muestran automáticamente sus posiciones `Tela principal 1` y `Tela secundaria 1..N`. El operador asigna una tela activa del catálogo existente a cada posición. Dos modelos que usan el mismo patrón pueden elegir telas diferentes; la definición del molde no se modifica.
 - **Tela heredada en piezas auxiliares:** al crear un componente se selecciona si cada pieza usa «Tela principal 1», «Tela secundaria» y su número, o ninguna. Al asignar ese componente a un modelo comercial, la pieza resuelve la tela desde la relación `productFabrics` de ese modelo. Por ejemplo, una pieza vinculada a `principal` hereda Polialgodón si ese modelo asignó Polialgodón a `Tela principal 1`; otro modelo que reutilice el componente puede heredar una tela diferente. Si la posición secundaria indicada no existe en el patrón base, el guardado se rechaza. Cambiar la tela del modelo actualiza la referencia visible sin duplicar ni compartir inventarios.
@@ -192,16 +192,11 @@ Al guardar un comprobante, TelaStock registra una entrada por cada detalle en el
 
 Las compras de telas permanecen en el módulo existente de rollos y no se duplican en compras de avíos. Las compras vinculadas a proveedor conservan su referencia aunque el proveedor luego deje de estar disponible en el catálogo local.
 
-### Inventario auxiliar por modelo comercial
+### Inventario auxiliar (etapa posterior)
 
-La biblioteca de componentes define moldes reutilizables (cuellos, bolsillos, puños, pretinas y otros acabados), sus piezas, lateralidad, tela, color y materiales. **No tiene inventario ni registra movimientos de existencias.**
+La biblioteca de componentes define moldes reutilizables (cuellos, bolsillos, puños, pretinas y otros acabados), sus piezas, lateralidad, tela, color y materiales. **En la etapa actual, configurar un modelo comercial no crea ni muestra un inventario auxiliar.**
 
-El inventario de piezas auxiliares nace dentro de cada modelo comercial configurado, después de combinar un patrón base con los componentes que llevará la prenda. Cada saldo se identifica por modelo comercial + pieza auxiliar + talla + lado. Por eso, dos modelos que reutilicen el mismo cuello mantienen existencias independientes.
-
-- La tabla de tallas se hereda del patrón base seleccionado. El inventario auxiliar solo muestra tallas de ese grupo.
-- Las piezas normales se controlan por unidades físicas.
-- Las piezas simétricas permiten registrar una cantidad en paridades (un lado izquierdo y uno derecho) o registrar un lado específico.
-- Las entradas, salidas y mermas quedan asociadas al modelo comercial, no a la ficha reutilizable del componente.
+La gestión de existencias, movimientos, tallas y lateralidad de piezas auxiliares se abordará en una etapa independiente, con una pantalla propia. Los movimientos históricos ya guardados se conservan; esta vista de configuración no los modifica ni los elimina.
 - La planificación y las reservas consultan el inventario del modelo seleccionado; el stock de las piezas del patrón base permanece independiente.
 - Los movimientos anteriores sin una relación inequívoca con un único modelo quedan sin asignar. No se duplican entre modelos compartidos; el operador debe registrar el saldo inicial correcto en cada modelo.
 
@@ -242,3 +237,11 @@ Al completar una orden, el operador confirma las cantidades reales de cada avío
 - Las piezas marcadas como `Cualquier color` mantienen una selección concreta independiente por pieza, dentro de ese modelo comercial; no generan una posición compartida artificial.
 - Al editar los colores de un modelo existente se utiliza el mismo conjunto de posiciones realmente usadas y se conservan las asignaciones antiguas que ya no estén en uso.
 - Se corrigió el reconocimiento de identificadores `secundaria_N` al guardar y reabrir patrones; antes, el escape incorrecto impedía reconocer esos índices en la pantalla de moldes.
+
+### Configuración de materiales por pieza en modelos comerciales
+
+- La tarjeta del modelo comercial ya no despliega ni presenta el inventario auxiliar durante la etapa de configuración.
+- La acción **Piezas y materiales** abre una vista dedicada que muestra por separado los moldes del patrón base y las piezas de los componentes seleccionados.
+- Cada pieza puede ajustar su tela y color para ese modelo comercial. Los valores se guardan como excepciones por pieza en `basePieceOverrides` o en `components[].pieceOverrides`; no modifican el patrón base ni la biblioteca de componentes.
+- Si una pieza no tiene excepción, hereda la tela/color de la posición configurada. Cada campo permite restablecer esa herencia de forma independiente.
+- Los campos se guardan automáticamente en el almacenamiento local existente. Los saldos y movimientos de inventario auxiliar históricos no se eliminan; el control de existencias queda fuera de esta pantalla y se abordará en una etapa posterior.
