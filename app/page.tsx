@@ -808,7 +808,10 @@ export default function Home() {
       const importedMovements = getRows('movements') as unknown as PieceMovement[];
       const importedFabric = Number(raw.schemaVersion) >= 2 ? validateFabricBackupData(data.fabricInventory) : emptyFabricBackupData();
       const importedProduction = Number(raw.schemaVersion) >= 4 ? validateProductionBackupData(data.production) : emptyProductionBackupData();
-      const importedModels = normalizeModelsWithSlots(migrateBaseModelFamilies(importedModelsRaw, importedProduction.productModels), normalizedImportedPieces);
+      const importedModels = normalizeModelsWithSlots(migrateBaseModelFamilies(importedModelsRaw, importedProduction.productModels), normalizedImportedPieces).map((model) => ({
+        ...model,
+        excludedSizeIds: (model.excludedSizeIds ?? []).filter((sizeId) => importedSizes.some((size) => size.id === sizeId && size.groupId === model.sizeGroupId)),
+      }));
       const hasText = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
       const groupIds = new Set(importedGroups.map((item) => item.id));
       const sizeIds = new Set(importedSizes.map((item) => item.id));
