@@ -88,6 +88,21 @@ export type ComponentPiece = {
   colorId: string | null;
 };
 
+export type ProductBasePieceMovement = {
+  id: string;
+  productModelId: string;
+  pieceId: string;
+  sizeId: string;
+  delta: number;
+  kind: 'entrada' | 'salida' | 'ajuste';
+  side?: 'izquierda' | 'derecha';
+  note: string;
+  date: string;
+  /** Original pattern-only movement copied once into a commercial model. */
+  sourceMovementId?: string;
+  sourceProductionOrderId?: string | null;
+};
+
 export type ComponentPieceMovement = {
   id: string;
   productModelId?: string | null;
@@ -246,6 +261,7 @@ export type ProductionBackupData = {
   supplyMovements: SupplyMovement[];
   supplyPurchases: SupplyPurchase[];
   supplyPurchaseDetails: SupplyPurchaseDetail[];
+  productBasePieceMovements: ProductBasePieceMovement[];
   componentPieceMovements: ComponentPieceMovement[];
   productionOrders: ProductionOrder[];
   components: GarmentComponent[];
@@ -263,6 +279,7 @@ export const PRODUCTION_STORAGE_KEYS = {
   supplyMovements: 'telastock-supply-movements-v1',
   supplyPurchases: 'telastock-supply-purchases-v1',
   supplyPurchaseDetails: 'telastock-supply-purchase-details-v1',
+  productBasePieceMovements: 'telastock-product-base-piece-movements-v1',
   componentPieceMovements: 'telastock-component-piece-movements-v1',
   productionOrders: 'telastock-production-orders-v1',
   components: 'telastock-garment-components-v1',
@@ -274,7 +291,7 @@ export const PRODUCTION_STORAGE_KEYS = {
 } as const;
 
 export function emptyProductionBackupData(): ProductionBackupData {
-  return { supplies: [], variants: [], supplyMovements: [], supplyPurchases: [], supplyPurchaseDetails: [], componentPieceMovements: [], productionOrders: [], components: [], familyRecipes: [], productCollections: [], productModels: [], productFabrics: [], productColors: [] };
+  return { supplies: [], variants: [], supplyMovements: [], supplyPurchases: [], supplyPurchaseDetails: [], productBasePieceMovements: [], componentPieceMovements: [], productionOrders: [], components: [], familyRecipes: [], productCollections: [], productModels: [], productFabrics: [], productColors: [] };
 }
 
 export function validateProductionBackupData(value: unknown): ProductionBackupData {
@@ -422,6 +439,33 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
   })) throw new Error('Hay órdenes de producción con datos o relaciones inválidas.');
   if (!output.components.every((x) => typeof x.name === 'string' && x.name.trim() && typeof x.type === 'string' && x.type.trim() && Array.isArray(x.pieces) && x.pieces.every((p) => p && typeof p.id === 'string' && p.id.trim() && typeof p.name === 'string' && p.name.trim() && Number.isInteger(p.unitsPerGarment) && p.unitsPerGarment > 0 && ['ninguna', 'simetrica', 'izquierda', 'derecha'].includes(p.laterality) && (p.laterality !== 'simetrica' || p.unitsPerGarment % 2 === 0) && isComponentFabricSlot(p.fabricSlot) && isComponentColorSlot(p.colorSlot) && p.textileId === null && (p.colorId === null || typeof p.colorId === 'string')) && validMaterials(x.materials))) {
     throw new Error('Hay componentes con piezas o materiales inválidos.');
+  }
+  if (!output.productBasePieceMovements.every((movement) =>
+    typeof movement.productModelId === 'string' && output.productModels.some((product) => product.id === movement.productModelId) &&
+    typeof movement.pieceId === 'string' && movement.pieceId.length > 0 &&
+    typeof movement.sizeId === 'string' && movement.sizeId.length > 0 &&
+    Number.isInteger(movement.delta) && movement.delta !== 0 &&
+    ['entrada', 'salida', 'ajuste'].includes(movement.kind) &&
+    !((movement.kind === 'entrada' && movement.delta < 0) || (movement.kind === 'salida' && movement.delta > 0)) &&
+    (movement.side === undefined || movement.side === 'izquierda' || movement.side === 'derecha') &&
+    typeof movement.note === 'string' && typeof movement.date === 'string' &&
+    (movement.sourceMovementId === undefined || typeof movement.sourceMovementId === 'string') &&
+    (movement.sourceProductionOrderId == null || typeof movement.sourceProductionOrderId === 'string')
+  )) throw new Error('Hay movimientos de moldes base sin modelo comercial o con datos inválidos.');
+  const baseMovementScopes = new Map<string, ProductBasePieceMovement[]>();
+  output.productBasePieceMovements.forEach((movement) => {
+    const key = movement.productModelId + ':' + movement.pieceId + ':' + movement.sizeId;
+    baseMovementScopes.set(key, [...(baseMovementScopes.get(key) ?? []), movement]);
+  });
+  for (const movements of baseMovementScopes.values()) {
+    const legacy = movements.filter((movement) => !movement.side).reduce((sum, movement) => sum + movement.delta, 0);
+    const pairs = Math.floor(Math.max(0, legacy) / 2);
+    const left = pairs + movements.filter((movement) => movement.side === 'izquierda').reduce((sum, movement) => sum + movement.delta, 0);
+    const right = pairs + movements.filter((movement) => movement.side === 'derecha').reduce((sum, movement) => sum + movement.delta, 0);
+    if (legacy < 0 || left < 0 || right < 0) throw new Error('El respaldo contiene stock negativo en moldes base de un modelo comercial.');
+  }
+  if (new Set(output.productBasePieceMovements.filter((movement) => movement.sourceMovementId).map((movement) => movement.sourceMovementId)).size !== output.productBasePieceMovements.filter((movement) => movement.sourceMovementId).length) {
+    throw new Error('Hay movimientos antiguos del patrón asignados más de una vez a modelos comerciales.');
   }
   if (!output.componentPieceMovements.every((movement) => {
     const owner = componentPieceMap.get(movement.pieceId);
@@ -793,7 +837,7 @@ export function ProductionModule({
     const loaded = loadLocal();
     setData(loaded.data);
     setStorageSafe(loaded.safe);
-    if (loaded.safe) localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '9');
+    if (loaded.safe) localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '10');
     else setNotice({ text: loaded.warning, kind: 'error' });
     setReady(true);
     refreshTextiles();
@@ -836,7 +880,7 @@ export function ProductionModule({
     try {
       keys.forEach((key) => previous.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       keys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(data[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '9');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '10');
     } catch {
       previous.forEach((value, key) => {
         try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch { /* rollback best effort */ }
@@ -1948,7 +1992,7 @@ export function ProductionModule({
     try {
       keys.forEach((key) => previous.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       keys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(next[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '9');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '10');
       setData(next);
       return true;
     } catch {
@@ -2251,7 +2295,7 @@ export function ProductionModule({
     try {
       productionKeys.forEach((key) => previousProduction.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       productionKeys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(nextData[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '9');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '10');
       localStorage.setItem(FABRIC_STORAGE_KEYS.rollos, JSON.stringify(updatedRolls));
       localStorage.setItem(FABRIC_STORAGE_KEYS.rolloMovimientos, JSON.stringify(nextRollMovements));
       const nextBase = [...baseMovements, ...baseEntries];
