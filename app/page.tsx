@@ -90,6 +90,13 @@ const secondaryColorSlotCountForModel = (model: ManufacturingModel, modelPieces:
   Math.max(model.secondaryColorSlots ?? 0, ...modelPieces.filter((piece) => piece.modelId === model.id).map((piece) => secondaryColorSlotIndex(piece.colorSlot)), 0);
 const normalizeModelsWithSlots = (models: ManufacturingModel[], modelPieces: ModelPiece[]) =>
   models.map((model) => ({ ...model, secondaryFabricSlots: secondarySlotCountForModel(model, modelPieces), secondaryColorSlots: secondaryColorSlotCountForModel(model, modelPieces) }));
+const normalizeExcludedModelSizes = (models: ManufacturingModel[], masterSizes: Size[]) =>
+  models.map((model) => ({
+    ...model,
+    excludedSizeIds: Array.isArray(model.excludedSizeIds)
+      ? model.excludedSizeIds.filter((sizeId) => typeof sizeId === 'string' && masterSizes.some((size) => size.id === sizeId && size.groupId === model.sizeGroupId))
+      : [],
+  }));
 const blankModelForm = (sizeGroupId: string, colorId = ''): ModelFormState => ({
   editingId: null,
   name: '',
@@ -172,7 +179,7 @@ export default function Home() {
         colorOverride: false,
       }));
       setPieces(migratedPieces);
-      const migratedModels = normalizeModelsWithSlots(migrateBaseModelFamilies(storedModels, legacyProductModels), migratedPieces);
+      const migratedModels = normalizeExcludedModelSizes(normalizeModelsWithSlots(migrateBaseModelFamilies(storedModels, legacyProductModels), migratedPieces), load<Size[]>(STORAGE.sizes, demoSizes));
       setModels(migratedModels);
       if (migratedModels.some((model) => !model.family)) setNotice({ message: 'Hay patrones base sin familia asignada. Edítalos en Modelos para que los modelos configurados hereden la familia correcta.', kind: 'info' });
       setMovements(load(STORAGE.movements, demoMovements));
@@ -716,7 +723,7 @@ export default function Home() {
         const merged = merge(current, normalizeModelsWithSlots(parsed.models!, incomingPieces)).map((model) => ({
           ...model,
           family: model.family || current.find((item) => item.id === model.id)?.family || '',
-          excludedSizeIds: (model.excludedSizeIds ?? []).filter((sizeId) => parsed.sizes!.some((size) => size.id === sizeId && size.groupId === model.sizeGroupId)),
+          excludedSizeIds: Array.isArray(model.excludedSizeIds) ? model.excludedSizeIds.filter((sizeId) => typeof sizeId === 'string' && parsed.sizes!.some((size) => size.id === sizeId && size.groupId === model.sizeGroupId)) : [],
         }));
         return migrateBaseModelFamilies(merged, legacyProductModels);
       });
@@ -814,7 +821,7 @@ export default function Home() {
       const importedProduction = Number(raw.schemaVersion) >= 4 ? validateProductionBackupData(data.production) : emptyProductionBackupData();
       const importedModels = normalizeModelsWithSlots(migrateBaseModelFamilies(importedModelsRaw, importedProduction.productModels), normalizedImportedPieces).map((model) => ({
         ...model,
-        excludedSizeIds: (model.excludedSizeIds ?? []).filter((sizeId) => importedSizes.some((size) => size.id === sizeId && size.groupId === model.sizeGroupId)),
+        excludedSizeIds: Array.isArray(model.excludedSizeIds) ? model.excludedSizeIds.filter((sizeId) => typeof sizeId === 'string' && importedSizes.some((size) => size.id === sizeId && size.groupId === model.sizeGroupId)) : [],
       }));
       const hasText = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
       const groupIds = new Set(importedGroups.map((item) => item.id));
