@@ -772,7 +772,7 @@ export default function Home() {
       const importedPieces = getRows('pieces') as unknown as ModelPiece[];
       const normalizedImportedPieces = importedPieces.map((piece) => ({ ...piece, colorSlot: piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna'), colorId: null, color: 'Sin especificar', colorOverride: false }));
       const importedMovements = getRows('movements') as unknown as PieceMovement[];
-      let importedFabric = Number(raw.schemaVersion) >= 2 ? validateFabricBackupData(data.fabricInventory) : emptyFabricBackupData();
+      const importedFabric = Number(raw.schemaVersion) >= 2 ? validateFabricBackupData(data.fabricInventory) : emptyFabricBackupData();
       const importedProduction = Number(raw.schemaVersion) >= 4 ? validateProductionBackupData(data.production) : emptyProductionBackupData();
       const importedModels = normalizeModelsWithSlots(migrateBaseModelFamilies(importedModelsRaw, importedProduction.productModels), normalizedImportedPieces);
       const hasText = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
