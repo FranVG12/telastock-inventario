@@ -1448,3 +1448,18 @@
   .pattern-library-assignment-note small{font-size:9px}
   .pattern-library-panel .schema-note{margin:0 10px 12px;padding:10px}
 }
+
+
+.pattern-library-position-summary{display:grid;gap:6px;padding-top:1px}
+.pattern-library-position-title{font-size:9px;font-weight:800;letter-spacing:.3px;color:#8490a2}
+.pattern-library-position-tags{display:flex;flex-wrap:wrap;gap:6px}
+.pattern-library-position-tag{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:6px 8px;border:1px solid #e9edf3;border-radius:8px;background:#fbfcfe;color:#526077;font-size:9px;font-weight:700;line-height:1.3}
+.pattern-library-position-tag small{color:#8f99aa;font-size:8px;font-weight:800}
+.pattern-library-position-tag.color-position{background:#fbfaff;border-color:#eceafb;color:#635bb5}
+@media(max-width:720px){
+ .pattern-library-position-summary{gap:5px}
+ .pattern-library-position-title{font-size:8px}
+ .pattern-library-position-tags{gap:5px}
+ .pattern-library-position-tag{padding:6px 7px;font-size:8px}
+ .pattern-library-position-tag small{font-size:7px}
+}
