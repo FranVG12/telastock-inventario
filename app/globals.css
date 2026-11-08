@@ -1371,3 +1371,9 @@
   .pattern-editor-add-button{padding:8px 9px;font-size:9px}
   .pattern-editor-actions{margin-left:-10px;margin-right:-10px;padding-left:10px;padding-right:10px}
 }
+
+.pattern-editor-slot-stepper{display:flex;align-items:center;gap:5px;flex:0 0 auto}
+.pattern-editor-slot-stepper button{width:34px;height:34px;border:1px solid #dedff0;border-radius:9px;background:#fff;color:#5c52ca;font-size:18px;font-weight:800;line-height:1}
+.pattern-editor-slot-stepper button:last-child{background:#f0efff;border-color:#e5e2ff}
+.pattern-editor-slot-stepper button:disabled{opacity:.35;background:#f7f8fb;color:#9aa2b1}
+@media(max-width:720px){.pattern-editor-slot-stepper{gap:6px}.pattern-editor-slot-stepper button{width:40px;height:40px;border-radius:10px;font-size:20px}}
