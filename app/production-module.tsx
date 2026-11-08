@@ -567,12 +567,6 @@ const categories: SupplyCategory[] = [
   'Bolsas y empaques', 'Otros avíos',
 ];
 const units: StockUnit[] = ['und', 'm', 'cm', 'g', 'kg', 'l', 'ml'];
-const families = [
-  { value: 'polo', label: 'Polo' },
-  { value: 'buzo', label: 'Buzo' },
-  { value: 'casaca', label: 'Casaca' },
-  { value: 'otro', label: 'Otro' },
-];
 const componentTypes = ['Cuello', 'Bolsillo', 'Puño', 'Pretina', 'Tapetera', 'Cierre', 'Terminación', 'Otro'];
 const productColorSlotsForConfiguredModel = (baseModelId: string, basePieces: ModelPiece[], components: GarmentComponent[]) =>
   requiredProductColorSlots([
@@ -756,9 +750,10 @@ function variantLabel(variant: SupplyVariant, variants: SupplyVariant[], supplie
 }
 
 export function ProductionModule({
-  view, baseModels, baseModelsReady, basePieces, baseMovements, sizes, sizeGroups, onAddBaseMovements, onNavigate, onQuickCreateBaseModel,
+  view, families, baseModels, baseModelsReady, basePieces, baseMovements, sizes, sizeGroups, onAddBaseMovements, onNavigate, onQuickCreateBaseModel,
 }: {
   view: ProductionView;
+  families: { value: string; label: string }[];
   baseModels: ManufacturingModel[];
   baseModelsReady: boolean;
   basePieces: ModelPiece[];
