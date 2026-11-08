@@ -134,7 +134,6 @@ export default function Home() {
   const [showSizeManager, setShowSizeManager] = useState(false);
   const [draftSizeGroups, setDraftSizeGroups] = useState<SizeGroup[]>([]);
   const [draftSizes, setDraftSizes] = useState<Size[]>([]);
-  const [sizeNameDrafts, setSizeNameDrafts] = useState<Record<string, string>>({});
   const [expandedPatternIds, setExpandedPatternIds] = useState<string[]>([]);
   const [patternSearch, setPatternSearch] = useState('');
   const [patternFamilyFilter, setPatternFamilyFilter] = useState('Todas');
@@ -615,19 +614,6 @@ export default function Home() {
     setNewSizeLabel('');
   }
 
-  function saveSizeName(sizeId: string) {
-    const current = draftSizes.find((size) => size.id === sizeId);
-    const draft = sizeNameDrafts[sizeId];
-    if (!current || draft === undefined) return;
-    const label = draft.trim();
-    if (!label) { setNoticeMessage('El nombre de la talla no puede quedar vacío.', 'error'); return; }
-    if (draftSizes.some((size) => size.id !== sizeId && size.groupId === current.groupId && size.label.trim().toLocaleLowerCase('es') === label.toLocaleLowerCase('es'))) {
-      setNoticeMessage('Ya existe una talla con ese nombre en este grupo.', 'error'); return;
-    }
-    setDraftSizes((previous) => previous.map((size) => size.id === sizeId ? { ...size, label } : size));
-    setSizeNameDrafts((previous) => { const next = { ...previous }; delete next[sizeId]; return next; });
-  }
-
   function reorderSize(sizeId: string, direction: -1 | 1) {
     const ordered = managerGroupSizes(sizeManagerGroupId);
     const index = ordered.findIndex((size) => size.id === sizeId);
@@ -657,7 +643,6 @@ export default function Home() {
       setNoticeMessage(`No se puede borrar la talla ${size.label}: está referenciada por una orden de producción. Renómbrala o déjala sin usar para conservar la trazabilidad.`, 'error'); return;
     }
     setDraftSizes((previous) => previous.filter((item) => item.id !== size.id));
-    setSizeNameDrafts((previous) => { const next = { ...previous }; delete next[size.id]; return next; });
   }
 
   function openSizeManagerFromModelForm() {
@@ -668,7 +653,6 @@ export default function Home() {
     setShowSizeManager(false);
     setDraftSizeGroups([]);
     setDraftSizes([]);
-    setSizeNameDrafts({});
     setNewSizeLabel('');
     setNewGroupName('');
     setReturnToModelFormAfterSizeManager(false);
@@ -714,7 +698,6 @@ export default function Home() {
     }
     setDraftSizeGroups([]);
     setDraftSizes([]);
-    setSizeNameDrafts({});
     setNewSizeLabel('');
     setNewGroupName('');
     setReturnToModelFormAfterSizeManager(false);
@@ -1502,21 +1485,64 @@ export default function Home() {
         </section>
       </div>}
 
-      {showSizeManager && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) cancelSizeManager(); }}>
-        <section className="modal size-manager-modal" role="dialog" aria-modal="true" aria-labelledby="size-manager-title">
-          <div className="modal-heading"><div><div className="eyebrow">CONFIGURACIÓN DE TALLAS</div><h2 id="size-manager-title">Editar grupos y tallas</h2><p>Las tallas se comparten entre modelos del mismo grupo. El orden aquí se usa en los selectores y en el inventario.</p></div><button className="icon-button" onClick={cancelSizeManager} aria-label="Cerrar">×</button></div>
-          <div className="size-manager-groups"><label className="field-label">Grupo de tallas<select className="large-input" value={sizeManagerGroupId} onChange={(event) => setSizeManagerGroupId(event.target.value)}>{sizeGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label><div className="add-group-row"><input className="large-input" value={newGroupName} onChange={(event) => setNewGroupName(event.target.value)} placeholder="Nuevo grupo: p. ej. Medias" /><button type="button" className="button secondary" onClick={addSizeGroup}>Crear grupo</button></div></div>
-          <div className="add-size-row"><input className="large-input" value={newSizeLabel} onChange={(event) => setNewSizeLabel(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addSize(); } }} placeholder="Nueva talla: T4, S, M, 6 a 9 años…" /><button type="button" className="button primary" onClick={addSize}>＋ Agregar talla</button></div>
-          <div className="size-manager-list">{groupSizes(sizeManagerGroupId).map((size, index) => {
-             const draft = sizeNameDrafts[size.id];
-             const changed = draft !== undefined && draft.trim() !== size.label;
-             return <div className="size-manager-row" key={size.id}><span className="size-order">{index + 1}</span><div className="size-name-editor"><label className="size-name-label">Nombre visible<input className="large-input" aria-label={`Editar nombre de talla ${size.label}`} title="Puedes cambiar este nombre; el ID histórico de la talla se conserva." value={draft ?? size.label} onChange={(event) => setSizeNameDrafts((previous) => ({ ...previous, [size.id]: event.target.value }))} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); saveSizeName(size.id); } if (event.key === 'Escape') setSizeNameDrafts((previous) => { const next = { ...previous }; delete next[size.id]; return next; }); }} /></label>{changed && <button type="button" className="text-action size-save-name" onClick={() => saveSizeName(size.id)}>Guardar nombre</button>}</div><div className="size-manager-actions"><button type="button" className="order-mold" disabled={index === 0} onClick={() => reorderSize(size.id, -1)} aria-label="Subir talla">↑</button><button type="button" className="order-mold" disabled={index === groupSizes(sizeManagerGroupId).length - 1} onClick={() => reorderSize(size.id, 1)} aria-label="Bajar talla">↓</button><button type="button" className="remove-piece" onClick={() => deleteSize(size)}>Eliminar</button></div></div>;
-           })}{groupSizes(sizeManagerGroupId).length === 0 && <div className="empty">Este grupo todavía no tiene tallas. Agrega la primera arriba.</div>}</div>
-          <div className="symmetry-help">Para cambiar un nombre, edítalo y pulsa «Guardar nombre». El orden se guarda automáticamente. Renombrar una talla conserva su identificador y su historial; si tiene movimientos, no se puede eliminar físicamente.</div>
-          <div className="form-actions"><button type="button" className="button primary" onClick={cancelSizeManager}>Listo</button></div>
+      {showSizeManager && <div className="modal-backdrop size-manager-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) cancelSizeManager(); }}>
+        <section className="modal size-manager-modal size-manager-transactional" role="dialog" aria-modal="true" aria-labelledby="size-manager-title">
+          <div className="modal-heading">
+            <div>
+              <div className="eyebrow">CONFIGURACIÓN DE TALLAS</div>
+              <h2 id="size-manager-title">Editar grupos y tallas</h2>
+              <p>Los cambios se preparan aquí y solo se aplican cuando pulsas «Listo».</p>
+            </div>
+            <button className="icon-button" onClick={cancelSizeManager} aria-label="Cerrar y descartar cambios">×</button>
+          </div>
+
+          <div className="size-manager-groups">
+            <label className="field-label">Grupo de tallas
+              <select className="large-input" value={sizeManagerGroupId} onChange={(event) => setSizeManagerGroupId(event.target.value)}>
+                {draftSizeGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+              </select>
+            </label>
+            {selectedManagerGroup && <label className="field-label size-group-name-editor">Nombre del grupo seleccionado
+              <input className="large-input" value={selectedManagerGroup.name} onChange={(event) => setDraftSizeGroups((previous) => previous.map((group) => group.id === sizeManagerGroupId ? { ...group, name: event.target.value } : group))} placeholder="Ej. Tallas comerciales 4–XL" />
+              <small>Renombrar no cambia el ID: los patrones y modelos asociados seguirán vinculados. Se aplicará al pulsar «Listo».</small>
+            </label>}
+            <div className="add-group-row">
+              <input className="large-input" value={newGroupName} onChange={(event) => setNewGroupName(event.target.value)} placeholder="Nuevo grupo: p. ej. Medias" aria-label="Nombre del nuevo grupo" />
+              <button type="button" className="button secondary" onClick={addSizeGroup}>＋ Crear grupo</button>
+            </div>
+          </div>
+
+          <div className="add-size-row">
+            <input className="large-input" value={newSizeLabel} onChange={(event) => setNewSizeLabel(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addSize(); } }} placeholder="Nueva talla: T4, S, M, 6 a 9 años…" aria-label="Nombre de la nueva talla" />
+            <button type="button" className="button primary" onClick={addSize}>＋ Agregar talla</button>
+          </div>
+
+          <div className="size-manager-list">
+            {managerGroupSizes(sizeManagerGroupId).map((size, index) => <div className="size-manager-row" key={size.id}>
+              <span className="size-order">{index + 1}</span>
+              <label className="size-name-label">Nombre visible
+                <input className="large-input" aria-label={`Nombre de talla ${size.label}`} title="El cambio queda pendiente hasta pulsar Listo." value={size.label} onChange={(event) => setDraftSizes((previous) => previous.map((item) => item.id === size.id ? { ...item, label: event.target.value } : item))} />
+              </label>
+              <div className="size-manager-actions">
+                <button type="button" className="order-mold" disabled={index === 0} onClick={() => reorderSize(size.id, -1)} aria-label="Subir talla">↑</button>
+                <button type="button" className="order-mold" disabled={index === managerGroupSizes(sizeManagerGroupId).length - 1} onClick={() => reorderSize(size.id, 1)} aria-label="Bajar talla">↓</button>
+                <button type="button" className="remove-piece" onClick={() => deleteSize(size)}>Eliminar</button>
+              </div>
+            </div>)}
+            {managerGroupSizes(sizeManagerGroupId).length === 0 && <div className="empty">Este grupo todavía no tiene tallas. Agrega la primera arriba.</div>}
+          </div>
+
+          <div className={`size-manager-pending ${hasPendingSizeManagerChanges ? 'has-changes' : ''}`}>
+            <span aria-hidden="true">{hasPendingSizeManagerChanges ? '●' : '○'}</span>
+            <div><strong>{hasPendingSizeManagerChanges ? 'Cambios pendientes por aplicar' : 'Sin cambios pendientes'}</strong><small>{hasPendingSizeManagerChanges ? 'Nada se modifica en el inventario hasta pulsar «Listo».' : 'Puedes editar nombres, agregar, eliminar u ordenar tallas.'}</small></div>
+          </div>
+
+          <div className="form-actions size-manager-footer">
+            <button type="button" className="button secondary" onClick={cancelSizeManager}>Cancelar</button>
+            <button type="button" className="button primary" onClick={applySizeManager}>Listo · aplicar cambios</button>
+          </div>
         </section>
       </div>}
-
       {missingTarget && (() => {
         const model = models.find((item) => item.id === missingTarget.modelId);
         const size = sizes.find((item) => item.id === missingTarget.sizeId);
