@@ -713,7 +713,11 @@ export default function Home() {
         } catch { return []; }
       })();
       setModels((current) => {
-        const merged = merge(current, normalizeModelsWithSlots(parsed.models!, incomingPieces)).map((model) => ({ ...model, family: model.family || current.find((item) => item.id === model.id)?.family || '' }));
+        const merged = merge(current, normalizeModelsWithSlots(parsed.models!, incomingPieces)).map((model) => ({
+          ...model,
+          family: model.family || current.find((item) => item.id === model.id)?.family || '',
+          excludedSizeIds: (model.excludedSizeIds ?? []).filter((sizeId) => parsed.sizes!.some((size) => size.id === sizeId && size.groupId === model.sizeGroupId)),
+        }));
         return migrateBaseModelFamilies(merged, legacyProductModels);
       });
       setPieces((current) => merge(current, incomingPieces));
@@ -820,7 +824,8 @@ export default function Home() {
       const productMaterialSpecificationsValid = importedProduction.productModels.every((product) => {
         const base = importedModels.find((model) => model.id === product.baseModelId);
         if (!base) return false;
-        const validSizeIds = importedSizes.filter((size) => size.groupId === base.sizeGroupId).map((size) => size.id);
+        const excludedSizeIds = new Set(base.excludedSizeIds ?? []);
+        const validSizeIds = importedSizes.filter((size) => size.groupId === base.sizeGroupId && !excludedSizeIds.has(size.id)).map((size) => size.id);
         return product.components.every((selection) => {
           const component = importedProduction.components.find((item) => item.id === selection.componentId);
           if (!component) return false;
@@ -1153,16 +1158,35 @@ export default function Home() {
           </>}
 
           {view === 'modelos' && <section className="panel models-panel pattern-library-panel">
-            <div className="panel-heading"><div><h2>Biblioteca de patrones</h2><p>Define la estructura de cada prenda. Las telas y los colores concretos se asignan después, en cada modelo comercial.</p></div><span className="count-badge">{models.length} patrones</span></div>
+            <div className="panel-heading">
+              <div><h2>Biblioteca de patrones</h2><p>Busca y filtra tus patrones. Abre una tarjeta solo cuando necesites consultar su composición.</p></div>
+              <span className="count-badge">{filteredPatterns.length} de {models.length}</span>
+            </div>
+
+            <div className="pattern-library-toolbar">
+              <label className="search-box pattern-library-search"><span aria-hidden="true">⌕</span><input value={patternSearch} onChange={(event) => setPatternSearch(event.target.value)} placeholder="Buscar patrón o molde…" aria-label="Buscar patrón por nombre o molde" /></label>
+              <div className="pattern-library-filters">
+                <label className="pattern-filter-field"><span>Familia</span><select className="large-input" value={patternFamilyFilter} onChange={(event) => setPatternFamilyFilter(event.target.value)}><option value="Todas">Todas las familias</option>{baseModelFamilies.map((family) => <option key={family.value} value={family.value}>{family.label}</option>)}</select></label>
+                <label className="pattern-filter-field"><span>Tabla de tallas</span><select className="large-input" value={patternGroupFilter} onChange={(event) => setPatternGroupFilter(event.target.value)}><option value="Todos">Todas las tablas</option>{sizeGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
+                <label className="pattern-filter-field"><span>Ordenar</span><select className="large-input" value={patternSort} onChange={(event) => setPatternSort(event.target.value as typeof patternSort)}><option value="az">Nombre · A–Z</option><option value="za">Nombre · Z–A</option><option value="recent">Más recientes</option><option value="pieces">Más moldes</option></select></label>
+              </div>
+              <div className="pattern-library-toolbar-footer">
+                <span>{filteredPatterns.length === 1 ? '1 patrón encontrado' : `${filteredPatterns.length} patrones encontrados`}</span>
+                <button type="button" className="text-action" onClick={() => setExpandedPatternIds(allPatternIdsExpanded ? [] : filteredPatterns.map((model) => model.id))} disabled={filteredPatterns.length === 0}>{allPatternIdsExpanded ? 'Plegar todas' : 'Expandir todas'}</button>
+              </div>
+            </div>
+
             <div className="model-management-list pattern-library-list">
-              {models.map((model) => {
+              {filteredPatterns.map((model) => {
                 const modelPartList = modelPieces(model.id);
                 const group = groupById.get(model.sizeGroupId);
                 const family = baseModelFamilies.find((item) => item.value === model.family);
                 const garmentPieceCount = modelPartList.reduce((sum, piece) => sum + piece.unitsPerGarment, 0);
                 const fabricPositions = [...new Set(modelPartList.map((piece) => fabricSlotLabel(piece.fabricSlot ?? 'principal')))];
                 const colorPositions = [...new Set(modelPartList.map((piece) => colorSlotLabel(piece.colorSlot ?? 'ninguna')))];
-                return <article className="managed-model pattern-library-card" key={model.id}>
+                const expanded = expandedPatternIds.includes(model.id);
+                const activeSizes = modelSizes(model);
+                return <article className={`managed-model pattern-library-card ${expanded ? 'expanded' : 'collapsed'}`} key={model.id}>
                   <div className="pattern-library-card-header">
                     <span className="pattern-library-symbol" aria-hidden="true">◇</span>
                     <div className="pattern-library-title">
@@ -1172,45 +1196,59 @@ export default function Home() {
                         <span className="pattern-group-badge">{group?.name ?? 'Grupo no disponible'}</span>
                       </div>
                     </div>
-                    <button className="button secondary edit-model pattern-library-edit" onClick={() => openEditModel(model)}>Editar</button>
-                  </div>
-
-                  <div className="pattern-library-metrics" aria-label="Resumen del patrón">
-                    <div><strong>{modelPartList.length}</strong><span>Moldes</span></div>
-                    <div><strong>{fmt(garmentPieceCount)}</strong><span>Piezas / prenda</span></div>
-                    <div><strong>{modelSizes(model).length}</strong><span>Tallas</span></div>
-                  </div>
-
-                  <div className="pattern-library-composition">
-                    <div className="pattern-library-section-heading"><strong>Composición</strong><span>{modelPartList.length} {modelPartList.length === 1 ? 'parte' : 'partes'}</span></div>
-                    {modelPartList.length > 0 ? <div className="pattern-library-piece-list">
-                      {modelPartList.map((piece, index) => {
-                        const lateralityLabel = piece.laterality === 'simetrica' ? 'Par simétrico' : piece.laterality === 'izquierda' ? 'Lado izquierdo' : piece.laterality === 'derecha' ? 'Lado derecho' : '';
-                        return <div className="pattern-library-piece-row" key={piece.id}>
-                          <span className="pattern-library-piece-index">{String(index + 1).padStart(2, '0')}</span>
-                          <div className="pattern-library-piece-name"><strong>{piece.name}</strong>{lateralityLabel && <small>{lateralityLabel}</small>}</div>
-                          <span className="pattern-library-piece-quantity">×{piece.unitsPerGarment}</span>
-                        </div>;
-                      })}
-                    </div> : <div className="pattern-library-empty">Este patrón todavía no tiene moldes.</div>}
-                  </div>
-
-                  <div className="pattern-library-position-summary">
-                    <span className="pattern-library-position-title">Posiciones configuradas</span>
-                    <div className="pattern-library-position-tags">
-                      {fabricPositions.map((position) => <span className="pattern-library-position-tag" key={`tela-${position}`}><small>Tela</small>{position}</span>)}
-                      {colorPositions.map((position) => <span className="pattern-library-position-tag color-position" key={`color-${position}`}><small>Color</small>{position}</span>)}
+                    <div className="pattern-library-card-actions">
+                      <button type="button" className="pattern-library-toggle" onClick={() => togglePatternExpanded(model.id)} aria-expanded={expanded} aria-label={expanded ? 'Plegar detalles' : 'Expandir detalles'}><span>{expanded ? 'Menos' : 'Detalles'}</span><span aria-hidden="true">{expanded ? '⌃' : '⌄'}</span></button>
+                      <button className="button secondary edit-model pattern-library-edit" onClick={() => openEditModel(model)}>Editar</button>
                     </div>
                   </div>
 
-                  <div className="pattern-library-assignment-note">
-                    <span aria-hidden="true">i</span>
-                    <div><strong>Configuración por modelo</strong><small>La tela y el color reales se eligen al crear cada modelo comercial. Este patrón solo conserva sus posiciones.</small></div>
+                  <div className="pattern-library-quick-summary">
+                    <span><strong>{modelPartList.length}</strong> moldes</span><i />
+                    <span><strong>{fmt(garmentPieceCount)}</strong> piezas / prenda</span><i />
+                    <span><strong>{activeSizes.length}</strong> tallas activas</span>
                   </div>
+
+                  {expanded && <div className="pattern-library-details">
+                    <div className="pattern-library-metrics" aria-label="Resumen del patrón">
+                      <div><strong>{modelPartList.length}</strong><span>Moldes</span></div>
+                      <div><strong>{fmt(garmentPieceCount)}</strong><span>Piezas / prenda</span></div>
+                      <div><strong>{activeSizes.length}</strong><span>Tallas activas</span></div>
+                    </div>
+
+                    <div className="pattern-library-composition">
+                      <div className="pattern-library-section-heading"><strong>Composición</strong><span>{modelPartList.length} {modelPartList.length === 1 ? 'parte' : 'partes'}</span></div>
+                      {modelPartList.length > 0 ? <div className="pattern-library-piece-list">
+                        {modelPartList.map((piece, index) => {
+                          const lateralityLabel = piece.laterality === 'simetrica' ? 'Par simétrico' : piece.laterality === 'izquierda' ? 'Lado izquierdo' : piece.laterality === 'derecha' ? 'Lado derecho' : '';
+                          return <div className="pattern-library-piece-row" key={piece.id}>
+                            <span className="pattern-library-piece-index">{String(index + 1).padStart(2, '0')}</span>
+                            <div className="pattern-library-piece-name"><strong>{piece.name}</strong>{lateralityLabel && <small>{lateralityLabel}</small>}</div>
+                            <span className="pattern-library-piece-quantity">×{piece.unitsPerGarment}</span>
+                          </div>;
+                        })}
+                      </div> : <div className="pattern-library-empty">Este patrón todavía no tiene moldes.</div>}
+                    </div>
+
+                    <div className="pattern-library-position-summary">
+                      <span className="pattern-library-position-title">Posiciones configuradas</span>
+                      <div className="pattern-library-position-tags">
+                        {fabricPositions.map((position) => <span className="pattern-library-position-tag" key={`tela-${position}`}><small>Tela</small>{position}</span>)}
+                        {colorPositions.map((position) => <span className="pattern-library-position-tag color-position" key={`color-${position}`}><small>Color</small>{position}</span>)}
+                      </div>
+                    </div>
+
+                    {activeSizes.length < groupSizes(model.sizeGroupId).length && <div className="pattern-library-disabled-sizes"><strong>{activeSizes.length} de {groupSizes(model.sizeGroupId).length} tallas habilitadas</strong><small>Hay tallas de la tabla maestra desactivadas para este patrón.</small></div>}
+
+                    <div className="pattern-library-assignment-note">
+                      <span aria-hidden="true">i</span>
+                      <div><strong>Configuración por modelo</strong><small>La tela y el color reales se eligen al crear cada modelo comercial. Este patrón solo conserva sus posiciones.</small></div>
+                    </div>
+                  </div>}
                 </article>;
               })}
+              {filteredPatterns.length === 0 && <div className="pattern-library-no-results"><strong>No encontramos patrones</strong><span>Prueba otro nombre o cambia los filtros seleccionados.</span><button type="button" className="text-action" onClick={() => { setPatternSearch(''); setPatternFamilyFilter('Todas'); setPatternGroupFilter('Todos'); setPatternSort('az'); }}>Limpiar filtros</button></div>}
             </div>
-            <div className="schema-note"><span>ⓘ</span><p><strong>Cómo funciona la biblioteca:</strong> un patrón define las piezas, cantidades, lateralidad y posiciones de tela/color. Puedes reutilizarlo en distintos modelos comerciales y asignarles telas y colores diferentes sin modificar el patrón original.</p></div>
+            <div className="schema-note"><span>ⓘ</span><p><strong>Cómo funciona la biblioteca:</strong> un patrón define sus piezas, cantidades, lateralidad y posiciones reutilizables. Las tallas activas determinan las variantes que estarán disponibles en los modelos comerciales.</p></div>
           </section>}
           {view === 'historial' && <section className="panel history-panel">
             <div className="panel-heading"><div><h2>Movimientos de inventario</h2><p>Consulta los registros anteriores. La edición y eliminación de errores están reservadas al administrador.</p></div><div className="history-heading-actions"><span className="count-badge">{historyRows.length} movimientos</span><button className={`button ${adminMode ? 'primary' : 'secondary'}`} onClick={() => setAdminMode((value) => !value)}>{adminMode ? '✓ Modo administrador activo' : '🔒 Administrar historial'}</button></div></div>
