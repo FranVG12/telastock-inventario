@@ -82,6 +82,7 @@ const {
   isComponentColorSlot,
   isComponentColorSlotAvailableForModel,
   normalizeComponentColorSlot,
+  requiredProductColorSlots,
   resolveComponentPieceColorId,
   secondaryColorSlotIndex,
 } = colorSlotModule.exports;
@@ -100,6 +101,23 @@ test('los componentes usan posiciones de color y admiten el comodín', () => {
   assert.equal(componentColorSlotLabel('principal'), 'Color principal 1');
   assert.equal(componentColorSlotLabel('secundaria_3'), 'Color secundario 3');
   assert.equal(componentColorSlotLabel('cualquiera'), 'Cualquier color');
+});
+
+test('solicita solo posiciones de color usadas por el patrón y sus componentes', () => {
+  const slots = requiredProductColorSlots([
+    { colorSlot: 'principal', colorId: null },
+    { colorSlot: 'secundaria_2', colorId: null },
+    { colorSlot: 'secundaria_1', colorId: null },
+    { colorSlot: 'secundaria_2', colorId: null },
+    { colorSlot: 'ninguna', colorId: null },
+    { colorSlot: 'cualquiera', colorId: null },
+    { colorSlot: undefined, colorId: 'legacy-color' },
+  ]);
+  assert.deepEqual(slots, ['principal', 'secundaria_1', 'secundaria_2']);
+  assert.deepEqual(requiredProductColorSlots([
+    { colorSlot: 'cualquiera', colorId: null },
+    { colorSlot: 'ninguna', colorId: null },
+  ]), []);
 });
 
 test('resuelve el color de componentes por modelo comercial sin cruzar asignaciones', () => {
