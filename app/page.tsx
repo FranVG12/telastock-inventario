@@ -627,7 +627,10 @@ export default function Home() {
   }
 
   function familyUsage(value: string) {
-    const patternCount = models.filter((model) => model.family === value).length + (showModelForm && modelForm.family === value ? 1 : 0);
+    const savedPatternCount = models.filter((model) => model.family === value).length;
+    const editingModel = showModelForm && modelForm.editingId ? models.find((model) => model.id === modelForm.editingId) : undefined;
+    const newDraftUsesFamily = showModelForm && modelForm.family === value && (!editingModel || editingModel.family !== value) ? 1 : 0;
+    const patternCount = savedPatternCount + newDraftUsesFamily;
     let recipeCount = 0;
     try {
       const raw = localStorage.getItem(PRODUCTION_STORAGE_KEYS.familyRecipes);
