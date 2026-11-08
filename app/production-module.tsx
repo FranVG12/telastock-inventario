@@ -192,6 +192,8 @@ export type ProductPieceOverride = { textileId?: string | null; colorId?: string
 type ProductPieceOverrideField = 'textileId' | 'colorId';
 type ProductInventoryPiece = ModelPiece & {
   scope: 'base' | 'component';
+  sourcePieceId: string;
+  selectionId: string | null;
   componentId: string | null;
   componentName: string;
   textileName: string;
@@ -1781,6 +1783,8 @@ export function ProductionModule({
       return {
         ...piece,
         scope: 'base',
+        sourcePieceId: piece.id,
+        selectionId: null,
         componentId: null,
         componentName: 'Molde base',
         textileName: textile?.nombreTela ?? (fabricSlot === 'ninguna' ? 'Sin tela definida' : 'Sin asignar'),
@@ -1802,7 +1806,9 @@ export function ProductionModule({
           : colorSlot === 'ninguna' ? piece.colorId : resolveComponentPieceColorId(product.id, colorSlot, data.productColors);
         const textile = textileId ? textileContext.telas.find((item) => item.id === textileId) : undefined;
         return {
-          id: piece.id,
+          id: 'component:' + selection.id + ':' + piece.id,
+          sourcePieceId: piece.id,
+          selectionId: selection.id,
           modelId: product.baseModelId,
           name: piece.name,
           unitsPerGarment: piece.unitsPerGarment * selection.quantity,
@@ -1825,19 +1831,18 @@ export function ProductionModule({
   }
 
   function productPieceDomainLedger(productModelId: string, piece: ProductInventoryPiece, sizeId: string): DomainPieceMovement[] {
-    return piece.scope === 'base'
-      ? productBasePieceDomainLedger(productModelId, piece.id, sizeId)
-      : componentPieceDomainLedger(productModelId, piece.id, sizeId);
-  }
-
-  function productInventoryDomainLedger(productModelId: string, sizeId: string): DomainPieceMovement[] {
-    return [
-      ...data.productBasePieceMovements.filter((movement) => movement.productModelId === productModelId && movement.sizeId === sizeId),
-      ...data.componentPieceMovements.filter((movement) => movement.productModelId === productModelId && movement.sizeId === sizeId),
-    ].map((movement) => ({
-      id: movement.id, pieceId: movement.pieceId, sizeId: movement.sizeId, delta: movement.delta,
+    if (piece.scope === 'base') return productBasePieceDomainLedger(productModelId, piece.sourcePieceId, sizeId);
+    return data.componentPieceMovements.filter((movement) =>
+      movement.productModelId === productModelId && movement.componentId === piece.componentId &&
+      movement.pieceId === piece.sourcePieceId && movement.sizeId === sizeId
+    ).map((movement) => ({
+      id: movement.id, pieceId: piece.id, sizeId: movement.sizeId, delta: movement.delta,
       kind: movement.kind, side: movement.side, note: movement.note, date: movement.date,
     }));
+  }
+
+  function productInventoryDomainLedger(product: ConfiguredProductModel, pieces: ProductInventoryPiece[], sizeId: string): DomainPieceMovement[] {
+    return pieces.flatMap((piece) => productPieceDomainLedger(product.id, piece, sizeId));
   }
 
   function unassignedLegacyBaseMovements(product: ConfiguredProductModel): DomainPieceMovement[] {
@@ -1873,10 +1878,10 @@ export function ProductionModule({
     const productPieces = productInventoryPieces(product);
     const productSizes = productSizeOptions(product);
     const hasStock = productSizes.some((size) => productPieces.some((piece) =>
-      getPieceStock(productInventoryDomainLedger(product.id, size.id), piece.id, size.id) > 0
+      getPieceStock(productPieceDomainLedger(product.id, piece, size.id), piece.id, size.id) > 0
     ));
     const complete = productSizes.reduce((sum, size) =>
-      sum + getCompleteUnits(productPieces, productInventoryDomainLedger(product.id, size.id), size.id), 0);
+      sum + getCompleteUnits(productPieces, productInventoryDomainLedger(product, productPieces, size.id), size.id), 0);
     const physical = productSizes.reduce((sum, size) => sum + productPieces.reduce((pieceSum, piece) => {
       const ledger = productPieceDomainLedger(product.id, piece, size.id);
       return pieceSum + (piece.laterality === 'simetrica'
