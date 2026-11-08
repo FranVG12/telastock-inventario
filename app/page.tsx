@@ -39,24 +39,49 @@ const STORAGE = {
   models: 'telastock-manufacturing-models-v1',
   pieces: 'telastock-model-pieces-v1',
   movements: 'telastock-piece-movements-v1',
+  families: 'telastock-pattern-families-v1',
 };
-const baseModelFamilies = [
+type PatternFamily = { value: string; label: string };
+const DEFAULT_PATTERN_FAMILIES: PatternFamily[] = [
   { value: 'polo', label: 'Polo' },
   { value: 'buzo', label: 'Buzo' },
   { value: 'casaca', label: 'Casaca' },
   { value: 'otro', label: 'Otro' },
 ];
-const migrateBaseModelFamilies = (models: ManufacturingModel[], products: Array<{ baseModelId?: string; family?: string }>) => {
+const normalizePatternFamilies = (input: unknown, fallback: PatternFamily[] = DEFAULT_PATTERN_FAMILIES): PatternFamily[] => {
+  if (!Array.isArray(input)) return fallback.map((item) => ({ ...item }));
+  const result: PatternFamily[] = [];
+  const values = new Set<string>();
+  const labels = new Set<string>();
+  input.forEach((item) => {
+    if (!item || typeof item !== 'object') return;
+    const row = item as Record<string, unknown>;
+    const value = typeof row.value === 'string' ? row.value.trim() : '';
+    const label = typeof row.label === 'string' ? row.label.trim() : '';
+    const normalizedLabel = label.toLocaleLowerCase('es');
+    if (!value || !label || values.has(value) || labels.has(normalizedLabel)) return;
+    values.add(value);
+    labels.add(normalizedLabel);
+    result.push({ value, label });
+  });
+  return result;
+};
+const migrateBaseModelFamilies = (
+  models: ManufacturingModel[],
+  products: Array<{ baseModelId?: string; family?: string }>,
+  availableFamilies: PatternFamily[] = DEFAULT_PATTERN_FAMILIES,
+) => {
+  const validValues = new Set(availableFamilies.map((item) => item.value));
   const byBaseModel = new Map<string, Set<string>>();
   products.forEach((product) => {
     const family = typeof product.family === 'string' ? product.family.trim() : '';
-    if (!product.baseModelId || !baseModelFamilies.some((item) => item.value === family)) return;
+    if (!product.baseModelId || !validValues.has(family)) return;
     const values = byBaseModel.get(product.baseModelId) ?? new Set<string>();
     values.add(family);
     byBaseModel.set(product.baseModelId, values);
   });
   return models.map((model) => {
-    if (baseModelFamilies.some((item) => item.value === model.family)) return model;
+    if (typeof model.family === 'string' && validValues.has(model.family)) return model;
     const inferred = [...(byBaseModel.get(model.id) ?? [])];
     return { ...model, family: inferred.length === 1 ? inferred[0] : '' };
   });
@@ -113,6 +138,7 @@ export default function Home() {
   const [sizeGroups, setSizeGroups] = useState<SizeGroup[]>(demoSizeGroups);
   const [sizes, setSizes] = useState<Size[]>(demoSizes);
   const [models, setModels] = useState<ManufacturingModel[]>(demoModels);
+  const [families, setFamilies] = useState<PatternFamily[]>(DEFAULT_PATTERN_FAMILIES);
   const [pieces, setPieces] = useState<ModelPiece[]>(demoPieces);
   const [fabricColors, setFabricColors] = useState<ColorDefinition[]>([]);
   const [movements, setMovements] = useState<PieceMovement[]>(demoMovements);
@@ -132,6 +158,9 @@ export default function Home() {
   const [missingTarget, setMissingTarget] = useState<{ modelId: string; sizeId: string; targetUnits?: number } | null>(null);
   const [showModelForm, setShowModelForm] = useState(false);
   const [showSizeManager, setShowSizeManager] = useState(false);
+  const [showFamilyManager, setShowFamilyManager] = useState(false);
+  const [draftFamilies, setDraftFamilies] = useState<PatternFamily[]>([]);
+  const [newFamilyLabel, setNewFamilyLabel] = useState('');
   const [draftSizeGroups, setDraftSizeGroups] = useState<SizeGroup[]>([]);
   const [draftSizes, setDraftSizes] = useState<Size[]>([]);
   const [expandedPatternIds, setExpandedPatternIds] = useState<string[]>([]);
@@ -162,6 +191,8 @@ export default function Home() {
       };
       setSizeGroups(load(STORAGE.groups, demoSizeGroups));
       setSizes(load(STORAGE.sizes, demoSizes));
+      const storedFamilies = normalizePatternFamilies(load<unknown>(STORAGE.families, DEFAULT_PATTERN_FAMILIES));
+      setFamilies(storedFamilies);
       const storedModels = load<ManufacturingModel[]>(STORAGE.models, demoModels);
       const legacyProductModels = load<Array<{ baseModelId?: string; family?: string }>>(PRODUCTION_STORAGE_KEYS.productModels, []);
       // A base pattern stores reusable textile/color positions, never concrete assignments.
@@ -180,7 +211,7 @@ export default function Home() {
         colorOverride: false,
       }));
       setPieces(migratedPieces);
-      const migratedModels = normalizeExcludedModelSizes(normalizeModelsWithSlots(migrateBaseModelFamilies(storedModels, legacyProductModels), migratedPieces), load<Size[]>(STORAGE.sizes, demoSizes));
+      const migratedModels = normalizeExcludedModelSizes(normalizeModelsWithSlots(migrateBaseModelFamilies(storedModels, legacyProductModels, storedFamilies), migratedPieces), load<Size[]>(STORAGE.sizes, demoSizes));
       setModels(migratedModels);
       if (migratedModels.some((model) => !model.family)) setNotice({ message: 'Hay patrones base sin familia asignada. Edítalos en Modelos para que los modelos configurados hereden la familia correcta.', kind: 'info' });
       setMovements(load(STORAGE.movements, demoMovements));
@@ -206,6 +237,7 @@ export default function Home() {
   useEffect(() => { if (ready) localStorage.setItem(STORAGE.groups, JSON.stringify(sizeGroups)); }, [sizeGroups, ready]);
   useEffect(() => { if (ready) localStorage.setItem(STORAGE.sizes, JSON.stringify(sizes)); }, [sizes, ready]);
   useEffect(() => { if (ready) localStorage.setItem(STORAGE.models, JSON.stringify(models)); }, [models, ready]);
+  useEffect(() => { if (ready) localStorage.setItem(STORAGE.families, JSON.stringify(families)); }, [families, ready]);
   useEffect(() => { if (ready) localStorage.setItem(STORAGE.pieces, JSON.stringify(pieces)); }, [pieces, ready]);
   useEffect(() => { if (ready) localStorage.setItem(STORAGE.movements, JSON.stringify(movements)); }, [movements, ready]);
 
@@ -528,7 +560,7 @@ export default function Home() {
     const cleanPieces = modelForm.pieces.map((piece) => ({ ...piece, name: piece.name.trim(), fabricType: fabricSlotLabel(piece.fabricSlot), color: 'Sin especificar', colorId: '', colorOverride: false, units: Number(piece.unitsPerGarment) }));
     if (!cleanName) { setNoticeMessage('Escribe el nombre del modelo.', 'error'); return; }
     if (!modelForm.sizeGroupId) { setNoticeMessage('Selecciona un grupo de tallas.', 'error'); return; }
-    if (!baseModelFamilies.some((family) => family.value === modelForm.family)) { setNoticeMessage('Selecciona la familia del patrón base.', 'error'); return; }
+    if (!families.some((family) => family.value === modelForm.family)) { setNoticeMessage('Selecciona la familia del patrón base.', 'error'); return; }
     if (groupSizes(modelForm.sizeGroupId).every((size) => modelForm.excludedSizeIds.includes(size.id))) { setNoticeMessage('Activa al menos una talla para este patrón.', 'error'); return; }
     if (cleanPieces.length === 0 || cleanPieces.some((piece) => !piece.name || !Number.isInteger(piece.units) || piece.units < 1 || !isValidFabricSlot(piece.fabricSlot, modelForm.secondaryFabricSlots) || !isValidColorSlot(piece.colorSlot, modelForm.secondaryColorSlots))) {
       setNoticeMessage('Cada molde debe tener nombre y una cantidad requerida entera mayor que cero.', 'error'); return;
@@ -1219,7 +1251,7 @@ export default function Home() {
             <div className="pattern-library-toolbar">
               <label className="search-box pattern-library-search"><span aria-hidden="true">⌕</span><input value={patternSearch} onChange={(event) => setPatternSearch(event.target.value)} placeholder="Buscar patrón o molde…" aria-label="Buscar patrón por nombre o molde" /></label>
               <div className="pattern-library-filters">
-                <label className="pattern-filter-field"><span>Familia</span><select className="large-input" value={patternFamilyFilter} onChange={(event) => setPatternFamilyFilter(event.target.value)}><option value="Todas">Todas las familias</option>{baseModelFamilies.map((family) => <option key={family.value} value={family.value}>{family.label}</option>)}</select></label>
+                <label className="pattern-filter-field"><span>Familia</span><select className="large-input" value={patternFamilyFilter} onChange={(event) => setPatternFamilyFilter(event.target.value)}><option value="Todas">Todas las familias</option>{families.map((family) => <option key={family.value} value={family.value}>{family.label}</option>)}</select></label>
                 <label className="pattern-filter-field"><span>Tabla de tallas</span><select className="large-input" value={patternGroupFilter} onChange={(event) => setPatternGroupFilter(event.target.value)}><option value="Todos">Todas las tablas</option>{sizeGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
                 <label className="pattern-filter-field"><span>Ordenar</span><select className="large-input" value={patternSort} onChange={(event) => setPatternSort(event.target.value as typeof patternSort)}><option value="az">Nombre · A–Z</option><option value="za">Nombre · Z–A</option><option value="recent">Más recientes</option><option value="pieces">Más moldes</option></select></label>
               </div>
@@ -1233,7 +1265,7 @@ export default function Home() {
               {filteredPatterns.map((model) => {
                 const modelPartList = modelPieces(model.id);
                 const group = groupById.get(model.sizeGroupId);
-                const family = baseModelFamilies.find((item) => item.value === model.family);
+                const family = families.find((item) => item.value === model.family);
                 const garmentPieceCount = modelPartList.reduce((sum, piece) => sum + piece.unitsPerGarment, 0);
                 const fabricPositions = [...new Set(modelPartList.map((piece) => fabricSlotLabel(piece.fabricSlot ?? 'principal')))];
                 const colorPositions = [...new Set(modelPartList.map((piece) => colorSlotLabel(piece.colorSlot ?? 'ninguna')))];
@@ -1373,7 +1405,7 @@ export default function Home() {
                 <label className="field-label">Familia del patrón
                   <select className="large-input" required value={modelForm.family} onChange={(event) => setModelForm((prev) => ({ ...prev, family: event.target.value }))}>
                     <option value="">Seleccionar familia</option>
-                    {baseModelFamilies.map((family) => <option key={family.value} value={family.value}>{family.label}</option>)}
+                    {families.map((family) => <option key={family.value} value={family.value}>{family.label}</option>)}
                   </select>
                   <small>La familia se hereda en los modelos comerciales.</small>
                 </label>
