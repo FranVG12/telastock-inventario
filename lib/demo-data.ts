@@ -11,10 +11,10 @@ export const demoSizes: Size[] = [
 ];
 
 export const demoModels: ManufacturingModel[] = [
-  { id: 'model-polo', name: 'Polo básico sublimado', sizeGroupId: 'group-prendas' },
-  { id: 'model-casaca', name: 'Casaca deportiva', sizeGroupId: 'group-prendas' },
-  { id: 'model-buzo', name: 'Pantalón de buzo', sizeGroupId: 'group-prendas' },
-  { id: 'model-medias', name: 'Medias deportivas', sizeGroupId: 'group-medias' },
+  { id: 'model-polo', name: 'Polo básico sublimado', sizeGroupId: 'group-prendas', family: 'polo' },
+  { id: 'model-casaca', name: 'Casaca deportiva', sizeGroupId: 'group-prendas', family: 'casaca' },
+  { id: 'model-buzo', name: 'Pantalón de buzo', sizeGroupId: 'group-prendas', family: 'buzo' },
+  { id: 'model-medias', name: 'Medias deportivas', sizeGroupId: 'group-medias', family: 'otro' },
 ];
 
 export const demoPieces: ModelPiece[] = [

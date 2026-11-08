@@ -59,7 +59,9 @@ Este MVP todavía no realiza llamadas a Supabase: los datos se guardan por naveg
 
 - `size_groups`: conjunto de tallas (prendas, medias, etc.).
 - `sizes`: talla y orden dentro del grupo.
-- `manufacturing_models`: patrón base y grupo de tallas asignado.
+- `manufacturing_models`: patrón base, familia de prenda y grupo de tallas asignado. La familia se define aquí y es heredada por los modelos comerciales.
+- `product_collections`: catálogo normalizado de colecciones reutilizables.
+- `configured_product_models`: configuración comercial que referencia un patrón base y, opcionalmente para conservar registros antiguos, una colección mediante `collection_id`; no guarda una familia propia.
 - `model_pieces`: piezas/moldes requeridos por prenda, cantidad física y lateralidad.
 - `piece_stock_movements`: ledger de movimientos con cantidad delta firmada; el saldo es una suma, no un campo editable duplicado.
 - `piece_stock_balances` y `model_size_completion`: vistas para consultar saldos y capacidad fabricable por modelo/talla.
@@ -135,7 +137,7 @@ Al corregir una línea de compra, la cantidad y el precio se actualizan en el hi
 - Los desplegables de color muestran todos los nombres globales; si el nombre aún no está asociado a la tela se crea la relación al seleccionarlo. Las opciones se ordenan por frecuencia de rollos de esa tela y después alfabéticamente.
 - Al registrar varios rollos del mismo material, color y precio en una compra, escribe las cantidades adicionales separadas por comas (usa punto decimal, por ejemplo `15, 18.5, 22`). TelaStock crea un rollo y una línea de detalle por cantidad, con saldo físico individual y el mismo precio unitario histórico.
 
-La migración SQL respalda los nombres antiguos de color de rollos y moldes antes de quitar los campos de texto libre. Los moldes antiguos quedan asignados por defecto a `principal`; los nombres de color se promueven al diccionario global y se vinculan por ID. Los códigos HEX/CMYK históricos desconocidos permanecen nulos.
+La migración SQL respalda los nombres antiguos de color de rollos y moldes antes de quitar los campos de texto libre. Los moldes antiguos quedan asignados por defecto a `principal`; los nombres de color se promueven al diccionario global y se vinculan por ID. Los códigos HEX/CMYK históricos desconocidos permanecen nulos. La migración `202611060008_component_piece_model_fabric_slots.sql` retira el vínculo fijo de tela de la pieza auxiliar y valida que cada ranura secundaria exista en el patrón base de todos los modelos que reutilizan el componente; está preparada, no ejecutada.
 
 ### Exportación y respaldo
 
@@ -151,3 +153,92 @@ La equivalencia estimada KG↔M para una operación de corte todavía no está i
 
 
 La importación CSV de insumos acepta `AAAA-MM-DD` y formatos locales con barras o guiones solo cuando día y mes se distinguen sin ambigüedad; valores como `04/05/2025` se rechazan para evitar cambiar el día por el mes.
+
+## Módulos de insumos y configuración de confección
+
+La rama de trabajo feature/componentes-insumos incorpora un módulo local-first para organizar materiales y acabados:
+
+- **Insumos y avíos:** catálogo por categoría, unidad base, modalidad de stock total o por talla, características adicionales y variantes comerciales (color, ancho, material, calibre, presentación, etc.).
+- **Variantes y existencias:** el stock se registra mediante movimientos de entrada/salida. Las presentaciones comerciales guardan su equivalencia declarada; no se inventan conversiones entre unidades incompatibles.
+- **Vinculación textil:** una variante puede referenciar una tela y un color ya existentes. Si se vincula a un rollo, el stock se consulta desde el inventario de rollos; el nuevo módulo no crea un saldo paralelo ni consume rollos automáticamente.
+- **Componentes reutilizables:** biblioteca de cuellos, bolsillos, puños, pretinas, tapeteras y otros acabados, con piezas auxiliares, lateralidad y consumos de materiales. Cada pieza auxiliar referencia una posición de tela del patrón (`principal`, `secundaria_1..N`) o «ninguna»; no guarda una tela comercial fija. El color se mantiene enlazado al catálogo global por identificador. La biblioteca es solo una definición de molde: no tiene inventario ni movimientos de stock. Los datos antiguos con `textileId` fijo se normalizan a la posición `principal` (o conservan su posición válida existente) y dejan de almacenar una tela concreta en la biblioteca.
+- **Modelos configurados:** una prenda comercial referencia un patrón base, elige una colección guardada, selecciona componentes y asigna una tela del catálogo a cada posición que define el patrón. La colección y las asignaciones de tela viven en relaciones normalizadas. La familia se hereda del patrón base y se muestra como etiqueta compacta; la tabla de tallas también se presenta como etiqueta pequeña, no como un campo editable. El inventario de piezas auxiliares se crea dentro de cada modelo comercial y usa únicamente la tabla de tallas del patrón base; los saldos no se comparten entre modelos aunque reutilicen el mismo componente.
+- **Recetas estándar:** consumos compartidos por familia (polo, buzo y casaca), con consumo fijo o diferenciado por talla y porcentaje de desperdicio.
+- **Asignación de telas por modelo:** al elegir un patrón base se muestran automáticamente sus posiciones `Tela principal 1` y `Tela secundaria 1..N`. El operador asigna una tela activa del catálogo existente a cada posición. Dos modelos que usan el mismo patrón pueden elegir telas diferentes; la definición del molde no se modifica.
+- **Tela heredada en piezas auxiliares:** al crear un componente se selecciona si cada pieza usa «Tela principal 1», «Tela secundaria» y su número, o ninguna. Al asignar ese componente a un modelo comercial, la pieza resuelve la tela desde la relación `productFabrics` de ese modelo. Por ejemplo, una pieza vinculada a `principal` hereda Polialgodón si ese modelo asignó Polialgodón a `Tela principal 1`; otro modelo que reutilice el componente puede heredar una tela diferente. Si la posición secundaria indicada no existe en el patrón base, el guardado se rechaza. Cambiar la tela del modelo actualiza la referencia visible sin duplicar ni compartir inventarios.
+- **Herencia de telas en piezas auxiliares:** la pieza puede usar `principal`, `secundaria_N` o `ninguna`. Para un modelo comercial, TelaStock resuelve el nombre de tela mediante `productFabrics` usando conjuntamente el ID del modelo y la posición; dos modelos que reutilizan el componente nunca comparten accidentalmente la tela asignada al otro. Se valida la compatibilidad al crear el modelo, editar el componente e importar un respaldo.
+- **Creación contextual de catálogos:** cuando un selector está vacío, ofrece crear el registro sin abandonar el formulario. Se puede crear tela desde cada posición de tela del modelo, desde piezas auxiliares, rollos y compras; crear colores desde moldes y componentes; crear patrón base y grupo de tallas desde el constructor comercial; crear componentes desde un modelo; e insumos/variantes desde recetas, componentes y compras de avíos. Al guardar, el nuevo registro queda seleccionado en el campo de origen. Los pasos de configuración que requieren más datos regresan al formulario anterior y conservan lo que ya se había llenado. También se puede crear una tela y su color asociado desde la vinculación opcional de una variante de insumo, respetando la unidad y la modalidad de inventario compatibles.
+- **Planificación:** estima materiales requeridos, disponibilidad y faltantes por variante, talla y presentación de compra. Es una simulación: no descuenta stock ni genera órdenes de compra.
+
+### Separación de inventarios
+
+1. **Rollos de tela:** inventario físico existente, con mediciones reales en KG o metros.
+2. **Piezas cortadas:** inventario existente por molde, talla y lateralidad.
+3. **Insumos y avíos:** ledger independiente por variante y, cuando corresponda, talla.
+
+No se debe sumar KG con metros ni inferir metros a partir de KG sin un rendimiento/medición real autorizado. Los consumos sin equivalencia conocida deben configurarse con una unidad compatible.
+
+### Respaldo y migración
+
+El respaldo completo usa schemaVersion 10 e incluye insumos, variantes, movimientos, componentes, recetas, colecciones, modelos, asignaciones de telas e inventarios auxiliares por modelo. Se mantienen importables los respaldos completos de versiones anteriores. Las asignaciones de tela se validan contra el patrón base y el catálogo de telas.
+
+La migración 202611060001_supplies_components_product_models.sql define el esquema relacional futuro. **No se ejecuta automáticamente** y no conecta la aplicación con Supabase. Las tablas nuevas mantienen RLS habilitado sin políticas permisivas, igual que el resto del esquema pendiente de configuración de autenticación y acceso.
+
+### Compras de insumos y avíos
+
+El módulo de compras de avíos permite registrar fecha, proveedor (reutiliza el catálogo existente), tipo y número de comprobante, observación y varios detalles por documento. Cada detalle conserva la variante, la talla cuando el insumo controla stock por talla, la cantidad comprada, la presentación, la equivalencia declarada a la unidad base, el precio histórico y el importe.
+
+Al guardar un comprobante, TelaStock registra una entrada por cada detalle en el ledger de stock de avíos. Para una presentación configurada, por ejemplo una docena con equivalencia de 12 unidades, la compra de 3 docenas ingresa 36 unidades al inventario. Cuando no hay presentación configurada, la cantidad se compra directamente en la unidad base del insumo. No se convierten unidades incompatibles ni se estima equivalencia.
+
+Las compras de telas permanecen en el módulo existente de rollos y no se duplican en compras de avíos. Las compras vinculadas a proveedor conservan su referencia aunque el proveedor luego deje de estar disponible en el catálogo local.
+
+### Inventario auxiliar por modelo comercial
+
+La biblioteca de componentes define moldes reutilizables (cuellos, bolsillos, puños, pretinas y otros acabados), sus piezas, lateralidad, tela, color y materiales. **No tiene inventario ni registra movimientos de existencias.**
+
+El inventario de piezas auxiliares nace dentro de cada modelo comercial configurado, después de combinar un patrón base con los componentes que llevará la prenda. Cada saldo se identifica por modelo comercial + pieza auxiliar + talla + lado. Por eso, dos modelos que reutilicen el mismo cuello mantienen existencias independientes.
+
+- La tabla de tallas se hereda del patrón base seleccionado. El inventario auxiliar solo muestra tallas de ese grupo.
+- Las piezas normales se controlan por unidades físicas.
+- Las piezas simétricas permiten registrar una cantidad en paridades (un lado izquierdo y uno derecho) o registrar un lado específico.
+- Las entradas, salidas y mermas quedan asociadas al modelo comercial, no a la ficha reutilizable del componente.
+- La planificación y las reservas consultan el inventario del modelo seleccionado; el stock de las piezas del patrón base permanece independiente.
+- Los movimientos anteriores sin una relación inequívoca con un único modelo quedan sin asignar. No se duplican entre modelos compartidos; el operador debe registrar el saldo inicial correcto en cada modelo.
+
+## Órdenes de producción y reservas
+
+El módulo de órdenes conecta la planificación con el inventario sin crear saldos paralelos:
+
+1. **Borrador:** se crea desde Planificar con un modelo configurado y cantidades enteras por talla. La orden guarda una foto del modelo, consumos de materiales, requerimientos de piezas del patrón base, piezas auxiliares y costos estimados.
+2. **Reservada:** antes de reservar, TelaStock verifica los saldos actuales y descuenta de la disponibilidad las reservas de otras órdenes. Para telas asigna rollos físicos por unidad real (KG o M), priorizando los rollos más antiguos con la medición requerida disponible. No convierte KG a metros ni al revés.
+3. **En proceso:** mantiene apartadas las existencias para que las salidas manuales no las consuman.
+4. **Completada:** registra salidas con la referencia de la orden en avíos, piezas auxiliares, moldes base y rollos; en rollos conserva la medición complementaria como desconocida si no se vuelve a medir.
+5. **Cancelada:** libera las reservas sin descontar existencias.
+
+El costo mostrado es una estimación basada en el último precio de compra conocido por variante/unidad. Si faltan precios, la orden muestra el número de líneas sin costo y no presenta un total como si fuera completo. No incluye mano de obra ni servicios externos.
+
+Las reservas son locales a este navegador, igual que el resto de los datos del prototipo. No proporcionan bloqueo entre dos dispositivos o usuarios. Antes de operar simultáneamente en varios equipos, se requiere migrar el flujo de reservar/completar a transacciones del backend. Las migraciones `202611060002_production_orders_and_reservations.sql`, `202611060006_product_scoped_component_piece_inventory.sql` y `202611060007_configured_product_fabrics.sql` preparan tablas, relaciones, referencias de movimientos, reservas aisladas por modelo y asignaciones de tela por posición del patrón; no se ejecutan ni conectan Supabase automáticamente.
+
+El respaldo completo utiliza `schemaVersion: 9` e incluye órdenes, reservas, consumos reales, colecciones y movimientos auxiliares separados por modelo comercial. Los respaldos completos anteriores siguen siendo importables; los movimientos auxiliares ambiguos se conservan sin asignar en lugar de duplicar existencias.
+
+Al completar una orden, el operador confirma las cantidades reales de cada avío y de cada rollo. Puede registrar un consumo menor al reservado, lo que libera la diferencia; no puede consumir más de lo que la orden tiene reservado. Para rollos, la cantidad real se registra con precisión de 0.001 KG o M y debe coincidir, por variante textil, con el consumo real indicado. Las piezas de molde base y auxiliares se descuentan de acuerdo con la cantidad de prendas y la receta de piezas guardada en la orden.
+
+### Posiciones reutilizables de tela y color por modelo comercial
+
+- En moldes base, cada pieza guarda una referencia de color: `ninguna`, `cualquiera`, `principal` o `secundaria_N`. La tela también admite `cualquiera`, `principal` o `secundaria_N`; el patrón no guarda una tela/color comercial fijo.
+- La biblioteca de componentes utiliza las mismas posiciones. Una pieza nueva puede dejar la tela y el color abiertos con **Cualquier tela** y **Cualquier color**, o heredar posiciones numeradas del patrón.
+- Al crear un modelo comercial, se elige un color global concreto para **Color principal 1** y para cada color secundario definido por el patrón. Esas asignaciones se guardan en `productColors`, separadas del patrón y de la biblioteca.
+- Las piezas declaradas como comodín solicitan una tela y/o color concretos para ese modelo. Las selecciones quedan guardadas como excepciones del modelo o del componente seleccionado; no alteran la definición reutilizable.
+- Los componentes resuelven posiciones por `productModelId + fabricSlot/colorSlot`, de modo que dos modelos que reutilizan el mismo componente pueden utilizar telas y colores distintos.
+- Cuando un modelo combina una tela y un color que todavía no tenían relación, se crea la asociación de esa tela con el color global. Sus códigos HEX/CMYK permanecen vacíos hasta que se configuren expresamente.
+- Los respaldos completos pasan a `schemaVersion: 13`; el módulo de producción local pasa a la versión 9 y conserva la compatibilidad con datos anteriores.
+- La migración `202611060010_configured_product_colors_and_wildcards.sql` incorpora posiciones de color, comodines, excepciones por modelo y la tabla `configured_product_colors`. Está preparada en la rama; **no se ejecuta automáticamente**. La aplicación sigue usando `localStorage` hasta completar la integración con Supabase y sus políticas RLS.
+
+### Corrección: colores secundarios por patrón y modelo comercial
+
+- El patrón base permite definir directamente la cantidad de colores secundarios (0–99). Cada pieza puede usar `Color principal 1`, `Color secundario 1..N`, `Cualquier color` o `Sin color`.
+- Los selectores y validadores utilizan el mismo analizador de posiciones; las posiciones numeradas se conservan al editar y restaurar patrones.
+- Al crear un modelo comercial, se solicitan únicamente las posiciones compartidas que utilizan los moldes del patrón base y los componentes auxiliares elegidos. Las posiciones duplicadas se solicitan una sola vez y se muestran en orden (principal, secundario 1, secundario 2…).
+- Las piezas marcadas como `Cualquier color` mantienen una selección concreta independiente por pieza, dentro de ese modelo comercial; no generan una posición compartida artificial.
+- Al editar los colores de un modelo existente se utiliza el mismo conjunto de posiciones realmente usadas y se conservan las asignaciones antiguas que ya no estén en uso.
+- Se corrigió el reconocimiento de identificadores `secundaria_N` al guardar y reabrir patrones; antes, el escape incorrecto impedía reconocer esos índices en la pantalla de moldes.
