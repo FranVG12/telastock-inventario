@@ -1248,7 +1248,7 @@ export default function Home() {
               {false && view === 'inventario' && <button className="button secondary" onClick={exportCsv}>↧ <span>Exportar</span></button>}
               {false && view === 'inventario' && <button className="button secondary" onClick={() => openStockForm('salida')}>− <span>Retirar / merma</span></button>}
               {false && view === 'inventario' && <button className="button primary" onClick={() => openStockForm('entrada')}>＋ <span>Registrar stock</span></button>}
-              {view === 'modelos' && <><button className="button secondary" onClick={() => beginSizeManager(sizeGroups[0]?.id ?? '', false)}>↕ <span>Editar tallas</span></button><button className="button secondary" onClick={exportConfiguration}>↧ <span>Exportar moldes/tallas</span></button><button className="button secondary" onClick={() => importInputRef.current?.click()}>↥ <span>Importar</span></button><input ref={importInputRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importConfiguration(event.target.files?.[0])} /><button className="button primary" onClick={() => openCreateModel()}>＋ <span>Nuevo patrón</span></button></>}
+              {view === 'modelos' && <><button className="button secondary" onClick={openFamilyManager}>▦ <span>Familias</span></button><button className="button secondary" onClick={() => beginSizeManager(sizeGroups[0]?.id ?? '', false)}>↕ <span>Editar tallas</span></button><button className="button secondary" onClick={exportConfiguration}>↧ <span>Exportar moldes/tallas</span></button><button className="button secondary" onClick={() => importInputRef.current?.click()}>↥ <span>Importar</span></button><input ref={importInputRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importConfiguration(event.target.files?.[0])} /><button className="button primary" onClick={() => openCreateModel()}>＋ <span>Nuevo patrón</span></button></>}
               {view === 'historial' && <button className="button secondary" onClick={exportCsv}>↧ <span>Exportar inventario</span></button>}
             </div>
           </div>
@@ -1588,6 +1588,58 @@ export default function Home() {
               <button type="submit" className="button primary">{modelForm.editingId ? 'Guardar cambios' : 'Crear patrón'}</button>
             </div>
           </form>
+        </section>
+      </div>}
+
+      {showFamilyManager && <div className="modal-backdrop family-manager-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) cancelFamilyManager(); }}>
+        <section className="modal family-manager-modal" role="dialog" aria-modal="true" aria-labelledby="family-manager-title">
+          <div className="modal-heading">
+            <div>
+              <div className="eyebrow">BIBLIOTECA DE PATRONES</div>
+              <h2 id="family-manager-title">Administrar familias</h2>
+              <p>Crea y organiza categorías que agrupan patrones y sus modelos comerciales.</p>
+            </div>
+            <button className="icon-button" onClick={cancelFamilyManager} aria-label="Cerrar y descartar cambios">×</button>
+          </div>
+
+          <div className="family-manager-add">
+            <label className="field-label">Nueva familia
+              <input className="large-input" value={newFamilyLabel} onChange={(event) => setNewFamilyLabel(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addDraftFamily(); } }} placeholder="Ej. Medias, gorros, capas…" />
+            </label>
+            <button type="button" className="button primary" onClick={addDraftFamily}>＋ Agregar</button>
+          </div>
+
+          <div className="family-manager-list">
+            <div className="family-manager-list-heading"><strong>Familias disponibles</strong><span>{draftFamilies.length} categorías</span></div>
+            {draftFamilies.map((family) => {
+              const usage = familyUsage(family.value);
+              return <article className="family-manager-row" key={family.value}>
+                <div className="family-manager-symbol" aria-hidden="true">◇</div>
+                <div className="family-manager-row-content">
+                  <label className="field-label">Nombre visible
+                    <input className="large-input" value={family.label} onChange={(event) => setDraftFamilies((previous) => previous.map((item) => item.value === family.value ? { ...item, label: event.target.value } : item))} />
+                  </label>
+                  <small className={usage.total > 0 ? 'family-manager-usage is-used' : 'family-manager-usage'}>
+                    {usage.total > 0
+                      ? `En uso: ${usage.patternCount} patrones · ${usage.recipeCount} recetas`
+                      : 'Sin patrones ni recetas asociadas'}
+                  </small>
+                </div>
+                <button type="button" className="remove-piece family-manager-delete" disabled={usage.total > 0} onClick={() => removeDraftFamily(family.value)} title={usage.total > 0 ? 'Reasigna primero los patrones y recetas asociados' : 'Eliminar familia'}>Eliminar</button>
+              </article>;
+            })}
+            {draftFamilies.length === 0 && <div className="pattern-editor-empty"><strong>No hay familias</strong><span>Agrega al menos una familia para clasificar tus patrones.</span></div>}
+          </div>
+
+          <div className={`size-manager-pending ${hasPendingFamilyChanges ? 'has-changes' : ''}`}>
+            <span aria-hidden="true">{hasPendingFamilyChanges ? '●' : '○'}</span>
+            <div><strong>{hasPendingFamilyChanges ? 'Cambios pendientes por aplicar' : 'Sin cambios pendientes'}</strong><small>{hasPendingFamilyChanges ? 'Los nombres y nuevas familias se guardarán al confirmar.' : 'Puedes renombrar familias sin perder sus vínculos.'}</small></div>
+          </div>
+
+          <div className="form-actions family-manager-footer">
+            <button type="button" className="button secondary" onClick={cancelFamilyManager}>Cancelar</button>
+            <button type="button" className="button primary" onClick={applyFamilyManager}>Guardar familias</button>
+          </div>
         </section>
       </div>}
 
