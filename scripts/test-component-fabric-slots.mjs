@@ -45,6 +45,7 @@ test('valida posiciones principales y secundarias sin aceptar índices inválido
   assert.equal(isComponentFabricSlotAvailableForModel('secundaria_2', 1), false);
   assert.equal(secondaryFabricSlotIndex('secundaria_3'), 3);
   assert.equal(secondaryFabricSlotIndex('principal'), 0);
+  assert.equal(secondaryFabricSlotIndex(undefined), 0);
 });
 
 test('resuelve la tela principal propia de cada modelo, sin cruzar inventarios', () => {
@@ -98,6 +99,7 @@ test('los componentes usan posiciones de color y admiten el comodín', () => {
   assert.equal(isComponentColorSlotAvailableForModel('secundaria_2', 2), true);
   assert.equal(isComponentColorSlotAvailableForModel('secundaria_2', 1), false);
   assert.equal(secondaryColorSlotIndex('secundaria_4'), 4);
+  assert.equal(secondaryColorSlotIndex(undefined), 0);
   assert.equal(componentColorSlotLabel('principal'), 'Color principal 1');
   assert.equal(componentColorSlotLabel('secundaria_3'), 'Color secundario 3');
   assert.equal(componentColorSlotLabel('cualquiera'), 'Cualquier color');
