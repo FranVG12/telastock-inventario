@@ -3401,14 +3401,21 @@ export function ProductionModule({
             <label className="field-label">Componente disponible
               <select className="large-input" value={componentToAddInPieceConfiguration} onChange={(event) => setComponentToAddInPieceConfiguration(event.target.value)}>
                 <option value="">Seleccionar componente de la biblioteca</option>
-                {availableComponentsToAdd.map((component) => <option key={component.id} value={component.id}>{component.name} · {component.pieces.length} {component.pieces.length === 1 ? 'pieza' : 'piezas'}</option>)}
+                {availableComponentsToAdd.map((component) => {
+                  const requiresSizeSpecification = component.materials.some((material) => material.specificationLabel?.trim());
+                  return <option key={component.id} value={component.id} disabled={requiresSizeSpecification}>{component.name} · {component.pieces.length} {component.pieces.length === 1 ? 'pieza' : 'piezas'}{requiresSizeSpecification ? ' · requiere medidas por talla' : ''}</option>;
+                })}
               </select>
             </label>
             <button type="button" className="button primary" disabled={!componentToAddInPieceConfiguration} onClick={() => addComponentToPieceConfiguration(product.id, componentToAddInPieceConfiguration)}>＋ Añadir al modelo</button>
           </div> : <div className="piece-material-no-components">
-            {data.components.some((component) => component.active && !linkedComponentIds.has(component.id))
-              ? 'Los componentes disponibles no tienen piezas auxiliares definidas.'
-              : 'Todos los componentes con piezas de la biblioteca ya están asociados a este modelo.'}
+            {data.components.some((component) => component.active && !linkedComponentIds.has(component.id) && component.pieces.length > 0)
+              ? 'Los componentes restantes requieren configurar medidas por talla antes de agregarlos desde esta vista.'
+              : data.components.some((component) => component.active && !linkedComponentIds.has(component.id))
+                ? 'Los componentes de la biblioteca todavía no tienen piezas auxiliares definidas.'
+                : data.components.some((component) => component.active && linkedComponentIds.has(component.id))
+                  ? 'Todos los componentes con piezas de la biblioteca ya están asociados a este modelo.'
+                  : 'Todavía no hay componentes activos con piezas en la biblioteca.'}
             <button type="button" className="text-action" onClick={() => onNavigate('componentes')}>Abrir biblioteca de componentes</button>
           </div>}
         </section>
