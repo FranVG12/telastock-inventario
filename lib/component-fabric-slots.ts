@@ -15,8 +15,8 @@ export function normalizeComponentFabricSlot(value: unknown, legacyTextileId?: u
   return typeof legacyTextileId === 'string' && legacyTextileId.trim() ? 'principal' : 'ninguna';
 }
 
-export function secondaryFabricSlotIndex(slot: string): number {
-  const match = SECONDARY_FABRIC_SLOT_PATTERN.exec(slot);
+export function secondaryFabricSlotIndex(slot?: string): number {
+  const match = SECONDARY_FABRIC_SLOT_PATTERN.exec(slot ?? '');
   return match ? Number(match[1]) : 0;
 }
 
