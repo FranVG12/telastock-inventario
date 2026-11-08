@@ -751,3 +751,81 @@
  .piece-material-summary span{font-size:9px}
  .piece-material-view-footer .button{width:100%}
 }
+
+
+/* Commercial-model piece inventory: one ledger for base molds and selected auxiliary parts. */
+.product-model-inventory{display:grid;gap:14px}
+.product-model-inventory>.panel-heading{align-items:flex-start}
+.product-model-inventory>.panel-heading p{max-width:720px;line-height:1.55}
+.inventory-model-actions{margin:1px 0 3px}
+.product-inventory-stats{margin:0 0 3px}
+.product-model-inventory-list{gap:12px}
+.product-model-inventory-card .model-card-trigger{align-items:flex-start}
+.product-model-inventory-card .model-main{min-width:0}
+.product-model-inventory-card .model-main>small{white-space:normal;overflow-wrap:anywhere}
+.inventory-product-material-summary{display:block;margin-top:5px;color:#7e8ba0;font-size:10px;line-height:1.45}
+.product-model-inventory-details{display:grid;gap:12px}
+.product-model-inventory-details>.inventory-model-actions{margin:0 0 2px}
+.inventory-legacy-notice{display:grid;gap:9px;line-height:1.5}
+.inventory-legacy-notice .button{justify-self:start;min-height:36px}
+.product-inventory-size-card{display:grid;gap:10px}
+.completion-status-row{display:flex;justify-content:flex-start}
+.inventory-product-piece-group{display:grid;gap:7px;padding-top:10px;border-top:1px solid #e9edf4}
+.inventory-product-piece-group h4{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0;color:#52637d;font-size:11px}
+.inventory-product-piece-group h4 span{color:#929cad;font-size:10px;font-weight:600}
+.inventory-product-piece-row{display:grid;grid-template-columns:minmax(120px,1fr) minmax(180px,1.4fr) minmax(125px,.8fr);align-items:center;gap:10px;padding:11px;border:1px solid #e8edf4;border-radius:10px;background:#fff}
+.inventory-product-piece-main{display:grid;gap:4px;min-width:0}
+.inventory-product-piece-main strong{color:#3b4c67;font-size:11px;overflow-wrap:anywhere}
+.inventory-product-piece-main small{color:#8a95a6;font-size:9px}
+.inventory-product-piece-materials{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.inventory-product-piece-materials>span{display:grid;gap:3px;min-width:0}
+.inventory-product-piece-materials small{color:#909aab;font-size:9px}
+.inventory-product-piece-materials strong{color:#62738e;font-size:10px;line-height:1.35;overflow-wrap:anywhere}
+.inventory-product-piece-stock{display:grid;gap:3px;justify-items:end;text-align:right}
+.inventory-product-piece-stock>strong{color:#334b70;font-size:13px;font-variant-numeric:tabular-nums}
+.inventory-product-piece-stock>small{color:#8a95a6;font-size:9px;line-height:1.35}
+.inventory-product-piece-stock .inventory-shortage{color:#a46d37}
+.inventory-product-piece-stock .inventory-stock-ok{color:#4b896b}
+.inventory-entry-group{display:grid;gap:8px;margin-top:10px}
+.inventory-entry-group>strong{color:#53647d;font-size:11px}
+.inventory-entry-piece{padding:10px 0;border-bottom:1px solid #eef1f5}
+.inventory-entry-piece .piece-entry-name{min-width:0}
+.inventory-entry-piece .piece-entry-name small{display:block;line-height:1.45;overflow-wrap:anywhere}
+.inventory-entry-piece .symmetric-quantity{min-width:120px}
+.product-inventory-stock-modal{max-height:min(92vh,900px);overflow-y:auto}
+.product-inventory-stock-modal .production-form{gap:13px}
+.product-inventory-stock-modal .modal-sticky-actions{position:sticky;bottom:-1px;z-index:2}
+@media(max-width:720px){
+ .product-model-inventory{gap:12px}
+ .product-model-inventory>.panel-heading{gap:8px}
+ .product-model-inventory>.panel-heading h2{font-size:18px}
+ .product-model-inventory>.panel-heading p{font-size:11px}
+ .inventory-model-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}
+ .inventory-model-actions .button{width:100%;min-height:42px;padding:8px;font-size:11px}
+ .product-inventory-stats{grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+ .product-inventory-stats .stat-card{padding:9px 8px}
+ .product-inventory-stats .stat-top{gap:4px;align-items:flex-start}
+ .product-inventory-stats .stat-top>span:first-child{font-size:9px;line-height:1.3}
+ .product-inventory-stats .stat-icon{width:24px;height:24px;font-size:11px}
+ .product-inventory-stats .stat-card>strong{font-size:20px}
+ .product-inventory-stats .stat-card>small{font-size:8px;line-height:1.35}
+ .product-model-inventory-card .model-card-trigger{gap:8px;padding:12px}
+ .product-model-inventory-card .model-main strong{font-size:12px}
+ .product-model-inventory-card .model-main>small{font-size:9px;line-height:1.4}
+ .inventory-product-material-summary{font-size:9px}
+ .inventory-legacy-notice{font-size:10px}
+ .inventory-legacy-notice .button{width:100%}
+ .inventory-product-piece-row{grid-template-columns:minmax(0,1fr) auto;gap:7px;padding:9px}
+ .inventory-product-piece-main{grid-column:1/-1}
+ .inventory-product-piece-materials{grid-column:1;grid-row:2;grid-template-columns:minmax(0,1fr);gap:5px}
+ .inventory-product-piece-stock{grid-column:2;grid-row:2;align-self:center}
+ .inventory-product-piece-stock>strong{font-size:12px}
+ .inventory-product-piece-group{gap:6px}
+ .product-inventory-size-card{padding:10px}
+ .product-inventory-stock-modal{padding:14px}
+ .product-inventory-stock-modal .inventory-entry-piece{display:grid;gap:8px}
+ .product-inventory-stock-modal .inventory-entry-piece .symmetric-quantity,
+ .product-inventory-stock-modal .inventory-entry-piece .symmetric-side-inputs{width:100%}
+ .product-inventory-stock-modal .modal-sticky-actions{display:grid;grid-template-columns:1fr 1fr}
+ .product-inventory-stock-modal .modal-sticky-actions>span{grid-column:1/-1}
+}
