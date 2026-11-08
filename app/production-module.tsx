@@ -7,7 +7,7 @@ import { componentFabricSlotLabel, isComponentFabricSlot, isComponentFabricSlotA
 import { componentColorSlotLabel, isComponentColorSlot, isComponentColorSlotAvailableForModel, normalizeComponentColorSlot, requiredProductColorSlots, resolveComponentPieceColorId, secondaryColorSlotIndex, type ComponentColorSlot } from '@/lib/component-color-slots';
 import { mapSizeSpecificationRules, validateSizeSpecification, type SizeSpecification, type SizeSpecificationRule } from '@/lib/material-size-specifications';
 
-export type ProductionView = 'inventario-piezas' | 'insumos' | 'compras-avios' | 'componentes' | 'modelos-producto' | 'recetas' | 'planificacion' | 'ordenes';
+export type ProductionView = 'inventario-piezas' | 'inventario-prendas' | 'insumos' | 'compras-avios' | 'componentes' | 'modelos-producto' | 'recetas' | 'planificacion' | 'ordenes';
 export type StockUnit = 'und' | 'm' | 'cm' | 'g' | 'kg' | 'l' | 'ml';
 export type SupplyCategory =
   | 'Hilos' | 'Botones y broches' | 'Cintas elásticas' | 'Cintas para vena'
