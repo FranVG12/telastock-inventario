@@ -1715,9 +1715,10 @@ export function ProductionModule({
   function getProductFabricableCapacity(product: ConfiguredProductModel, sizeId: string) {
     const baseModel = baseModels.find((item) => item.id === product.baseModelId);
     const baseModelPieces = basePieces.filter((piece) => piece.modelId === product.baseModelId && !piece.archived);
-    const reservedBase = ordersHoldingStock.flatMap((order) => order.basePieces).filter((line) => line.sizeId === sizeId);
+    const productReservations = ordersHoldingStock.filter((order) => order.productModelId === product.id);
+    const reservedBase = productReservations.flatMap((order) => order.basePieces).filter((line) => line.sizeId === sizeId);
     const effectiveBaseLedger: DomainPieceMovement[] = [
-      ...baseMovements,
+      ...data.productBasePieceMovements.filter((movement) => movement.productModelId === product.id && movement.sizeId === sizeId),
       ...reservedBase.map((line) => ({ id: line.id, pieceId: line.pieceId, sizeId: line.sizeId, delta: -line.quantity, kind: 'salida' as const, side: line.side ?? undefined, note: 'Reserva de orden de producción', date: '' })),
     ];
     const baseCapacity = baseModel ? getCompleteUnits(baseModelPieces, effectiveBaseLedger, sizeId) : 0;
@@ -2163,14 +2164,15 @@ export function ProductionModule({
     }
   }
 
-  function currentBasePieceBalance(pieceId: string, sizeId: string, side: 'izquierda' | 'derecha' | null): number {
+  function currentBasePieceBalance(productModelId: string, pieceId: string, sizeId: string, side: 'izquierda' | 'derecha' | null): number {
     const piece = basePieces.find((item) => item.id === pieceId);
     if (!piece) return 0;
+    const ledger = productBasePieceDomainLedger(productModelId, piece.id, sizeId);
     if (piece.laterality === 'simetrica') {
-      const stock = getSymmetricStock(baseMovements, piece.id, sizeId);
+      const stock = getSymmetricStock(ledger, piece.id, sizeId);
       return side === 'derecha' ? stock.right : stock.left;
     }
-    return getPieceStock(baseMovements, piece.id, sizeId);
+    return getPieceStock(ledger, piece.id, sizeId);
   }
 
   function currentComponentPieceBalance(productModelId: string, pieceId: string, sizeId: string, side: 'izquierda' | 'derecha' | null): number {
@@ -2244,8 +2246,8 @@ export function ProductionModule({
     }
     for (const line of order.basePieces) {
       const piece = basePieces.find((item) => item.id === line.pieceId);
-      const balance = currentBasePieceBalance(line.pieceId, line.sizeId, line.side);
-      const reserved = reservedPieceQuantity(otherOrders.flatMap((activeOrder) => activeOrder.basePieces), line.pieceId, line.sizeId, line.side);
+      const balance = currentBasePieceBalance(order.productModelId, line.pieceId, line.sizeId, line.side);
+      const reserved = reservedPieceQuantity(otherOrders.filter((activeOrder) => activeOrder.productModelId === order.productModelId).flatMap((activeOrder) => activeOrder.basePieces), line.pieceId, line.sizeId, line.side);
       if (balance - reserved + 0.00001 < line.quantity) issues.push((piece?.name ?? 'Molde base') + ' · ' + (sizes.find((size) => size.id === line.sizeId)?.label ?? 'Talla') + ': faltan ' + format(line.quantity - Math.max(0, balance - reserved)) + ' piezas' + (line.side ? ' ' + line.side : ''));
     }
     for (const line of order.componentPieces) {
@@ -2339,8 +2341,8 @@ export function ProductionModule({
     }
     for (const line of order.basePieces) {
       const piece = basePieces.find((item) => item.id === line.pieceId);
-      const reserved = reservedPieceQuantity(otherOrders.flatMap((activeOrder) => activeOrder.basePieces), line.pieceId, line.sizeId, line.side);
-      if (currentBasePieceBalance(line.pieceId, line.sizeId, line.side) - reserved + 0.00001 < line.quantity) issues.push((piece?.name ?? 'Molde base') + ': el stock reservado ya no está disponible.');
+      const reserved = reservedPieceQuantity(otherOrders.filter((activeOrder) => activeOrder.productModelId === order.productModelId).flatMap((activeOrder) => activeOrder.basePieces), line.pieceId, line.sizeId, line.side);
+      if (currentBasePieceBalance(order.productModelId, line.pieceId, line.sizeId, line.side) - reserved + 0.00001 < line.quantity) issues.push((piece?.name ?? 'Molde base') + ': el stock reservado ya no está disponible.');
     }
     for (const line of order.componentPieces) {
       const piece = data.components.find((component) => component.id === line.componentId)?.pieces.find((item) => item.id === line.pieceId);
@@ -2425,8 +2427,8 @@ export function ProductionModule({
       side: line.side ?? undefined, delta: -line.quantity, kind: 'salida',
       note: 'Consumo de orden ' + order.number, date: timestamp, sourceProductionOrderId: order.id,
     }));
-    const baseEntries: DomainPieceMovement[] = order.basePieces.map((line) => ({
-      id: id(), pieceId: line.pieceId, sizeId: line.sizeId, side: line.side ?? undefined,
+    const baseEntries: ProductBasePieceMovement[] = order.basePieces.map((line) => ({
+      id: id(), productModelId: order.productModelId, pieceId: line.pieceId, sizeId: line.sizeId, side: line.side ?? undefined,
       delta: -line.quantity, kind: 'salida', note: 'Consumo de orden ' + order.number,
       date: timestamp, sourceProductionOrderId: order.id,
     }));
@@ -2434,6 +2436,7 @@ export function ProductionModule({
     const nextData: ProductionBackupData = {
       ...data,
       supplyMovements: [...data.supplyMovements, ...supplyMovements],
+      productBasePieceMovements: [...data.productBasePieceMovements, ...baseEntries],
       componentPieceMovements: [...data.componentPieceMovements, ...componentMovements],
       productionOrders: data.productionOrders.map((item) => item.id === order.id ? {
         ...item, status: 'completada', completedAt: timestamp, updatedAt: timestamp,
@@ -2457,8 +2460,6 @@ export function ProductionModule({
       localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '10');
       localStorage.setItem(FABRIC_STORAGE_KEYS.rollos, JSON.stringify(updatedRolls));
       localStorage.setItem(FABRIC_STORAGE_KEYS.rolloMovimientos, JSON.stringify(nextRollMovements));
-      const nextBase = [...baseMovements, ...baseEntries];
-      if (!onAddBaseMovements(nextBase)) throw new Error('No se pudo guardar el consumo de piezas del patrón base.');
       setData(nextData);
       setCompletionDraft(null);
       window.dispatchEvent(new Event('telastock-fabric-data-restored'));
