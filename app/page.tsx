@@ -149,33 +149,21 @@ export default function Home() {
       setSizes(load(STORAGE.sizes, demoSizes));
       const storedModels = load<ManufacturingModel[]>(STORAGE.models, demoModels);
       const legacyProductModels = load<Array<{ baseModelId?: string; family?: string }>>(PRODUCTION_STORAGE_KEYS.productModels, []);
-      // The global color-name dictionary is shared with the textile module. Legacy mold color names
-      // are promoted into it once; their fabric-specific HEX/CMYK variant is resolved later by tela.
+      // A base pattern stores reusable textile/color positions, never concrete assignments.
+      // Old demo/legacy color names are intentionally not promoted into the shared color catalog.
       const storedColors = load<ColorDefinition[]>(FABRIC_STORAGE_KEYS.colores, []);
-      const colorMap = new Map(storedColors.map((color) => [color.nombre.toLocaleLowerCase('es'), color]));
       const storedPieces = load<ModelPiece[]>(STORAGE.pieces, demoPieces);
-      storedPieces.forEach((piece) => {
-        const legacyName = (piece.color ?? '').trim();
-        if (legacyName && legacyName !== 'Sin especificar' && !colorMap.has(legacyName.toLocaleLowerCase('es'))) {
-          const color = { id: newId(), nombre: legacyName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-          colorMap.set(legacyName.toLocaleLowerCase('es'), color);
-        }
-      });
-      const colors = [...colorMap.values()];
-      localStorage.setItem(FABRIC_STORAGE_KEYS.colores, JSON.stringify(colors));
-      setFabricColors(colors);
-      const migratedPieces = storedPieces.map((piece) => {
-        const legacyColorId = piece.colorId ?? colors.find((color) => color.nombre.toLocaleLowerCase('es') === (piece.color ?? '').toLocaleLowerCase('es'))?.id ?? null;
-        return {
-          ...piece,
-          fabricType: fabricSlotLabel(piece.fabricSlot ?? 'principal'),
-          fabricSlot: piece.fabricSlot ?? 'principal',
-          color: piece.color ?? 'Sin especificar',
-          colorSlot: piece.colorSlot ?? (legacyColorId ? 'principal' : 'ninguna'),
-          colorId: legacyColorId,
-          colorOverride: piece.colorOverride ?? true,
-        };
-      });
+      setFabricColors(storedColors);
+      const migratedPieces = storedPieces.map((piece) => ({
+        ...piece,
+        fabricType: fabricSlotLabel(piece.fabricSlot ?? 'principal'),
+        fabricSlot: piece.fabricSlot ?? 'principal',
+        color: 'Sin especificar',
+        // Preserve the old position (e.g. principal 1) while removing the actual legacy color.
+        colorSlot: piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna'),
+        colorId: null,
+        colorOverride: false,
+      }));
       setPieces(migratedPieces);
       const migratedModels = normalizeModelsWithSlots(migrateBaseModelFamilies(storedModels, legacyProductModels), migratedPieces);
       setModels(migratedModels);
@@ -489,7 +477,7 @@ export default function Home() {
       family: model.family ?? '',
       secondaryFabricSlots: secondarySlotCountForModel(model, pieces),
       secondaryColorSlots: secondaryColorSlotCountForModel(model, pieces),
-      pieces: modelPieces(model.id).map((piece) => ({ id: piece.id, name: piece.name, unitsPerGarment: String(piece.unitsPerGarment), laterality: piece.laterality, fabricSlot: piece.fabricSlot ?? 'principal', colorSlot: piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna'), colorId: piece.colorId ?? colorIdForName(piece.color ?? ''), colorOverride: piece.colorOverride ?? true, fabricType: piece.fabricType ?? '', color: piece.color ?? '' })),
+      pieces: modelPieces(model.id).map((piece) => ({ id: piece.id, name: piece.name, unitsPerGarment: String(piece.unitsPerGarment), laterality: piece.laterality, fabricSlot: piece.fabricSlot ?? 'principal', colorSlot: piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna'), colorId: '', colorOverride: false, fabricType: fabricSlotLabel(piece.fabricSlot ?? 'principal'), color: 'Sin especificar' })),
     });
     setShowModelForm(true);
   }
@@ -499,15 +487,12 @@ export default function Home() {
   function saveModel(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const cleanName = modelForm.name.trim();
-    const cleanPieces = modelForm.pieces.map((piece) => ({ ...piece, name: piece.name.trim(), fabricType: fabricSlotLabel(piece.fabricSlot), color: fabricColorById.get(piece.colorId)?.nombre ?? 'Sin especificar', units: Number(piece.unitsPerGarment) }));
+    const cleanPieces = modelForm.pieces.map((piece) => ({ ...piece, name: piece.name.trim(), fabricType: fabricSlotLabel(piece.fabricSlot), color: 'Sin especificar', colorId: '', colorOverride: false, units: Number(piece.unitsPerGarment) }));
     if (!cleanName) { setNoticeMessage('Escribe el nombre del modelo.', 'error'); return; }
     if (!modelForm.sizeGroupId) { setNoticeMessage('Selecciona un grupo de tallas.', 'error'); return; }
     if (!baseModelFamilies.some((family) => family.value === modelForm.family)) { setNoticeMessage('Selecciona la familia del patrón base.', 'error'); return; }
     if (cleanPieces.length === 0 || cleanPieces.some((piece) => !piece.name || !Number.isInteger(piece.units) || piece.units < 1 || !isValidFabricSlot(piece.fabricSlot, modelForm.secondaryFabricSlots) || !isValidColorSlot(piece.colorSlot, modelForm.secondaryColorSlots))) {
       setNoticeMessage('Cada molde debe tener nombre y una cantidad requerida entera mayor que cero.', 'error'); return;
-    }
-    if (cleanPieces.some((piece) => piece.colorId && !fabricColorById.has(piece.colorId))) {
-      setNoticeMessage('Uno de los colores seleccionados ya no existe en el catálogo central. Actualiza la selección.', 'error'); return;
     }
     if (cleanPieces.some((piece) => piece.laterality === 'simetrica' && piece.units % 2 !== 0)) {
       setNoticeMessage('Las piezas simétricas requieren una cantidad par por prenda (izquierda + derecha). Ejemplo: 2 = 1 por lado.', 'error'); return;
@@ -540,8 +525,8 @@ export default function Home() {
     const savedModel: ManufacturingModel = { id: modelId, name: cleanName, sizeGroupId: modelForm.sizeGroupId, family: modelForm.family, secondaryFabricSlots: modelForm.secondaryFabricSlots, secondaryColorSlots: modelForm.secondaryColorSlots, updatedAt: new Date().toISOString() };
     const savedPieces: ModelPiece[] = cleanPieces.map((formPiece, index) => ({
       id: formPiece.id || newId(), modelId, name: formPiece.name, unitsPerGarment: formPiece.units,
-      laterality: formPiece.laterality, fabricSlot: formPiece.fabricSlot, colorSlot: formPiece.colorSlot, colorId: formPiece.colorId || null,
-      fabricType: fabricSlotLabel(formPiece.fabricSlot), color: fabricColorById.get(formPiece.colorId)?.nombre ?? 'Sin especificar', colorOverride: formPiece.colorOverride, sortOrder: index + 1, archived: false,
+      laterality: formPiece.laterality, fabricSlot: formPiece.fabricSlot, colorSlot: formPiece.colorSlot, colorId: null,
+      fabricType: fabricSlotLabel(formPiece.fabricSlot), color: 'Sin especificar', colorOverride: false, sortOrder: index + 1, archived: false,
     }));
     setModels((previous) => modelForm.editingId ? previous.map((model) => model.id === modelId ? savedModel : model) : [...previous, savedModel]);
     setPieces((previous) => [...previous.filter((piece) => piece.modelId !== modelId || piece.archived || archivedRemovedIds.has(piece.id)).map((piece) => archivedRemovedIds.has(piece.id) ? { ...piece, archived: true } : piece), ...savedPieces]);
@@ -786,7 +771,7 @@ export default function Home() {
       const importedSizes = getRows('sizes') as unknown as Size[];
       const importedModelsRaw = getRows('models') as unknown as ManufacturingModel[];
       const importedPieces = getRows('pieces') as unknown as ModelPiece[];
-      const normalizedImportedPieces = importedPieces.map((piece) => ({ ...piece, colorSlot: piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna') }));
+      const normalizedImportedPieces = importedPieces.map((piece) => ({ ...piece, colorSlot: piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna'), colorId: null, color: 'Sin especificar', colorOverride: false }));
       const importedMovements = getRows('movements') as unknown as PieceMovement[];
       let importedFabric = Number(raw.schemaVersion) >= 2 ? validateFabricBackupData(data.fabricInventory) : emptyFabricBackupData();
       const importedProduction = Number(raw.schemaVersion) >= 4 ? validateProductionBackupData(data.production) : emptyProductionBackupData();
@@ -853,16 +838,6 @@ export default function Home() {
         }));
       });
       if (!productionSizeLinksValid || !componentPieceCatalogLinksValid || !componentPieceSlotsValidForProducts || !productMaterialSpecificationsValid || !productFabricLinksValid || !productColorLinksValid) throw new Error('Hay órdenes, movimientos, piezas auxiliares o telas de modelos vinculados a registros que no existen en este respaldo.');
-      const importedColorMap = new Map(importedFabric.colores.map((color) => [color.nombre.toLocaleLowerCase('es'), color]));
-      importedPieces.forEach((piece) => {
-        const legacyName = (piece.color ?? '').trim();
-        if (legacyName && legacyName !== 'Sin especificar' && !importedColorMap.has(legacyName.toLocaleLowerCase('es'))) {
-          const color = { id: newId(), nombre: legacyName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-          importedColorMap.set(legacyName.toLocaleLowerCase('es'), color);
-        }
-      });
-      importedFabric = { ...importedFabric, colores: [...importedColorMap.values()] };
-
       if (!importedGroups.every((item) => hasText(item.name))) throw new Error('Hay grupos de tallas sin nombre.');
       if (!importedSizes.every((item) => hasText(item.label) && groupIds.has(item.groupId) && Number.isInteger(item.sortOrder))) throw new Error('Hay tallas incompletas o vinculadas a un grupo inexistente.');
       if (!importedModels.every((item) => hasText(item.name) && groupIds.has(item.sizeGroupId))) throw new Error('Hay modelos incompletos o vinculados a un grupo inexistente.');
@@ -900,11 +875,11 @@ export default function Home() {
       setPieces(normalizedImportedPieces.map((piece) => ({
         ...piece,
         fabricSlot: piece.fabricSlot ?? 'principal',
-        colorSlot: piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna'),
+        colorSlot: piece.colorSlot ?? 'ninguna',
         fabricType: fabricSlotLabel(piece.fabricSlot ?? 'principal'),
-        color: piece.colorId ? importedFabric.colores.find((color) => color.id === piece.colorId)?.nombre ?? 'Sin especificar' : piece.color ?? 'Sin especificar',
-        colorId: piece.colorId ?? importedFabric.colores.find((color) => color.nombre.toLocaleLowerCase('es') === (piece.color ?? '').toLocaleLowerCase('es'))?.id ?? null,
-        colorOverride: piece.colorOverride ?? true,
+        color: 'Sin especificar',
+        colorId: null,
+        colorOverride: false,
       })));
       setFabricColors(importedFabric.colores);
       setMovements(importedMovements);
@@ -1141,20 +1116,56 @@ export default function Home() {
             </section>
           </>}
 
-          {view === 'modelos' && <section className="panel models-panel">
-            <div className="panel-heading"><div><h2>Biblioteca de patrones</h2><p>Guarda estructuras reutilizables para crear distintos modelos comerciales con sus propias telas y colores.</p></div><span className="count-badge">{models.length} patrones</span></div>
-            <div className="model-management-list">{models.map((model) => {
-              const modelPartList = modelPieces(model.id);
-              const group = groupById.get(model.sizeGroupId);
-              return <article className="managed-model" key={model.id}>
-                <div className="managed-model-top"><span className="model-symbol" aria-hidden="true">◇</span><div className="managed-model-title"><strong>{model.name}</strong><span>{group?.name ?? 'Grupo no disponible'}</span></div><button className="button secondary edit-model" onClick={() => openEditModel(model)}>Editar</button></div>
-                <div className="piece-chip-list">{modelPartList.map((piece) => <span className="piece-chip" key={piece.id}><span>{piece.name}</span><strong>×{piece.unitsPerGarment}</strong><small>{fabricSlotLabel(piece.fabricSlot ?? 'principal')} · {fabricColorById.get(piece.colorId ?? '')?.nombre ?? piece.color}</small>{piece.laterality === 'simetrica' && <small>espejo</small>}</span>)}</div>
-                <div className="managed-model-bottom"><span>{modelPartList.length} moldes · {modelSizes(model).length} tallas disponibles</span><button className="text-action" onClick={() => openStockForm('entrada', model.id)}>Registrar stock →</button></div>
-              </article>;
-            })}</div>
-            <div className="schema-note"><span>ⓘ</span><p><strong>Nota de diseño:</strong> el grupo de tallas se define una sola vez y cada modelo lo referencia. No se duplican las tallas en cada modelo. En un molde simétrico, ×2 significa una pieza izquierda y una derecha por prenda; el stock se puede ingresar por paridad o por lado. Si los moldes difieren físicamente, usa moldes distintos para izquierda y derecha.</p></div>
-          </section>}
+          {view === 'modelos' && <section className="panel models-panel pattern-library-panel">
+            <div className="panel-heading"><div><h2>Biblioteca de patrones</h2><p>Define la estructura de cada prenda. Las telas y los colores concretos se asignan después, en cada modelo comercial.</p></div><span className="count-badge">{models.length} patrones</span></div>
+            <div className="model-management-list pattern-library-list">
+              {models.map((model) => {
+                const modelPartList = modelPieces(model.id);
+                const group = groupById.get(model.sizeGroupId);
+                const family = baseModelFamilies.find((item) => item.value === model.family);
+                const garmentPieceCount = modelPartList.reduce((sum, piece) => sum + piece.unitsPerGarment, 0);
+                return <article className="managed-model pattern-library-card" key={model.id}>
+                  <div className="pattern-library-card-header">
+                    <span className="pattern-library-symbol" aria-hidden="true">◇</span>
+                    <div className="pattern-library-title">
+                      <strong>{model.name}</strong>
+                      <div className="pattern-library-badges">
+                        <span className="pattern-family-badge">{family?.label ?? 'Familia pendiente'}</span>
+                        <span className="pattern-group-badge">{group?.name ?? 'Grupo no disponible'}</span>
+                      </div>
+                    </div>
+                    <button className="button secondary edit-model pattern-library-edit" onClick={() => openEditModel(model)}>Editar</button>
+                  </div>
 
+                  <div className="pattern-library-metrics" aria-label="Resumen del patrón">
+                    <div><strong>{modelPartList.length}</strong><span>Moldes</span></div>
+                    <div><strong>{fmt(garmentPieceCount)}</strong><span>Piezas / prenda</span></div>
+                    <div><strong>{modelSizes(model).length}</strong><span>Tallas</span></div>
+                  </div>
+
+                  <div className="pattern-library-composition">
+                    <div className="pattern-library-section-heading"><strong>Composición</strong><span>{modelPartList.length} {modelPartList.length === 1 ? 'parte' : 'partes'}</span></div>
+                    {modelPartList.length > 0 ? <div className="pattern-library-piece-list">
+                      {modelPartList.map((piece, index) => {
+                        const lateralityLabel = piece.laterality === 'simetrica' ? 'Par simétrico' : piece.laterality === 'izquierda' ? 'Lado izquierdo' : piece.laterality === 'derecha' ? 'Lado derecho' : '';
+                        return <div className="pattern-library-piece-row" key={piece.id}>
+                          <span className="pattern-library-piece-index">{String(index + 1).padStart(2, '0')}</span>
+                          <div className="pattern-library-piece-name"><strong>{piece.name}</strong>{lateralityLabel && <small>{lateralityLabel}</small>}</div>
+                          <span className="pattern-library-piece-quantity">×{piece.unitsPerGarment}</span>
+                        </div>;
+                      })}
+                    </div> : <div className="pattern-library-empty">Este patrón todavía no tiene moldes.</div>}
+                  </div>
+
+                  <div className="pattern-library-assignment-note">
+                    <span aria-hidden="true">i</span>
+                    <div><strong>Configuración por modelo</strong><small>La tela y el color reales se eligen al crear cada modelo comercial. Este patrón solo conserva sus posiciones.</small></div>
+                  </div>
+                </article>;
+              })}
+            </div>
+            <div className="schema-note"><span>ⓘ</span><p><strong>Cómo funciona la biblioteca:</strong> un patrón define las piezas, cantidades, lateralidad y posiciones de tela/color. Puedes reutilizarlo en distintos modelos comerciales y asignarles telas y colores diferentes sin modificar el patrón original.</p></div>
+          </section>}
           {view === 'historial' && <section className="panel history-panel">
             <div className="panel-heading"><div><h2>Movimientos de inventario</h2><p>Consulta los registros anteriores. La edición y eliminación de errores están reservadas al administrador.</p></div><div className="history-heading-actions"><span className="count-badge">{historyRows.length} movimientos</span><button className={`button ${adminMode ? 'primary' : 'secondary'}`} onClick={() => setAdminMode((value) => !value)}>{adminMode ? '✓ Modo administrador activo' : '🔒 Administrar historial'}</button></div></div>
             {adminMode && <div className="notice info"><span><strong>Modo administrador:</strong> puedes editar cantidades y observaciones o eliminar movimientos registrados por error. Los cambios afectan el saldo y no se permiten saldos negativos. Este control es solo visual mientras no exista autenticación; no es una barrera de seguridad real.</span></div>}
