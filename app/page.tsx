@@ -85,7 +85,7 @@ const colorSlotOptions = (secondaryCount: number) => [
 const isValidFabricSlot = (slot: string, secondaryCount: number) => isComponentFabricSlotAvailableForModel(slot, secondaryCount);
 const isValidColorSlot = (slot: string, secondaryCount: number) => isComponentColorSlotAvailableForModel(slot, secondaryCount);
 const secondarySlotCountForModel = (model: ManufacturingModel, modelPieces: ModelPiece[]) =>
-  Math.max(model.secondaryFabricSlots ?? 0, ...modelPieces.filter((piece) => piece.modelId === model.id).map((piece) => secondarySlotIndex(piece.fabricSlot)), 0);
+  Math.max(model.secondaryFabricSlots ?? 0, ...modelPieces.filter((piece) => piece.modelId === model.id).map((piece) => secondaryFabricSlotIndex(piece.fabricSlot)), 0);
 const secondaryColorSlotCountForModel = (model: ManufacturingModel, modelPieces: ModelPiece[]) =>
   Math.max(model.secondaryColorSlots ?? 0, ...modelPieces.filter((piece) => piece.modelId === model.id).map((piece) => secondaryColorSlotIndex(piece.colorSlot)), 0);
 const normalizeModelsWithSlots = (models: ManufacturingModel[], modelPieces: ModelPiece[]) =>
@@ -872,7 +872,7 @@ export default function Home() {
         Number.isInteger(item.unitsPerGarment) &&
         item.unitsPerGarment > 0 &&
         ['simetrica', 'izquierda', 'derecha', 'ninguna'].includes(item.laterality) &&
-        (item.fabricSlot === undefined || isValidFabricSlot(item.fabricSlot, (importedModels.find((model) => model.id === item.modelId)?.secondaryFabricSlots ?? Math.max(0, ...normalizedImportedPieces.filter((piece) => piece.modelId === item.modelId).map((piece) => secondarySlotIndex(piece.fabricSlot)))))) &&
+        (item.fabricSlot === undefined || isValidFabricSlot(item.fabricSlot, (importedModels.find((model) => model.id === item.modelId)?.secondaryFabricSlots ?? Math.max(0, ...normalizedImportedPieces.filter((piece) => piece.modelId === item.modelId).map((piece) => secondaryFabricSlotIndex(piece.fabricSlot)))))) &&
         isValidColorSlot(item.colorSlot ?? 'ninguna', (importedModels.find((model) => model.id === item.modelId)?.secondaryColorSlots ?? Math.max(0, ...normalizedImportedPieces.filter((piece) => piece.modelId === item.modelId).map((piece) => secondaryColorSlotIndex(piece.colorSlot))))) &&
         (item.colorId == null || importedFabric.colores.some((color) => color.id === item.colorId)) &&
         (item.colorOverride === undefined || typeof item.colorOverride === 'boolean') &&
