@@ -1724,7 +1724,6 @@ export function ProductionModule({
     const baseCapacity = baseModel ? getCompleteUnits(baseModelPieces, effectiveBaseLedger, sizeId) : 0;
     let componentCapacity = Number.POSITIVE_INFINITY;
     let limitingComponent = '';
-    const productReservations = ordersHoldingStock.filter((order) => order.productModelId === product.id);
     product.components.forEach((selection) => {
       const component = data.components.find((item) => item.id === selection.componentId && item.active);
       if (!component || component.pieces.length === 0) return;
