@@ -64,7 +64,7 @@ const normalizePatternFamilies = (input: unknown, fallback: PatternFamily[] = DE
     labels.add(normalizedLabel);
     result.push({ value, label });
   });
-  return result;
+  return result.length > 0 ? result : fallback.map((item) => ({ ...item }));
 };
 const migrateBaseModelFamilies = (
   models: ManufacturingModel[],
@@ -678,8 +678,10 @@ export default function Home() {
     if (draftFamilies.some((family) => !family.label.trim())) { setNoticeMessage('Todas las familias deben tener un nombre.', 'error'); return; }
     const labels = draftFamilies.map((family) => family.label.trim().toLocaleLowerCase('es'));
     if (new Set(labels).size !== labels.length) { setNoticeMessage('Hay nombres de familia duplicados.', 'error'); return; }
-    const values = new Set(draftFamilies.map((family) => family.value));
-    const removedInUse = families.find((family) => !values.has(family.value) && familyUsage(family.value).total > 0);
+    const values = draftFamilies.map((family) => family.value);
+    if (new Set(values).size !== values.length) { setNoticeMessage('Hay identificadores de familia duplicados.', 'error'); return; }
+    const valueSet = new Set(values);
+    const removedInUse = families.find((family) => !valueSet.has(family.value) && familyUsage(family.value).total > 0);
     if (removedInUse) { setNoticeMessage(`No se puede eliminar «${removedInUse.label}» porque todavía está asociada a patrones o recetas.`, 'error'); return; }
     const nextFamilies = draftFamilies.map((family) => ({ ...family, label: family.label.trim() }));
     setFamilies(nextFamilies);
@@ -876,7 +878,7 @@ export default function Home() {
       });
       setPieces((current) => merge(current, incomingPieces));
       window.dispatchEvent(new Event('telastock-fabric-data-updated'));
-      setNoticeMessage('Configuración importada. Se combinaron los modelos, moldes, colores y tallas por ID; el historial de movimientos existente se conservó.');
+      setNoticeMessage('Configuración importada. Se combinaron familias, modelos, moldes, colores y tallas; el historial de movimientos existente se conservó.');
     } catch (error) {
       setNoticeMessage(`No se pudo importar el archivo: ${error instanceof Error ? error.message : 'formato no válido'}`, 'error');
     } finally {
@@ -959,7 +961,7 @@ export default function Home() {
       };
 
       const importedGroups = getRows('sizeGroups') as unknown as SizeGroup[];
-      const importedFamilies = normalizePatternFamilies(Array.isArray(data.families) ? data.families : DEFAULT_PATTERN_FAMILIES);
+      const importedFamilies = normalizePatternFamilies(Array.isArray(data.families) && data.families.length > 0 ? data.families : DEFAULT_PATTERN_FAMILIES);
       const importedSizes = getRows('sizes') as unknown as Size[];
       const importedModelsRaw = getRows('models') as unknown as ManufacturingModel[];
       const importedPieces = getRows('pieces') as unknown as ModelPiece[];
@@ -1061,7 +1063,7 @@ export default function Home() {
 
       const legacyWarning = raw.schemaVersion === 1 ? '\\nEste respaldo antiguo no contiene datos de telas, rollos ni compras; al restaurarlo, esas colecciones quedarán vacías.' : '';
       const confirmed = window.confirm(
-        `Vas a restaurar ${importedModels.length} modelos, ${importedPieces.length} moldes y ${importedMovements.length} movimientos, además de ${importedFabric.rollos.length} rollos, ${importedFabric.compras.length} compras y ${importedProduction.supplies.length} insumos. Esto reemplazará los datos del navegador actual. Exporta un respaldo previo si necesitas conservarlos.${legacyWarning} ¿Continuar?`
+        `Vas a restaurar ${importedFamilies.length} familias, ${importedModels.length} patrones, ${importedPieces.length} moldes y ${importedMovements.length} movimientos, además de ${importedFabric.rollos.length} rollos, ${importedFabric.compras.length} compras y ${importedProduction.supplies.length} insumos. Esto reemplazará los datos del navegador actual. Exporta un respaldo previo si necesitas conservarlos.${legacyWarning} ¿Continuar?`
       );
       if (!confirmed) return;
 
