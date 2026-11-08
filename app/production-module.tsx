@@ -3315,6 +3315,10 @@ export function ProductionModule({
           };
         });
       const linkedComponentIds = new Set(product.components.map((selection) => selection.componentId));
+      const linkedComponentsWithoutPieces = product.components.flatMap((selection) => {
+        const component = data.components.find((item) => item.id === selection.componentId);
+        return component && component.pieces.length === 0 ? [{ selection, component }] : [];
+      });
       const availableComponentsToAdd = data.components.filter((component) => component.active && !linkedComponentIds.has(component.id) && component.pieces.length > 0);
       const componentPieceGroups = product.components.flatMap((selection) => {
         const component = data.components.find((item) => item.id === selection.componentId);
@@ -3423,7 +3427,15 @@ export function ProductionModule({
           <div className="piece-material-group-heading"><h3>{component.name}</h3><span>{rows.length} piezas</span></div>
           {rows.map(renderMaterialPiece)}
         </section>)}
-        {totalPieces === 0 && <div className="empty">Este modelo todavía no tiene moldes ni piezas auxiliares.</div>}
+        {linkedComponentsWithoutPieces.map(({ selection, component }) => <section className="piece-material-group piece-material-auxiliary-group piece-material-missing-component" key={selection.id}>
+          <div className="piece-material-group-heading"><h3>{component.name}</h3><span>Sin piezas</span></div>
+          <div className="piece-material-auxiliary-empty">
+            <strong>Este componente está asociado, pero su ficha no tiene piezas auxiliares.</strong>
+            <span>Completa las piezas en la biblioteca de componentes. Al volver, aparecerán aquí para asignarles tela y color.</span>
+            <button type="button" className="text-action" onClick={() => onNavigate('componentes')}>Abrir este componente en la biblioteca</button>
+          </div>
+        </section>)}
+        {totalPieces === 0 && basePieceRows.length === 0 && linkedComponentsWithoutPieces.length === 0 && <div className="empty">Este modelo todavía no tiene moldes ni piezas auxiliares.</div>}
         <div className="piece-material-view-footer"><button type="button" className="button secondary" onClick={() => setSelectedPieceConfigurationProductId('')}>Volver a modelos</button></div>
       </section>;
     }
