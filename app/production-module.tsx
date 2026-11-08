@@ -1470,6 +1470,7 @@ export function ProductionModule({
       return component ? [component] : [];
     });
     const slots = productColorSlotsForConfiguredModel(base.id, basePieces, productComponents);
+    if (slots.length === 0) return tell('Este modelo no necesita posiciones de color compartidas. Los colores «Cualquier color» se asignaron por pieza.', 'info');
     const selected = Object.fromEntries(slots.map((slot) => [
       slot,
       data.productColors.find((assignment) => assignment.productModelId === product.id && assignment.colorSlot === slot)?.colorId ?? '',
@@ -2467,9 +2468,9 @@ export function ProductionModule({
             <button type="button" className="text-action" onClick={() => openQuickTextile({ kind: 'product', slot })}>＋ Crear tela y asignarla aquí</button>
           </label>)}</div>
         </section>}
-        {selectedProductBasePattern && <section className="product-fabric-assignment-section">
-          <div className="production-subheading"><strong>Colores del modelo</strong><span className="production-muted">Asigna el color definitivo a cada posición</span></div>
-          <p className="production-muted">El patrón conserva referencias como Color principal 1 y Color secundario 1. Aquí eliges los colores concretos del modelo comercial.</p>
+        {selectedProductBasePattern && selectedProductColorSlots.length > 0 && <section className="product-fabric-assignment-section">
+          <div className="production-subheading"><strong>Colores del modelo</strong><span className="production-muted">Solo las posiciones que necesitan los moldes y componentes elegidos</span></div>
+          <p className="production-muted">Asigna aquí cada color compartido una sola vez. Las piezas «Cualquier color» se configuran individualmente más abajo.</p>
           {textileContext.colores.length === 0 && <div className="notice info">No hay colores en el catálogo global. Crea el primero desde cualquiera de las posiciones.</div>}
           <div className="product-fabric-slots">{selectedProductColorSlots.map((slot) => <label className="field-label" key={slot}>
             <span>{productColorSlotLabel(slot)}</span>
@@ -2480,6 +2481,7 @@ export function ProductionModule({
             <button type="button" className="text-action" onClick={() => openQuickProductColor(slot)}>＋ Crear color y asignarlo aquí</button>
           </label>)}</div>
         </section>}
+        {selectedProductBasePattern && selectedProductColorSlots.length === 0 && <div className="notice info">Los moldes y componentes seleccionados no requieren colores compartidos. Las piezas configuradas como «Cualquier color» se asignan individualmente.</div>}
         {selectedProductBaseWildcardPieces.length > 0 && <section className="product-fabric-assignment-section">
           <div className="production-subheading"><strong>Asignaciones de moldes comodín</strong><span className="production-muted">Solo para este modelo comercial</span></div>
           <p className="production-muted">Estos moldes del patrón se definieron como «Cualquier tela» o «Cualquier color». Selecciona aquí sus valores concretos sin modificar el patrón reutilizable.</p>
