@@ -3639,6 +3639,95 @@ export function ProductionModule({
         </div>
         <div className="form-actions"><button type="button" className="button secondary" onClick={cancelVariantCreation}>Cancelar</button><button className="button primary">Guardar variante</button></div>
       </form></section></div>}
+    {showProductInventoryForm && (() => {
+      const product = data.productModels.find((item) => item.id === inventoryProductId && item.active);
+      if (!product) return null;
+      const productSizes = productSizeOptions(product);
+      const productPieces = productInventoryPieces(product);
+      const selectedSizeCount = inventorySizeIds.length;
+      const allSelected = productSizes.length > 0 && selectedSizeCount === productSizes.length;
+      const physicalToRegister = inventorySizeIds.reduce((sum, sizeId) => sum + productPieces.reduce((pieceSum, piece) => {
+        if (piece.laterality === 'simetrica') {
+          const mode = inventoryEntryModes[piece.id] ?? 'paridad';
+          return pieceSum + (mode === 'paridad'
+            ? 2 * Math.max(0, Number(inventoryAmounts[sizeId + '::' + piece.id + '::paridad']) || 0)
+            : Math.max(0, Number(inventoryAmounts[sizeId + '::' + piece.id + '::izquierda']) || 0) + Math.max(0, Number(inventoryAmounts[sizeId + '::' + piece.id + '::derecha']) || 0));
+        }
+        return pieceSum + Math.max(0, Number(inventoryAmounts[sizeId + '::' + piece.id]) || 0);
+      }, 0), 0);
+      const renderInventoryEntryPiece = (piece: ProductInventoryPiece, sizeId: string) => {
+        const ledger = productPieceDomainLedger(product.id, piece, sizeId);
+        const stock = piece.laterality === 'simetrica' ? getSymmetricStock(ledger, piece.id, sizeId) : undefined;
+        const current = piece.laterality === 'simetrica' ? inventoryStockLabel(product.id, piece, sizeId) : format(Math.max(0, getPieceStock(ledger, piece.id, sizeId)));
+        const mode = inventoryEntryModes[piece.id] ?? 'paridad';
+        return piece.laterality !== 'simetrica'
+          ? <label className="piece-entry-row inventory-entry-piece" key={piece.id}>
+              <span className="piece-entry-name"><strong>{piece.name}</strong><small>{piece.scope === 'base' ? 'Molde base' : piece.componentName} · {piece.textileName} · {piece.colorName} · Stock actual: {current}</small></span>
+              {inventoryQuantityControl(sizeId, piece, undefined, (inventoryOperation === 'entrada' ? 'Ingresar' : 'Retirar') + ' ' + piece.name + ', talla ' + (productSizes.find((size) => size.id === sizeId)?.label ?? ''))}
+            </label>
+          : <div className="piece-entry-row symmetric-entry-row inventory-entry-piece" key={piece.id}>
+              <div className="piece-entry-name">
+                <strong>{piece.name}</strong>
+                <small>{piece.scope === 'base' ? 'Molde base' : piece.componentName} · {piece.textileName} · {piece.colorName} · Stock actual: {current}</small>
+                <div className="side-mode-toggle" role="group" aria-label={'Modo de registro de ' + piece.name}>
+                  <button type="button" className={mode === 'paridad' ? 'active' : ''} onClick={() => changeInventoryEntryMode(piece.id, 'paridad')}>Paridad</button>
+                  <button type="button" className={mode === 'lados' ? 'active' : ''} onClick={() => changeInventoryEntryMode(piece.id, 'lados')}>Por lado</button>
+                </div>
+                {stock?.unassigned ? <small className="inventory-shortage">{format(stock.unassigned)} pieza(s) histórica(s) sin lado identificado.</small> : null}
+              </div>
+              {mode === 'paridad'
+                ? <div className="symmetric-quantity"><small>{inventoryOperation === 'entrada' ? 'Pares a ingresar' : 'Pares a retirar'}</small>{inventoryQuantityControl(sizeId, piece, 'paridad', 'paridad de ' + piece.name)}<span className="quantity-hint">1 paridad = 1 izquierda + 1 derecha</span></div>
+                : <div className="symmetric-side-inputs">
+                    <div className="symmetric-side-control"><small>Izquierda · hay {format(stock?.left ?? 0)}</small>{inventoryQuantityControl(sizeId, piece, 'izquierda', 'lado izquierdo de ' + piece.name)}</div>
+                    <div className="symmetric-side-control"><small>Derecha · hay {format(stock?.right ?? 0)}</small>{inventoryQuantityControl(sizeId, piece, 'derecha', 'lado derecho de ' + piece.name)}</div>
+                  </div>}
+            </div>;
+      };
+      return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowProductInventoryForm(false); }}>
+        <section className="modal stock-modal product-inventory-stock-modal" role="dialog" aria-modal="true" aria-labelledby="product-inventory-stock-title">
+          <div className="modal-heading">
+            <div><div className="eyebrow">{inventoryOperation === 'entrada' ? 'ENTRADA DE STOCK' : 'SALIDA / MERMA'}</div><h2 id="product-inventory-stock-title">{inventoryOperation === 'entrada' ? 'Registrar stock del modelo' : 'Retirar stock del modelo'}</h2><p>Las cantidades se guardan en este modelo comercial, sin mezclarse con otras prendas que usen el mismo patrón.</p></div>
+            <button className="icon-button" onClick={() => setShowProductInventoryForm(false)} aria-label="Cerrar">×</button>
+          </div>
+          <form className="production-form" onSubmit={submitProductInventoryMovement}>
+            <label className="field-label">Modelo comercial
+              <select className="large-input" value={product.id} onChange={(event) => changeInventoryProduct(event.target.value)}>
+                {activeInventoryProducts.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
+              </select>
+              <small>Patrón base: {baseModels.find((item) => item.id === product.baseModelId)?.name ?? 'No disponible'} · Tallas heredadas del patrón.</small>
+            </label>
+            <div className="form-section-heading"><div><strong>Tallas</strong><small>{selectedSizeCount === 0 ? 'Selecciona una o varias.' : selectedSizeCount + ' seleccionada(s)'}</small></div><button type="button" className="text-action" onClick={() => setInventorySizeIds(allSelected ? [] : productSizes.map((size) => size.id))}>{allSelected ? 'Quitar todas' : 'Seleccionar todas'}</button></div>
+            <div className="size-check-grid">{productSizes.map((size) => {
+              const hasStock = productPieces.some((piece) => getPieceStock(productPieceDomainLedger(product.id, piece, size.id), piece.id, size.id) > 0);
+              return <label className={'size-check ' + (inventorySizeIds.includes(size.id) ? 'checked' : '')} key={size.id}>
+                <input type="checkbox" checked={inventorySizeIds.includes(size.id)} onChange={() => toggleInventorySize(size.id)} />
+                <span className="checkmark" aria-hidden="true">✓</span><strong>{size.label}</strong><small>{hasStock ? 'Tiene stock' : 'Vacía'}</small>
+              </label>;
+            })}</div>
+            {selectedSizeCount > 0 && <div className="selected-sizes-inputs">
+              <div className="form-section-heading compact-form-heading"><div><strong>Cantidad por pieza</strong><small>Se muestran moldes base y piezas auxiliares del modelo.</small></div></div>
+              {inventorySizeIds.map((sizeId) => {
+                const size = productSizes.find((item) => item.id === sizeId);
+                const baseRows = productPieces.filter((piece) => piece.scope === 'base');
+                const groups = product.components.flatMap((selection) => {
+                  const component = data.components.find((item) => item.id === selection.componentId && item.active);
+                  if (!component) return [];
+                  const rows = productPieces.filter((piece) => piece.scope === 'component' && piece.selectionId === selection.id);
+                  return rows.length > 0 ? [{ selection, component, rows }] : [];
+                });
+                return <section className="entry-size-card" key={sizeId}>
+                  <div className="entry-size-title"><span className="size-pill">{size?.label}</span><span>{inventoryOperation === 'entrada' ? 'Stock a ingresar' : 'Stock a retirar'}</span></div>
+                  {baseRows.length > 0 && <div className="inventory-entry-group"><strong>Moldes base</strong>{baseRows.map((piece) => renderInventoryEntryPiece(piece, sizeId))}</div>}
+                  {groups.map(({ selection, component, rows }) => <div className="inventory-entry-group" key={selection.id}><strong>{component.name}</strong>{rows.map((piece) => renderInventoryEntryPiece(piece, sizeId))}</div>)}
+                </section>;
+              })}
+            </div>}
+            <label className="field-label stock-note-field">Observación del movimiento<input className="large-input" value={inventoryNote} onChange={(event) => setInventoryNote(event.target.value)} placeholder="Ej. Corte del lote 25/10" /></label>
+            <div className="modal-sticky-actions"><span>{format(physicalToRegister)} piezas físicas {inventoryOperation === 'entrada' ? 'a ingresar' : 'a retirar'}</span><button type="button" className="button secondary" onClick={() => setShowProductInventoryForm(false)}>Cancelar</button><button className="button primary" disabled={selectedSizeCount === 0}>Confirmar movimiento</button></div>
+          </form>
+        </section>
+      </div>;
+    })()}
     {showComponentPieceMovement && selectedStockProductModel && selectedStockComponent && selectedComponentStockPiece && <div className="modal-backdrop">
       <section className="modal production-modal" role="dialog" aria-modal="true" aria-labelledby="component-piece-stock-title">
         <div className="modal-heading"><div><h2 id="component-piece-stock-title">Movimiento de pieza auxiliar</h2><p>{selectedStockProductModel.name} · {selectedStockComponent.name} · {selectedComponentStockPiece.name}</p></div><button className="icon-button" onClick={() => setShowComponentPieceMovement(false)}>×</button></div>
