@@ -1201,26 +1201,115 @@ export default function Home() {
         </section>
       </div>}
 
-      {showModelForm && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModelForm(); }}>
-        <section className="modal model-modal" role="dialog" aria-modal="true" aria-labelledby="model-modal-title">
-          <div className="modal-heading"><div><div className="eyebrow">PATRÓN BASE</div><h2 id="model-modal-title">{modelForm.editingId ? 'Editar patrón' : 'Crear patrón base'}</h2><p>Define las piezas necesarias por prenda y si su stock requiere control de lateralidad.</p></div><button className="icon-button" onClick={closeModelForm} aria-label="Cerrar">×</button></div>
-          <form onSubmit={saveModel} className="model-form">
-            <label className="field-label">Nombre del patrón<input className="large-input" required value={modelForm.name} onChange={(event) => setModelForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="Ej. Polo básico sublimado" /></label>
-            <label className="field-label">Familia del patrón base<select className="large-input" required value={modelForm.family} onChange={(event) => setModelForm((prev) => ({ ...prev, family: event.target.value }))}><option value="">Seleccionar familia</option>{baseModelFamilies.map((family) => <option key={family.value} value={family.value}>{family.label}</option>)}</select><small>La familia se define aquí y la heredan los modelos comerciales que usan este patrón.</small></label>
-            <label className="field-label">Grupo de tallas<select className="large-input" required value={modelForm.sizeGroupId} onChange={(event) => setModelForm((prev) => ({ ...prev, sizeGroupId: event.target.value }))} disabled={Boolean(modelForm.editingId && modelForm.pieces.some((piece) => movements.some((movement) => movement.pieceId === piece.id)))}><option value="">Seleccionar grupo</option>{sizeGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select><button type="button" className="text-action" disabled={Boolean(modelForm.editingId && modelForm.pieces.some((piece) => movements.some((movement) => movement.pieceId === piece.id)))} onClick={openSizeManagerFromModelForm}>＋ Crear grupo o administrar tallas</button><small>Las tallas pertenecen al grupo y se reutilizan en los modelos.</small></label>
-            <div className="form-section-heading"><div><strong>Moldes que componen una prenda</strong><small>Las posiciones de tela y color se resolverán al crear cada modelo comercial.</small></div><div className="mold-heading-actions"><button type="button" className="text-action" onClick={() => setModelForm((prev) => ({ ...prev, secondaryFabricSlots: prev.secondaryFabricSlots + 1 }))}>＋ Añadir tela secundaria</button><button type="button" className="text-action" onClick={() => setModelForm((prev) => ({ ...prev, secondaryColorSlots: prev.secondaryColorSlots + 1 }))}>＋ Añadir color secundario</button><button type="button" className="text-action" onClick={() => setModelForm((prev) => ({ ...prev, pieces: [...prev.pieces, { id: '', name: '', unitsPerGarment: '1', laterality: 'ninguna', fabricSlot: 'principal', colorSlot: 'principal', colorId: '', colorOverride: false, fabricType: 'Tela principal 1', color: '' }] }))}>＋ Añadir molde</button></div></div>
-            <div className="fabric-slot-summary"><strong>{modelForm.secondaryFabricSlots + 1} posiciones de tela</strong><span>Principal 1{modelForm.secondaryFabricSlots ? ' · ' + Array.from({ length: modelForm.secondaryFabricSlots }, (_, i) => `Secundaria ${i + 1}`).join(' · ') : ''}</span></div>
-            <div className="fabric-slot-summary"><strong>{modelForm.secondaryColorSlots + 1} posiciones de color disponibles</strong><span>Principal 1{modelForm.secondaryColorSlots ? ' · ' + Array.from({ length: modelForm.secondaryColorSlots }, (_, i) => `Secundario ${i + 1}`).join(' · ') : ''}</span></div>
-            <label className="field-label">Cantidad de colores secundarios
-              <input className="large-input" type="number" inputMode="numeric" min="0" max="99" step="1" value={modelForm.secondaryColorSlots} onChange={(event) => {
-                const nextCount = event.target.value === '' ? 0 : Number(event.target.value);
-                if (Number.isInteger(nextCount) && nextCount >= 0 && nextCount <= 99) setModelForm((prev) => ({ ...prev, secondaryColorSlots: nextCount }));
-              }} />
-              <small>Usa 0 si solo necesitas Color principal 1. Por ejemplo, 3 habilita Color secundario 1, 2 y 3 en los moldes y componentes.</small>
-            </label>
-            <div className="piece-editor-list">{modelForm.pieces.map((piece, index) => <div className="piece-editor" key={piece.id || `new-${index}`}><div className="piece-editor-top"><span>Molde {index + 1} · orden {index + 1}</span><div className="mold-order-actions"><button type="button" className="order-mold" disabled={index === 0} aria-label="Mover molde arriba" onClick={() => moveMold(index, -1)}>↑</button><button type="button" className="order-mold" disabled={index === modelForm.pieces.length - 1} aria-label="Mover molde abajo" onClick={() => moveMold(index, 1)}>↓</button>{modelForm.pieces.length > 1 && <button type="button" className="remove-piece" onClick={() => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.filter((_, pieceIndex) => pieceIndex !== index) }))}>Quitar</button>}</div></div><div className="piece-editor-fields mold-fields-row"><label className="field-label">Molde<input className="large-input" required value={piece.name} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => pieceIndex === index ? { ...item, name: event.target.value } : item) }))} placeholder="Pecho, cuello…" /></label><label className="field-label">Piezas/prenda<input className="large-input" required type="number" inputMode="numeric" min="1" step="1" value={piece.unitsPerGarment} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => pieceIndex === index ? { ...item, unitsPerGarment: event.target.value } : item) }))} /></label><label className="field-label">Lateralidad<select className="large-input" value={piece.laterality} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => { if (pieceIndex !== index) return item; const laterality = event.target.value as Laterality; const currentUnits = Number(item.unitsPerGarment); const unitsPerGarment = laterality === 'simetrica' && (!Number.isInteger(currentUnits) || currentUnits < 2 || currentUnits % 2 !== 0) ? String(Math.max(2, Math.ceil((currentUnits || 1) / 2) * 2)) : item.unitsPerGarment; return { ...item, laterality, unitsPerGarment }; }) }))}><option value="ninguna">Sin lado</option><option value="simetrica">Simétrica</option><option value="izquierda">Izquierda</option><option value="derecha">Derecha</option></select></label><label className="field-label">Posición de tela<select className="large-input" value={piece.fabricSlot} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => pieceIndex === index ? { ...item, fabricSlot: event.target.value as FabricSlot, fabricType: fabricSlotLabel(event.target.value as FabricSlot) } : item) }))}>{fabricSlotOptions(modelForm.secondaryFabricSlots).map((slot) => <option key={slot} value={slot}>{fabricSlotLabel(slot)}</option>)}</select><small>«Cualquier tela» deja el material abierto para resolverlo en cada modelo comercial.</small></label><label className="field-label">Posición de color<select className="large-input" value={piece.colorSlot} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => pieceIndex === index ? { ...item, colorSlot: event.target.value } : item) }))}>{colorSlotOptions(modelForm.secondaryColorSlots).map((slot) => <option key={slot} value={slot}>{colorSlotLabel(slot)}</option>)}</select><small>El color definitivo se asignará en cada modelo comercial; el patrón conserva solo la referencia.</small></label></div></div>)}</div>
-            <div className="symmetry-help"><strong>Cómo se cuenta la simetría:</strong> un par requiere 1 pieza izquierda y 1 derecha. El stock se registra por paridad de forma predeterminada; puedes cambiar a lados para registrar cantidades diferentes. En este molde, ×2 significa 1 pieza por lado.</div>
-            <div className="form-actions"><button type="button" className="button secondary" onClick={closeModelForm}>Cancelar</button><button type="submit" className="button primary">{modelForm.editingId ? 'Guardar cambios' : 'Crear modelo'}</button></div>
+      {showModelForm && <div className="modal-backdrop pattern-editor-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModelForm(); }}>
+        <section className="modal model-modal pattern-editor-modal" role="dialog" aria-modal="true" aria-labelledby="model-modal-title">
+          <div className="modal-heading">
+            <div>
+              <div className="eyebrow">PATRÓN BASE</div>
+              <h2 id="model-modal-title">{modelForm.editingId ? 'Editar patrón' : 'Crear patrón base'}</h2>
+              <p>Configura los datos y las piezas que forman una prenda.</p>
+            </div>
+            <button className="icon-button" onClick={closeModelForm} aria-label="Cerrar">×</button>
+          </div>
+
+          <form onSubmit={saveModel} className="model-form pattern-editor-form">
+            <section className="pattern-editor-section">
+              <div className="pattern-editor-section-heading">
+                <div><strong>1. Datos del patrón</strong><small>Identificación y tallaje que heredarán los modelos.</small></div>
+                <span className="pattern-editor-step">BÁSICO</span>
+              </div>
+              <div className="pattern-editor-basics-grid">
+                <label className="field-label pattern-editor-name-field">Nombre del patrón
+                  <input className="large-input" required value={modelForm.name} onChange={(event) => setModelForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="Ej. Polo básico sublimado" />
+                </label>
+                <label className="field-label">Familia del patrón
+                  <select className="large-input" required value={modelForm.family} onChange={(event) => setModelForm((prev) => ({ ...prev, family: event.target.value }))}>
+                    <option value="">Seleccionar familia</option>
+                    {baseModelFamilies.map((family) => <option key={family.value} value={family.value}>{family.label}</option>)}
+                  </select>
+                  <small>La familia se hereda en los modelos comerciales.</small>
+                </label>
+                <label className="field-label">Grupo de tallas
+                  <select className="large-input" required value={modelForm.sizeGroupId} onChange={(event) => setModelForm((prev) => ({ ...prev, sizeGroupId: event.target.value }))} disabled={Boolean(modelForm.editingId && modelForm.pieces.some((piece) => movements.some((movement) => movement.pieceId === piece.id)))}>
+                    <option value="">Seleccionar grupo</option>
+                    {sizeGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+                  </select>
+                  <button type="button" className="text-action pattern-editor-inline-action" disabled={Boolean(modelForm.editingId && modelForm.pieces.some((piece) => movements.some((movement) => movement.pieceId === piece.id)))} onClick={openSizeManagerFromModelForm}>＋ Administrar tallas</button>
+                  <small>Las tallas se reutilizan entre patrones del mismo grupo.</small>
+                </label>
+              </div>
+            </section>
+
+            <section className="pattern-editor-section">
+              <div className="pattern-editor-section-heading">
+                <div><strong>2. Piezas por prenda</strong><small>Define cuántas piezas requiere fabricar una unidad.</small></div>
+                <span className="pattern-editor-count">{modelForm.pieces.length} {modelForm.pieces.length === 1 ? 'pieza' : 'piezas'}</span>
+              </div>
+
+              <div className="pattern-editor-settings-grid">
+                <div className="pattern-editor-setting">
+                  <div><strong>{modelForm.secondaryFabricSlots + 1} posiciones de tela</strong><small>Principal 1{modelForm.secondaryFabricSlots ? ' · ' + Array.from({ length: modelForm.secondaryFabricSlots }, (_, i) => `Sec. ${i + 1}`).join(' · ') : ''}</small></div>
+                  <button type="button" className="text-action" onClick={() => setModelForm((prev) => ({ ...prev, secondaryFabricSlots: prev.secondaryFabricSlots + 1 }))}>＋ Añadir tela</button>
+                </div>
+                <div className="pattern-editor-setting">
+                  <div><strong>{modelForm.secondaryColorSlots + 1} posiciones de color</strong><small>Principal 1{modelForm.secondaryColorSlots ? ' · ' + Array.from({ length: modelForm.secondaryColorSlots }, (_, i) => `Sec. ${i + 1}`).join(' · ') : ''}</small></div>
+                  <button type="button" className="text-action" onClick={() => setModelForm((prev) => ({ ...prev, secondaryColorSlots: prev.secondaryColorSlots + 1 }))}>＋ Añadir color</button>
+                </div>
+              </div>
+
+              <div className="pattern-editor-piece-heading">
+                <div><strong>Lista de moldes</strong><small>Orden de corte y configuración de cada pieza.</small></div>
+                <button type="button" className="button secondary pattern-editor-add-button" onClick={() => setModelForm((prev) => ({ ...prev, pieces: [...prev.pieces, { id: '', name: '', unitsPerGarment: '1', laterality: 'ninguna', fabricSlot: 'principal', colorSlot: 'principal', colorId: '', colorOverride: false, fabricType: 'Tela principal 1', color: '' }] }))}>＋ Añadir molde</button>
+              </div>
+
+              <div className="piece-editor-list pattern-editor-piece-list">
+                {modelForm.pieces.map((piece, index) => <article className="piece-editor pattern-editor-piece" key={piece.id || `new-${index}`}>
+                  <div className="piece-editor-top pattern-editor-piece-top">
+                    <div className="pattern-editor-piece-title"><span className="pattern-editor-piece-number">{String(index + 1).padStart(2, '0')}</span><div><strong>Molde {index + 1}</strong><small>Parte de la prenda</small></div></div>
+                    <div className="mold-order-actions">
+                      <button type="button" className="order-mold" disabled={index === 0} aria-label="Mover molde arriba" onClick={() => moveMold(index, -1)}>↑</button>
+                      <button type="button" className="order-mold" disabled={index === modelForm.pieces.length - 1} aria-label="Mover molde abajo" onClick={() => moveMold(index, 1)}>↓</button>
+                      {modelForm.pieces.length > 1 && <button type="button" className="remove-piece" onClick={() => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.filter((_, pieceIndex) => pieceIndex !== index) }))}>Quitar</button>}
+                    </div>
+                  </div>
+                  <div className="piece-editor-fields mold-fields-row pattern-editor-piece-fields">
+                    <label className="field-label">Nombre del molde
+                      <input className="large-input" required value={piece.name} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => pieceIndex === index ? { ...item, name: event.target.value } : item) }))} placeholder="Ej. Delantero, manga…" />
+                    </label>
+                    <label className="field-label">Piezas por prenda
+                      <input className="large-input" required type="number" inputMode="numeric" min="1" step="1" value={piece.unitsPerGarment} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => pieceIndex === index ? { ...item, unitsPerGarment: event.target.value } : item) }))} />
+                    </label>
+                    <label className="field-label">Lateralidad
+                      <select className="large-input" value={piece.laterality} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => { if (pieceIndex !== index) return item; const laterality = event.target.value as Laterality; const currentUnits = Number(item.unitsPerGarment); const unitsPerGarment = laterality === 'simetrica' && (!Number.isInteger(currentUnits) || currentUnits < 2 || currentUnits % 2 !== 0) ? String(Math.max(2, Math.ceil((currentUnits || 1) / 2) * 2)) : item.unitsPerGarment; return { ...item, laterality, unitsPerGarment }; }) }))}>
+                        <option value="ninguna">Sin lado</option><option value="simetrica">Simétrica (par)</option><option value="izquierda">Solo izquierda</option><option value="derecha">Solo derecha</option>
+                      </select>
+                    </label>
+                    <label className="field-label">Posición de tela
+                      <select className="large-input" value={piece.fabricSlot} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => pieceIndex === index ? { ...item, fabricSlot: event.target.value as FabricSlot, fabricType: fabricSlotLabel(event.target.value as FabricSlot) } : item) }))}>
+                        {fabricSlotOptions(modelForm.secondaryFabricSlots).map((slot) => <option key={slot} value={slot}>{fabricSlotLabel(slot)}</option>)}
+                      </select>
+                      <small>«Cualquier tela» permite decidirla en cada modelo comercial.</small>
+                    </label>
+                    <label className="field-label">Posición de color
+                      <select className="large-input" value={piece.colorSlot} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => pieceIndex === index ? { ...item, colorSlot: event.target.value } : item) }))}>
+                        {colorSlotOptions(modelForm.secondaryColorSlots).map((slot) => <option key={slot} value={slot}>{colorSlotLabel(slot)}</option>)}
+                      </select>
+                      <small>El color definitivo se asigna al crear el modelo.</small>
+                    </label>
+                  </div>
+                </article>)}
+                {modelForm.pieces.length === 0 && <div className="pattern-editor-empty"><strong>Aún no hay moldes</strong><span>Añade la primera pieza para definir cómo se compone la prenda.</span><button type="button" className="button secondary" onClick={() => setModelForm((prev) => ({ ...prev, pieces: [...prev.pieces, { id: '', name: '', unitsPerGarment: '1', laterality: 'ninguna', fabricSlot: 'principal', colorSlot: 'principal', colorId: '', colorOverride: false, fabricType: 'Tela principal 1', color: '' }] }))}>＋ Añadir primer molde</button></div>}
+              </div>
+              <details className="pattern-editor-help">
+                <summary>¿Cómo funciona la lateralidad simétrica?</summary>
+                <p>Un par simétrico necesita una pieza izquierda y una derecha. Por eso, al elegir «Simétrica (par)», la cantidad por prenda debe ser par: ×2 representa una pieza por lado. El inventario puede registrar paridades o lados por separado.</p>
+              </details>
+            </section>
+
+            <div className="form-actions pattern-editor-actions">
+              <button type="button" className="button secondary" onClick={closeModelForm}>Cancelar</button>
+              <button type="submit" className="button primary">{modelForm.editingId ? 'Guardar cambios' : 'Crear patrón'}</button>
+            </div>
           </form>
         </section>
       </div>}
