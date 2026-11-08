@@ -117,6 +117,21 @@ export type ComponentPieceMovement = {
   sourceProductionOrderId?: string | null;
 };
 
+/**
+ * Prototipo de existencias de prendas terminadas.
+ * Se conserva como ledger independiente para poder ajustar sus reglas sin
+ * modificar el inventario de piezas ni el modelo comercial.
+ */
+export type FinishedGarmentMovement = {
+  id: string;
+  productModelId: string;
+  sizeId: string;
+  delta: number;
+  kind: 'conversion_piezas' | 'ajuste';
+  note: string;
+  date: string;
+};
+
 export type MaterialRequirement = {
   id: string;
   variantId: string;
@@ -273,6 +288,7 @@ export type ProductionBackupData = {
   supplyPurchaseDetails: SupplyPurchaseDetail[];
   productBasePieceMovements: ProductBasePieceMovement[];
   componentPieceMovements: ComponentPieceMovement[];
+  finishedGarmentMovements: FinishedGarmentMovement[];
   productionOrders: ProductionOrder[];
   components: GarmentComponent[];
   familyRecipes: FamilyRecipe[];
@@ -291,6 +307,7 @@ export const PRODUCTION_STORAGE_KEYS = {
   supplyPurchaseDetails: 'telastock-supply-purchase-details-v1',
   productBasePieceMovements: 'telastock-product-base-piece-movements-v1',
   componentPieceMovements: 'telastock-component-piece-movements-v1',
+  finishedGarmentMovements: 'telastock-finished-garment-movements-v1',
   productionOrders: 'telastock-production-orders-v1',
   components: 'telastock-garment-components-v1',
   familyRecipes: 'telastock-family-recipes-v1',
@@ -301,7 +318,7 @@ export const PRODUCTION_STORAGE_KEYS = {
 } as const;
 
 export function emptyProductionBackupData(): ProductionBackupData {
-  return { supplies: [], variants: [], supplyMovements: [], supplyPurchases: [], supplyPurchaseDetails: [], productBasePieceMovements: [], componentPieceMovements: [], productionOrders: [], components: [], familyRecipes: [], productCollections: [], productModels: [], productFabrics: [], productColors: [] };
+  return { supplies: [], variants: [], supplyMovements: [], supplyPurchases: [], supplyPurchaseDetails: [], productBasePieceMovements: [], componentPieceMovements: [], finishedGarmentMovements: [], productionOrders: [], components: [], familyRecipes: [], productCollections: [], productModels: [], productFabrics: [], productColors: [] };
 }
 
 export function validateProductionBackupData(value: unknown): ProductionBackupData {
@@ -462,6 +479,21 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
     (movement.sourceMovementId === undefined || typeof movement.sourceMovementId === 'string') &&
     (movement.sourceProductionOrderId == null || typeof movement.sourceProductionOrderId === 'string')
   )) throw new Error('Hay movimientos de moldes base sin modelo comercial o con datos inválidos.');
+  if (!output.finishedGarmentMovements.every((movement) =>
+    typeof movement.productModelId === 'string' && output.productModels.some((product) => product.id === movement.productModelId) &&
+    typeof movement.sizeId === 'string' && movement.sizeId.length > 0 &&
+    Number.isInteger(movement.delta) && movement.delta !== 0 &&
+    ['conversion_piezas', 'ajuste'].includes(movement.kind) &&
+    typeof movement.note === 'string' && typeof movement.date === 'string'
+  )) throw new Error('Hay movimientos de prendas terminadas con datos inválidos o sin modelo comercial.');
+  const finishedGarmentBalances = new Map<string, number>();
+  output.finishedGarmentMovements.forEach((movement) => {
+    const key = movement.productModelId + ':' + movement.sizeId;
+    finishedGarmentBalances.set(key, (finishedGarmentBalances.get(key) ?? 0) + movement.delta);
+  });
+  if ([...finishedGarmentBalances.values()].some((balance) => balance < 0)) {
+    throw new Error('El respaldo contiene existencias negativas de prendas terminadas.');
+  }
   const baseMovementScopes = new Map<string, ProductBasePieceMovement[]>();
   output.productBasePieceMovements.forEach((movement) => {
     const key = movement.productModelId + ':' + movement.pieceId + ':' + movement.sizeId;
@@ -755,6 +787,8 @@ export function ProductionModule({
   const [inventoryEntryModes, setInventoryEntryModes] = useState<Record<string, 'paridad' | 'lados'>>({});
   const [inventoryNote, setInventoryNote] = useState('Ingreso de piezas');
   const [showProductInventoryForm, setShowProductInventoryForm] = useState(false);
+  const [finishedInventorySearch, setFinishedInventorySearch] = useState('');
+  const [finishedInventoryFilter, setFinishedInventoryFilter] = useState<'Con stock' | 'Vacío' | 'Todos'>('Con stock');
   const [selectedPieceConfigurationProductId, setSelectedPieceConfigurationProductId] = useState('');
   const [selectedStockComponentId, setSelectedStockComponentId] = useState('');
   const [showComponentPieceMovement, setShowComponentPieceMovement] = useState(false);
@@ -837,7 +871,7 @@ export function ProductionModule({
     let safe = true;
     let warning = '';
     const version = Number(localStorage.getItem(PRODUCTION_STORAGE_KEYS.version) ?? '0');
-    if (version > 10) { safe = false; warning = 'Los datos de insumos fueron creados con una versión más reciente. Se evita sobrescribirlos.'; }
+    if (version > 11) { safe = false; warning = 'Los datos de insumos fueron creados con una versión más reciente. Se evita sobrescribirlos.'; }
     for (const key of Object.keys(empty) as (keyof ProductionBackupData)[]) {
       try {
         const raw = localStorage.getItem(PRODUCTION_STORAGE_KEYS[key]);
@@ -858,7 +892,7 @@ export function ProductionModule({
     const loaded = loadLocal();
     setData(loaded.data);
     setStorageSafe(loaded.safe);
-    if (loaded.safe) localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '10');
+    if (loaded.safe) localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '11');
     else setNotice({ text: loaded.warning, kind: 'error' });
     setReady(true);
     refreshTextiles();
@@ -901,7 +935,7 @@ export function ProductionModule({
     try {
       keys.forEach((key) => previous.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       keys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(data[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '10');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '11');
     } catch {
       previous.forEach((value, key) => {
         try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch { /* rollback best effort */ }
@@ -1928,6 +1962,31 @@ export function ProductionModule({
   const inventoryPhysicalTotal = inventoryProductSummaries.reduce((sum, item) => sum + item.physical, 0);
   const inventoryCompleteUnits = inventoryProductSummaries.reduce((sum, item) => sum + item.complete, 0);
 
+  function finishedGarmentStock(productModelId: string, sizeId: string): number {
+    return Math.max(0, data.finishedGarmentMovements
+      .filter((movement) => movement.productModelId === productModelId && movement.sizeId === sizeId)
+      .reduce((sum, movement) => sum + movement.delta, 0));
+  }
+
+  const finishedInventorySummaries = activeInventoryProducts.map((product) => {
+    const base = baseModels.find((model) => model.id === product.baseModelId);
+    const collection = data.productCollections.find((item) => item.id === product.collectionId)?.name ?? 'Sin colección';
+    const sizes = productSizeOptions(product).map((size) => ({ size, quantity: finishedGarmentStock(product.id, size.id) }));
+    const sizesWithStock = sizes.filter((item) => item.quantity > 0);
+    return { product, base, collection, sizesWithStock, total: sizesWithStock.reduce((sum, item) => sum + item.quantity, 0) };
+  });
+  const finishedInventorySearchNormalized = finishedInventorySearch.trim().toLocaleLowerCase('es');
+  const filteredFinishedInventory = finishedInventorySummaries.filter((item) => {
+    const matchesSearch = !finishedInventorySearchNormalized ||
+      (item.product.name + ' ' + (item.base?.name ?? '') + ' ' + item.collection).toLocaleLowerCase('es').includes(finishedInventorySearchNormalized);
+    const matchesFilter = finishedInventoryFilter === 'Todos' ||
+      (finishedInventoryFilter === 'Con stock' ? item.total > 0 : item.total === 0);
+    return matchesSearch && matchesFilter;
+  });
+  const finishedInventoryTotal = finishedInventorySummaries.reduce((sum, item) => sum + item.total, 0);
+  const finishedInventoryModelsWithStock = finishedInventorySummaries.filter((item) => item.total > 0).length;
+  const finishedInventorySizesWithStock = finishedInventorySummaries.reduce((sum, item) => sum + item.sizesWithStock.length, 0);
+
   function inventoryReservedPieceQuantity(productId: string, piece: ProductInventoryPiece, sizeId: string, side: 'izquierda' | 'derecha' | null): number {
     const productOrders = ordersHoldingStock.filter((order) => order.productModelId === productId);
     if (piece.scope === 'base') {
@@ -2080,6 +2139,64 @@ export function ProductionModule({
     setInventoryEntryModes({});
     const physicalTotal = [...baseRows, ...componentRows].reduce((sum, movement) => sum + Math.abs(movement.delta), 0);
     tell((inventoryOperation === 'entrada' ? 'Stock registrado: ' : 'Stock retirado: ') + format(physicalTotal) + ' piezas físicas en ' + selectedSizes.length + ' talla(s).');
+  }
+
+  function convertPieceSetToFinishedGarment(product: ConfiguredProductModel, sizeId: string) {
+    const productSizes = productSizeOptions(product);
+    const size = productSizes.find((item) => item.id === sizeId);
+    if (!size) return tell('La talla seleccionada ya no pertenece a este modelo.', 'error');
+    const productPieces = productInventoryPieces(product);
+    if (productPieces.length === 0) return tell('Este modelo no tiene piezas configuradas para convertir.', 'error');
+
+    // Recalcular con las reservas de órdenes activas para no consumir piezas comprometidas.
+    const availableUnits = getCompleteUnits(productPieces, productInventoryEffectiveLedger(product, productPieces, sizeId), sizeId);
+    if (availableUnits < 1) return tell('No hay un juego completo de piezas disponible para la talla ' + size.label + '.', 'error');
+
+    const physicalPiecesPerGarment = productPieces.reduce((sum, piece) => sum + piece.unitsPerGarment, 0);
+    if (!window.confirm(
+      'Convertir 1 unidad de «' + product.name + '» · talla ' + size.label + ' en prenda terminada.\n\n' +
+      'Se descontarán ' + physicalPiecesPerGarment + ' piezas físicas del inventario de este modelo (moldes base y componentes auxiliares) y se sumará 1 prenda terminada.\n\n' +
+      'Esta acción no crea una orden de producción ni registra consumos de tela o avíos.\n\n¿Continuar?'
+    )) return;
+
+    const baseRows: ProductBasePieceMovement[] = [];
+    const componentRows: ComponentPieceMovement[] = [];
+    const timestamp = now();
+    const note = 'Conversión rápida a prenda terminada';
+    for (const piece of productPieces) {
+      if (!Number.isInteger(piece.unitsPerGarment) || piece.unitsPerGarment < 1 ||
+          (piece.laterality === 'simetrica' && piece.unitsPerGarment % 2 !== 0)) {
+        return tell('No se pudo convertir: la cantidad requerida de «' + piece.name + '» no es válida.', 'error');
+      }
+      const push = (quantity: number, side?: 'izquierda' | 'derecha') => {
+        if (quantity <= 0) return;
+        const common = {
+          id: id(), productModelId: product.id, pieceId: piece.sourcePieceId, sizeId,
+          delta: -quantity, kind: 'salida' as const, side, note, date: timestamp,
+        };
+        if (piece.scope === 'base') baseRows.push(common as ProductBasePieceMovement);
+        else componentRows.push({ ...common, componentId: piece.componentId! } as ComponentPieceMovement);
+      };
+      if (piece.laterality === 'simetrica') {
+        const perSide = piece.unitsPerGarment / 2;
+        push(perSide, 'izquierda');
+        push(perSide, 'derecha');
+      } else {
+        push(piece.unitsPerGarment);
+      }
+    }
+
+    const finishedMovement: FinishedGarmentMovement = {
+      id: id(), productModelId: product.id, sizeId, delta: 1,
+      kind: 'conversion_piezas', note, date: timestamp,
+    };
+    setData((current) => ({
+      ...current,
+      productBasePieceMovements: [...current.productBasePieceMovements, ...baseRows],
+      componentPieceMovements: [...current.componentPieceMovements, ...componentRows],
+      finishedGarmentMovements: [...current.finishedGarmentMovements, finishedMovement],
+    }));
+    tell('Prenda terminada registrada: ' + product.name + ' · talla ' + size.label + '. Se descontó el juego completo de piezas.');
   }
 
   function exportProductInventoryCsv() {
@@ -2367,7 +2484,7 @@ export function ProductionModule({
     try {
       keys.forEach((key) => previous.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       keys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(next[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '10');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '11');
       setData(next);
       return true;
     } catch {
@@ -2672,7 +2789,7 @@ export function ProductionModule({
     try {
       productionKeys.forEach((key) => previousProduction.set(PRODUCTION_STORAGE_KEYS[key], localStorage.getItem(PRODUCTION_STORAGE_KEYS[key])));
       productionKeys.forEach((key) => localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(nextData[key])));
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '10');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '11');
       localStorage.setItem(FABRIC_STORAGE_KEYS.rollos, JSON.stringify(updatedRolls));
       localStorage.setItem(FABRIC_STORAGE_KEYS.rolloMovimientos, JSON.stringify(nextRollMovements));
       setData(nextData);
@@ -2696,6 +2813,7 @@ export function ProductionModule({
         <span className="count-badge">{activeInventoryProducts.length} modelos</span>
       </div>
       <div className="production-card-actions inventory-model-actions">
+        <button className="button secondary" onClick={() => onNavigate('inventario-prendas')}>✓ Ver prendas terminadas</button>
         <button className="button secondary" onClick={exportProductInventoryCsv}>↧ Exportar inventario</button>
         <button className="button secondary" disabled={activeInventoryProducts.length === 0} onClick={() => openProductInventoryForm('salida')}>− Retirar / merma</button>
         <button className="button primary" disabled={activeInventoryProducts.length === 0} onClick={() => openProductInventoryForm('entrada')}>＋ Registrar stock</button>
@@ -2802,6 +2920,10 @@ export function ProductionModule({
                         <div className="complete-count"><strong>{format(complete)}</strong><span>prendas fabricables</span></div>
                       </div>
                       <div className="completion-status-row"><span className={'completion-status ' + (complete > 0 ? 'ready' : physicalTotal > 0 ? 'partial' : 'empty-status')}><i />{complete > 0 ? 'Fabricable' : physicalTotal > 0 ? 'Incompleto' : 'Vacío'}</span></div>
+                      <div className="finished-conversion-action">
+                        <div><strong>{format(finishedGarmentStock(product.id, size.id))}</strong><small>prendas terminadas de esta talla</small></div>
+                        <button type="button" className="button primary" disabled={complete < 1} onClick={() => convertPieceSetToFinishedGarment(product, size.id)}>⇢ Convertir 1 prenda</button>
+                      </div>
                       {baseRows.length > 0 && <section className="inventory-product-piece-group"><h4>Moldes del patrón base <span>{baseRows.length}</span></h4>{baseRows.map(renderPiece)}</section>}
                       {componentGroups.map(({ selection, component, rows }) => <section className="inventory-product-piece-group" key={selection.id}><h4>{component.name} <span>{rows.length} piezas</span></h4>{rows.map(renderPiece)}</section>)}
                     </div>;
@@ -2813,6 +2935,41 @@ export function ProductionModule({
           {filteredInventoryProducts.length === 0 && <div className="empty">No hay modelos que coincidan con la búsqueda o el filtro.</div>}
         </div>
       </>}
+    </section>;
+
+    if (view === 'inventario-prendas') return <section className="panel production-panel finished-garment-inventory">
+      <div className="panel-heading">
+        <div><h2>Inventario de prendas terminadas</h2><p>Vista rápida por modelo y talla. Este inventario es un prototipo: por ahora las existencias ingresan al convertir juegos completos de piezas.</p></div>
+        <span className="count-badge">{finishedInventoryModelsWithStock} modelos con prendas</span>
+      </div>
+      <div className="production-card-actions inventory-model-actions">
+        <button className="button secondary" onClick={() => onNavigate('inventario-piezas')}>▦ Ver inventario de piezas</button>
+      </div>
+      <div className="stats-grid piece-stats finished-garment-stats">
+        <article className="stat-card"><div className="stat-top"><span>Prendas terminadas</span><span className="stat-icon green">✓</span></div><strong>{format(finishedInventoryTotal)}</strong><small>Unidades registradas por conversión</small></article>
+        <article className="stat-card"><div className="stat-top"><span>Modelos disponibles</span><span className="stat-icon purple">▧</span></div><strong>{finishedInventoryModelsWithStock}</strong><small>De {activeInventoryProducts.length} modelos activos</small></article>
+        <article className="stat-card"><div className="stat-top"><span>Tallas con prendas</span><span className="stat-icon blue">#</span></div><strong>{finishedInventorySizesWithStock}</strong><small>Combinaciones modelo y talla</small></article>
+      </div>
+      <div className="filters inventory-filters">
+        <label className="search-box"><span aria-hidden="true">⌕</span><input value={finishedInventorySearch} onChange={(event) => setFinishedInventorySearch(event.target.value)} placeholder="Buscar modelo terminado…" aria-label="Buscar modelo terminado" /></label>
+        <div className="filter-segment" aria-label="Filtrar prendas terminadas">{(['Con stock', 'Vacío', 'Todos'] as const).map((filter) => <button key={filter} className={finishedInventoryFilter === filter ? 'selected' : ''} onClick={() => setFinishedInventoryFilter(filter)}>{filter}</button>)}</div>
+      </div>
+      <div className="finished-garment-list">
+        {filteredFinishedInventory.map(({ product, base, collection, sizesWithStock, total }) => <article className="finished-garment-card" key={product.id}>
+          <div className="finished-garment-card-heading">
+            <span className="model-symbol" aria-hidden="true">✓</span>
+            <div className="finished-garment-card-title"><strong>{product.name}</strong><small>{base?.name ?? 'Patrón no disponible'} · {collection}</small></div>
+            <div className="finished-garment-total"><strong>{format(total)}</strong><small>terminadas</small></div>
+          </div>
+          {sizesWithStock.length > 0
+            ? <div className="finished-garment-size-grid">{sizesWithStock.map(({ size, quantity }) => <div className="finished-garment-size-chip" key={size.id}>
+                <small>Talla</small><strong>{size.label}</strong><b>{format(quantity)}</b><small>unidades</small>
+              </div>)}</div>
+            : <div className="finished-garment-empty">Todavía no hay prendas terminadas registradas.</div>}
+        </article>)}
+        {filteredFinishedInventory.length === 0 && <div className="empty">No hay modelos que coincidan con la búsqueda o el filtro.</div>}
+      </div>
+      <div className="panel-footer"><span>Prototipo editable · sin precios ni ventas.</span><span>Las conversiones descuentan piezas y agregan prendas por talla.</span></div>
     </section>;
 
     if (view === 'insumos') return <section className="panel production-panel">
