@@ -15,8 +15,8 @@ export function normalizeComponentColorSlot(value: unknown, legacyColorId?: unkn
   return typeof legacyColorId === 'string' && legacyColorId.trim() ? 'principal' : 'ninguna';
 }
 
-export function secondaryColorSlotIndex(slot: string): number {
-  const match = SECONDARY_COLOR_SLOT_PATTERN.exec(slot);
+export function secondaryColorSlotIndex(slot?: string): number {
+  const match = SECONDARY_COLOR_SLOT_PATTERN.exec(slot ?? '');
   return match ? Number(match[1]) : 0;
 }
 
