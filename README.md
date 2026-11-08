@@ -242,3 +242,11 @@ Al completar una orden, el operador confirma las cantidades reales de cada avío
 - Las piezas marcadas como `Cualquier color` mantienen una selección concreta independiente por pieza, dentro de ese modelo comercial; no generan una posición compartida artificial.
 - Al editar los colores de un modelo existente se utiliza el mismo conjunto de posiciones realmente usadas y se conservan las asignaciones antiguas que ya no estén en uso.
 - Se corrigió el reconocimiento de identificadores `secundaria_N` al guardar y reabrir patrones; antes, el escape incorrecto impedía reconocer esos índices en la pantalla de moldes.
+
+### Configuración de materiales por pieza en modelos comerciales
+
+- La tarjeta del modelo comercial ya no despliega ni presenta el inventario auxiliar durante la etapa de configuración.
+- La acción **Piezas y materiales** abre una vista dedicada que muestra por separado los moldes del patrón base y las piezas de los componentes seleccionados.
+- Cada pieza puede ajustar su tela y color para ese modelo comercial. Los valores se guardan como excepciones por pieza en `basePieceOverrides` o en `components[].pieceOverrides`; no modifican el patrón base ni la biblioteca de componentes.
+- Si una pieza no tiene excepción, hereda la tela/color de la posición configurada. Cada campo permite restablecer esa herencia de forma independiente.
+- Los campos se guardan automáticamente en el almacenamiento local existente. Los saldos y movimientos de inventario auxiliar históricos no se eliminan; el control de existencias queda fuera de esta pantalla y se abordará en una etapa posterior.
