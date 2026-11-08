@@ -1756,6 +1756,146 @@ export function ProductionModule({
   const holdingStatuses: ProductionOrderStatus[] = ['reservada', 'en_proceso'];
   const ordersHoldingStock = data.productionOrders.filter((order) => holdingStatuses.includes(order.status));
 
+  function productBasePieceDomainLedger(productModelId: string, pieceId: string, sizeId: string): DomainPieceMovement[] {
+    return data.productBasePieceMovements.filter((movement) =>
+      movement.productModelId === productModelId && movement.pieceId === pieceId && movement.sizeId === sizeId
+    ).map((movement) => ({
+      id: movement.id, pieceId: movement.pieceId, sizeId: movement.sizeId, delta: movement.delta,
+      kind: movement.kind, side: movement.side, note: movement.note, date: movement.date,
+    }));
+  }
+
+  function productInventoryPieces(product: ConfiguredProductModel): ProductInventoryPiece[] {
+    const basePiecesForProduct = basePieces.filter((piece) => piece.modelId === product.baseModelId && !piece.archived);
+    const baseRows: ProductInventoryPiece[] = basePiecesForProduct.map((piece) => {
+      const override = product.basePieceOverrides?.[piece.id];
+      const hasTextileOverride = Boolean(override && Object.prototype.hasOwnProperty.call(override, 'textileId'));
+      const hasColorOverride = Boolean(override && Object.prototype.hasOwnProperty.call(override, 'colorId'));
+      const fabricSlot = piece.fabricSlot ?? 'principal';
+      const colorSlot = normalizeComponentColorSlot(piece.colorSlot, piece.colorId);
+      const textileId = hasTextileOverride ? override?.textileId ?? null : fabricSlot === 'cualquiera' || fabricSlot === 'ninguna' ? null
+        : data.productFabrics.find((assignment) => assignment.productModelId === product.id && assignment.fabricSlot === fabricSlot)?.textileId ?? null;
+      const colorId = hasColorOverride ? override?.colorId ?? null : colorSlot === 'cualquiera' ? null
+        : colorSlot === 'ninguna' ? piece.colorId ?? null : resolveComponentPieceColorId(product.id, colorSlot, data.productColors);
+      const textile = textileId ? textileContext.telas.find((item) => item.id === textileId) : undefined;
+      return {
+        ...piece,
+        scope: 'base',
+        componentId: null,
+        componentName: 'Molde base',
+        textileName: textile?.nombreTela ?? (fabricSlot === 'ninguna' ? 'Sin tela definida' : 'Sin asignar'),
+        colorName: colorId ? componentColorName(colorId) : (colorSlot === 'ninguna' ? 'Sin color' : 'Sin asignar'),
+      };
+    });
+    const componentRows: ProductInventoryPiece[] = product.components.flatMap((selection) => {
+      const component = data.components.find((item) => item.id === selection.componentId && item.active);
+      if (!component) return [];
+      return component.pieces.map((piece) => {
+        const override = selection.pieceOverrides?.[piece.id];
+        const hasTextileOverride = Boolean(override && Object.prototype.hasOwnProperty.call(override, 'textileId'));
+        const hasColorOverride = Boolean(override && Object.prototype.hasOwnProperty.call(override, 'colorId'));
+        const colorSlot = normalizeComponentColorSlot(piece.colorSlot, piece.colorId);
+        const textileId = hasTextileOverride ? override?.textileId ?? null
+          : piece.fabricSlot === 'ninguna' || piece.fabricSlot === 'cualquiera' ? null
+          : resolveComponentPieceTextileId(product.id, piece.fabricSlot, data.productFabrics);
+        const colorId = hasColorOverride ? override?.colorId ?? null : colorSlot === 'cualquiera' ? null
+          : colorSlot === 'ninguna' ? piece.colorId : resolveComponentPieceColorId(product.id, colorSlot, data.productColors);
+        const textile = textileId ? textileContext.telas.find((item) => item.id === textileId) : undefined;
+        return {
+          id: piece.id,
+          modelId: product.baseModelId,
+          name: piece.name,
+          unitsPerGarment: piece.unitsPerGarment * selection.quantity,
+          laterality: piece.laterality,
+          sortOrder: 100000 + component.pieces.indexOf(piece),
+          fabricSlot: piece.fabricSlot,
+          colorSlot,
+          colorId,
+          fabricType: textile?.nombreTela ?? (piece.fabricSlot === 'ninguna' ? 'Sin tela definida' : 'Sin asignar'),
+          color: colorId ? componentColorName(colorId) : (colorSlot === 'ninguna' ? 'Sin color' : 'Sin asignar'),
+          scope: 'component' as const,
+          componentId: component.id,
+          componentName: component.name,
+          textileName: textile?.nombreTela ?? (piece.fabricSlot === 'ninguna' ? 'Sin tela definida' : 'Sin asignar'),
+          colorName: colorId ? componentColorName(colorId) : (colorSlot === 'ninguna' ? 'Sin color' : 'Sin asignar'),
+        };
+      });
+    });
+    return [...baseRows, ...componentRows];
+  }
+
+  function productPieceDomainLedger(productModelId: string, piece: ProductInventoryPiece, sizeId: string): DomainPieceMovement[] {
+    return piece.scope === 'base'
+      ? productBasePieceDomainLedger(productModelId, piece.id, sizeId)
+      : componentPieceDomainLedger(productModelId, piece.id, sizeId);
+  }
+
+  function productInventoryDomainLedger(productModelId: string, sizeId: string): DomainPieceMovement[] {
+    return [
+      ...data.productBasePieceMovements.filter((movement) => movement.productModelId === productModelId && movement.sizeId === sizeId),
+      ...data.componentPieceMovements.filter((movement) => movement.productModelId === productModelId && movement.sizeId === sizeId),
+    ].map((movement) => ({
+      id: movement.id, pieceId: movement.pieceId, sizeId: movement.sizeId, delta: movement.delta,
+      kind: movement.kind, side: movement.side, note: movement.note, date: movement.date,
+    }));
+  }
+
+  function unassignedLegacyBaseMovements(product: ConfiguredProductModel): DomainPieceMovement[] {
+    const pieceIds = new Set(basePieces.filter((piece) => piece.modelId === product.baseModelId && !piece.archived).map((piece) => piece.id));
+    const importedIds = new Set(data.productBasePieceMovements.map((movement) => movement.sourceMovementId).filter((value): value is string => Boolean(value)));
+    return baseMovements.filter((movement) => pieceIds.has(movement.pieceId) && !importedIds.has(movement.id));
+  }
+
+  function importLegacyBaseStock(product: ConfiguredProductModel) {
+    const legacy = unassignedLegacyBaseMovements(product);
+    if (legacy.length === 0) return tell('No hay movimientos históricos pendientes de asignar para este patrón.', 'info');
+    const baseName = baseModels.find((model) => model.id === product.baseModelId)?.name ?? 'Patrón base';
+    const confirmed = window.confirm(
+      'Se asignarán ' + legacy.length + ' movimientos históricos de «' + baseName + '» al modelo comercial «' + product.name + '».\n\n' +
+      'Esto evita que el mismo stock aparezca en otros modelos que reutilizan el patrón. Los movimientos originales se conservarán en el historial antiguo y no se borrarán.\n\n¿Continuar?'
+    );
+    if (!confirmed) return;
+    const imported: ProductBasePieceMovement[] = legacy.map((movement) => ({
+      id: id(), productModelId: product.id, pieceId: movement.pieceId, sizeId: movement.sizeId,
+      delta: movement.delta, kind: movement.kind, side: movement.side, note: movement.note,
+      date: movement.date, sourceMovementId: movement.id, sourceProductionOrderId: movement.sourceProductionOrderId ?? null,
+    }));
+    setData((current) => ({
+      ...current,
+      productBasePieceMovements: [...current.productBasePieceMovements, ...imported],
+    }));
+    tell('Stock histórico asignado a ' + product.name + '. Los demás modelos no recibirán estas existencias.');
+  }
+
+  const activeInventoryProducts = data.productModels.filter((product) => product.active);
+  const inventoryProductSummaries = activeInventoryProducts.map((product) => {
+    const base = baseModels.find((model) => model.id === product.baseModelId);
+    const productPieces = productInventoryPieces(product);
+    const productSizes = productSizeOptions(product);
+    const hasStock = productSizes.some((size) => productPieces.some((piece) =>
+      getPieceStock(productInventoryDomainLedger(product.id, size.id), piece.id, size.id) > 0
+    ));
+    const complete = productSizes.reduce((sum, size) =>
+      sum + getCompleteUnits(productPieces, productInventoryDomainLedger(product.id, size.id), size.id), 0);
+    const physical = productSizes.reduce((sum, size) => sum + productPieces.reduce((pieceSum, piece) => {
+      const ledger = productPieceDomainLedger(product.id, piece, size.id);
+      return pieceSum + (piece.laterality === 'simetrica'
+        ? getSymmetricStock(ledger, piece.id, size.id).physicalTotal
+        : Math.max(0, getPieceStock(ledger, piece.id, size.id)));
+    }, 0), 0);
+    return { product, base, productPieces, productSizes, hasStock, complete, physical };
+  });
+  const inventorySearchNormalized = inventorySearch.trim().toLocaleLowerCase('es');
+  const filteredInventoryProducts = inventoryProductSummaries.filter(({ product, base, productPieces, productSizes, hasStock }) => {
+    const searchText = [product.name, base?.name ?? '', ...productPieces.map((piece) => piece.name), ...productPieces.map((piece) => piece.textileName), ...productPieces.map((piece) => piece.colorName)].join(' ').toLocaleLowerCase('es');
+    const matchesSearch = !inventorySearchNormalized || searchText.includes(inventorySearchNormalized);
+    const matchesFilter = inventoryFilter === 'Todos' || (inventoryFilter === 'Con stock' ? hasStock : !hasStock);
+    return matchesSearch && matchesFilter && productSizes.length >= 0;
+  });
+  const inventoryModelsWithStock = inventoryProductSummaries.filter((item) => item.hasStock).length;
+  const inventoryPhysicalTotal = inventoryProductSummaries.reduce((sum, item) => sum + item.physical, 0);
+  const inventoryCompleteUnits = inventoryProductSummaries.reduce((sum, item) => sum + item.complete, 0);
+
   const plan = useMemo(() => {
     type PlannedMaterial = MaterialRequirement & { productSpecification?: SizeSpecification };
     type PlannedRow = { bySize: Record<string, number>; missingSizes: string[]; specificationsBySize: Record<string, string[]> };
