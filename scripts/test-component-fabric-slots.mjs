@@ -113,11 +113,11 @@ test('solicita solo posiciones de color usadas por el patrón y sus componentes'
     { colorSlot: 'cualquiera', colorId: null },
     { colorSlot: undefined, colorId: 'legacy-color' },
   ]);
-  assert.deepEqual(slots, ['principal', 'secundaria_1', 'secundaria_2']);
-  assert.deepEqual(requiredProductColorSlots([
+  assert.equal(JSON.stringify(slots), JSON.stringify(['principal', 'secundaria_1', 'secundaria_2']));
+  assert.equal(JSON.stringify(requiredProductColorSlots([
     { colorSlot: 'cualquiera', colorId: null },
     { colorSlot: 'ninguna', colorId: null },
-  ]), []);
+  ])), JSON.stringify([]));
 });
 
 test('resuelve el color de componentes por modelo comercial sin cruzar asignaciones', () => {
