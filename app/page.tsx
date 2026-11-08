@@ -67,7 +67,7 @@ const newId = () => typeof crypto !== 'undefined' && 'randomUUID' in crypto ? cr
 const fabricSlotLabel = (slot: FabricSlot) => {
   if (slot === 'cualquiera') return 'Cualquier tela';
   if (slot === 'principal') return 'Tela principal 1';
-  const match = /^secundaria_(\\d+)$/.exec(slot);
+  const match = /^secundaria_(\d+)$/.exec(slot);
   return match ? `Tela secundaria ${Number(match[1])}` : slot;
 };
 const fabricSlotOptions = (secondaryCount: number): FabricSlot[] =>
@@ -76,18 +76,18 @@ const colorSlotLabel = (slot: string) => {
   if (slot === 'ninguna') return 'Sin color';
   if (slot === 'cualquiera') return 'Cualquier color';
   if (slot === 'principal') return 'Color principal 1';
-  const match = /^secundaria_(\\d+)$/.exec(slot);
+  const match = /^secundaria_(\d+)$/.exec(slot);
   return match ? `Color secundario ${Number(match[1])}` : 'Posición de color inválida';
 };
 const colorSlotOptions = (secondaryCount: number) => [
   'ninguna', 'cualquiera', 'principal', ...Array.from({ length: secondaryCount }, (_, index) => `secundaria_${index + 1}`),
 ];
 const secondaryColorSlotIndex = (slot?: string) => {
-  const match = /^secundaria_(\\d+)$/.exec(slot ?? '');
+  const match = /^secundaria_(\d+)$/.exec(slot ?? '');
   return match ? Number(match[1]) : 0;
 };
 const secondarySlotIndex = (slot?: string) => {
-  const match = /^secundaria_(\\d+)$/.exec(slot ?? '');
+  const match = /^secundaria_(\d+)$/.exec(slot ?? '');
   return match ? Number(match[1]) : 0;
 };
 const isValidFabricSlot = (slot: string, secondaryCount: number) =>
