@@ -3117,76 +3117,115 @@ export function ProductionModule({
 
     if (view === 'componentes') return <section className="panel production-panel">
       <div className="panel-heading"><div><h2>Biblioteca de componentes</h2><p>Configura una vez los acabados que podrás reutilizar en distintos modelos.</p></div><button className="button primary" onClick={newComponent}>＋ Nuevo componente</button></div>
-      {componentDraft && <form className="production-form" onSubmit={saveComponent}>
-        <div className="production-form-grid">
-          <label className="field-label">Tipo<select className="large-input" value={componentDraft.type} onChange={(e) => setComponentDraft({ ...componentDraft, type: e.target.value })}>{componentTypes.map((x) => <option key={x}>{x}</option>)}</select></label>
-          <label className="field-label">Nombre<input className="large-input" value={componentDraft.name} onChange={(e) => setComponentDraft({ ...componentDraft, name: e.target.value })} placeholder="Ej. Cuello camisero clásico" required /></label>
-        </div>
-        <label className="field-label">Fotografía de referencia (URL opcional)<input className="large-input" value={componentDraft.imageUrl} onChange={(e) => setComponentDraft({ ...componentDraft, imageUrl: e.target.value })} placeholder="https://…" /></label>
-        <label className="field-label">Descripción<textarea className="large-input" rows={2} value={componentDraft.description} onChange={(e) => setComponentDraft({ ...componentDraft, description: e.target.value })} /></label>
-        <div className="production-subheading"><strong>Piezas auxiliares de patronaje</strong><button type="button" className="text-action" onClick={() => setComponentDraft({ ...componentDraft, pieces: [...componentDraft.pieces, { id: id(), name: '', unitsPerGarment: 1, laterality: 'ninguna', fabricSlot: 'cualquiera', textileId: null, colorSlot: 'cualquiera', colorId: null }] })}>＋ Agregar pieza</button></div>
-        {componentDraft.pieces.map((piece, index) => {
-          const secondaryIndex = secondaryFabricSlotIndex(piece.fabricSlot);
-          const fabricKind = piece.fabricSlot === 'cualquiera' ? 'cualquiera' : piece.fabricSlot === 'principal' ? 'principal' : secondaryIndex > 0 ? 'secundaria' : 'ninguna';
-          const colorSlot = normalizeComponentColorSlot(piece.colorSlot, piece.colorId);
-          const colorIndex = secondaryColorSlotIndex(colorSlot);
-          const colorKind = colorSlot === 'cualquiera' ? 'cualquiera' : colorSlot === 'principal' ? 'principal' : colorIndex > 0 ? 'secundaria' : 'ninguna';
-          return <div className="production-piece-row" key={piece.id}>
-            <label className="field-label">Nombre de pieza<input className="large-input" value={piece.name} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, name: e.target.value } : x) })} placeholder="Ej. Pechera" /></label>
-            <label className="field-label">Posición de tela
-              <select className="large-input" value={fabricKind} onChange={(e) => {
-                const nextKind = e.target.value;
-                setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? {
-                  ...x,
-                  fabricSlot: (nextKind === 'principal' ? 'principal' : nextKind === 'cualquiera' ? 'cualquiera' : nextKind === 'secundaria' ? (secondaryFabricSlotIndex(x.fabricSlot) > 0 ? x.fabricSlot : 'secundaria_1') : 'ninguna') as ComponentFabricSlot,
-                  textileId: null,
-                } : x) });
-              }}>
-                <option value="ninguna">Sin tela vinculada</option>
-                <option value="cualquiera">Cualquier tela</option>
-                <option value="principal">Tela principal 1</option>
-                <option value="secundaria">Tela secundaria</option>
-              </select>
-              {secondaryIndex > 0 && <span className="component-piece-secondary-index">
-                <span>N.º de tela secundaria</span>
-                <input className="large-input" type="number" min="1" step="1" aria-label="Número de tela secundaria" value={secondaryIndex} onChange={(e) => {
-                  const slotIndex = Number(e.target.value);
-                  if (!Number.isInteger(slotIndex) || slotIndex < 1) return;
-                  setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, fabricSlot: ('secundaria_' + slotIndex) as ComponentFabricSlot } : x) });
-                }} />
-              </span>}
-              <small>Una posición numerada hereda la tela del modelo. «Cualquier tela» deja la elección abierta para cada modelo comercial.</small>
+      {componentDraft && <form className="production-form pattern-editor-form pattern-editor-auxiliary" onSubmit={saveComponent}>
+        <section className="pattern-editor-section">
+          <div className="pattern-editor-section-heading">
+            <div><strong>1. Datos del componente</strong><small>Identifica el elemento para reutilizarlo en distintos modelos.</small></div>
+            <span className="pattern-editor-step">BÁSICO</span>
+          </div>
+          <div className="pattern-editor-basics-grid">
+            <label className="field-label">Tipo de componente
+              <select className="large-input" value={componentDraft.type} onChange={(e) => setComponentDraft({ ...componentDraft, type: e.target.value })}>{componentTypes.map((x) => <option key={x}>{x}</option>)}</select>
             </label>
-            <label className="field-label">Posición de color
-              <select className="large-input" value={colorKind} onChange={(e) => {
-                const nextKind = e.target.value;
-                setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? {
-                  ...x,
-                  colorSlot: (nextKind === 'principal' ? 'principal' : nextKind === 'cualquiera' ? 'cualquiera' : nextKind === 'secundaria' ? (secondaryColorSlotIndex(normalizeComponentColorSlot(x.colorSlot, x.colorId)) > 0 ? normalizeComponentColorSlot(x.colorSlot, x.colorId) : 'secundaria_1') : 'ninguna') as ComponentColorSlot,
-                } : x) });
-              }}>
-                <option value="ninguna">Sin color vinculado</option>
-                <option value="cualquiera">Cualquier color</option>
-                <option value="principal">Color principal 1</option>
-                <option value="secundaria">Color secundario</option>
-              </select>
-              {colorIndex > 0 && <span className="component-piece-secondary-index">
-                <span>N.º de color secundario</span>
-                <input className="large-input" type="number" min="1" step="1" aria-label="Número de color secundario" value={colorIndex} onChange={(e) => {
-                  const slotIndex = Number(e.target.value);
-                  if (!Number.isInteger(slotIndex) || slotIndex < 1) return;
-                  setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, colorSlot: ('secundaria_' + slotIndex) as ComponentColorSlot } : x) });
-                }} />
-              </span>}
-              <small>Una posición numerada hereda el color del modelo. «Cualquier color» permite decidirlo para cada modelo comercial.</small>
+            <label className="field-label">Nombre
+              <input className="large-input" value={componentDraft.name} onChange={(e) => setComponentDraft({ ...componentDraft, name: e.target.value })} placeholder="Ej. Cuello camisero clásico" required />
             </label>
-            <label className="field-label">Piezas por prenda<input className="large-input" type="number" min="1" step="1" value={piece.unitsPerGarment} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, unitsPerGarment: Number(e.target.value) } : x) })} /></label>
-            <label className="field-label">Lateralidad<select className="large-input" value={piece.laterality} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, laterality: e.target.value as ComponentPiece['laterality'] } : x) })}><option value="ninguna">Sin lado</option><option value="simetrica">Simétrica</option><option value="izquierda">Izquierda</option><option value="derecha">Derecha</option></select></label>
-            <button type="button" className="text-action danger-action" onClick={() => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.filter((_, i) => i !== index) })}>Quitar</button>
-          </div>;
-        })}
-        <MaterialEditor materials={componentDraft.materials} onChange={(materials) => setComponentDraft({ ...componentDraft, materials })} variants={variants} supplies={supplies} sizes={sizes} title="Materiales y consumos del componente" onCreateSupplyVariant={createSupplyVariantFromMaterial} allowSizeSpecifications />
-        <div className="form-actions"><button type="button" className="button secondary" onClick={cancelComponentDraft}>Cancelar</button><button className="button primary">Guardar componente</button></div>
+            <label className="field-label">Fotografía de referencia <span className="pattern-editor-optional">Opcional · URL</span>
+              <input className="large-input" value={componentDraft.imageUrl} onChange={(e) => setComponentDraft({ ...componentDraft, imageUrl: e.target.value })} placeholder="https://…" />
+            </label>
+            <label className="field-label">Descripción <span className="pattern-editor-optional">Opcional</span>
+              <textarea className="large-input pattern-editor-textarea" rows={2} value={componentDraft.description} onChange={(e) => setComponentDraft({ ...componentDraft, description: e.target.value })} placeholder="Detalles para reconocer este componente…" />
+            </label>
+          </div>
+        </section>
+
+        <section className="pattern-editor-section">
+          <div className="pattern-editor-section-heading">
+            <div><strong>2. Piezas auxiliares</strong><small>Configura las piezas que forman este componente.</small></div>
+            <span className="pattern-editor-count">{componentDraft.pieces.length} {componentDraft.pieces.length === 1 ? 'pieza' : 'piezas'}</span>
+          </div>
+          <div className="pattern-editor-piece-heading">
+            <div><strong>Lista de piezas</strong><small>Tela y color se resolverán según el modelo comercial.</small></div>
+            <button type="button" className="button secondary pattern-editor-add-button" onClick={() => setComponentDraft({ ...componentDraft, pieces: [...componentDraft.pieces, { id: id(), name: '', unitsPerGarment: 1, laterality: 'ninguna', fabricSlot: 'cualquiera', textileId: null, colorSlot: 'cualquiera', colorId: null }] })}>＋ Añadir pieza</button>
+          </div>
+          <div className="pattern-editor-piece-list">
+            {componentDraft.pieces.map((piece, index) => {
+              const secondaryIndex = secondaryFabricSlotIndex(piece.fabricSlot);
+              const fabricKind = piece.fabricSlot === 'cualquiera' ? 'cualquiera' : piece.fabricSlot === 'principal' ? 'principal' : secondaryIndex > 0 ? 'secundaria' : 'ninguna';
+              const colorSlot = normalizeComponentColorSlot(piece.colorSlot, piece.colorId);
+              const colorIndex = secondaryColorSlotIndex(colorSlot);
+              const colorKind = colorSlot === 'cualquiera' ? 'cualquiera' : colorSlot === 'principal' ? 'principal' : colorIndex > 0 ? 'secundaria' : 'ninguna';
+              return <article className="pattern-editor-piece pattern-editor-aux-piece" key={piece.id}>
+                <div className="pattern-editor-piece-top">
+                  <div className="pattern-editor-piece-title"><span className="pattern-editor-piece-number">{String(index + 1).padStart(2, '0')}</span><div><strong>Pieza auxiliar {index + 1}</strong><small>Parte del componente</small></div></div>
+                  <button type="button" className="remove-piece" onClick={() => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.filter((x) => x.id !== piece.id) })}>Quitar pieza</button>
+                </div>
+                <div className="pattern-editor-piece-fields pattern-editor-aux-fields">
+                  <label className="field-label">Nombre de pieza
+                    <input className="large-input" value={piece.name} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, name: e.target.value } : x) })} placeholder="Ej. Pechera" required />
+                  </label>
+                  <label className="field-label">Posición de tela
+                    <select className="large-input" value={fabricKind} onChange={(e) => {
+                      const nextKind = e.target.value;
+                      setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? {
+                        ...x,
+                        fabricSlot: (nextKind === 'principal' ? 'principal' : nextKind === 'cualquiera' ? 'cualquiera' : nextKind === 'secundaria' ? (secondaryFabricSlotIndex(x.fabricSlot) > 0 ? x.fabricSlot : 'secundaria_1') : 'ninguna') as ComponentFabricSlot,
+                        textileId: null,
+                      } : x) });
+                    }}>
+                      <option value="ninguna">Sin tela vinculada</option><option value="cualquiera">Cualquier tela</option><option value="principal">Tela principal 1</option><option value="secundaria">Tela secundaria</option>
+                    </select>
+                    {secondaryIndex > 0 && <span className="component-piece-secondary-index">
+                      <span>N.º de tela secundaria</span>
+                      <input className="large-input" type="number" min="1" step="1" aria-label="Número de tela secundaria" value={secondaryIndex} onChange={(e) => {
+                        const slotIndex = Number(e.target.value);
+                        if (!Number.isInteger(slotIndex) || slotIndex < 1) return;
+                        setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, fabricSlot: ('secundaria_' + slotIndex) as ComponentFabricSlot } : x) });
+                      }} />
+                    </span>}
+                    <small>Una posición numerada hereda la tela del modelo. «Cualquier tela» permite decidirla en cada modelo.</small>
+                  </label>
+                  <label className="field-label">Posición de color
+                    <select className="large-input" value={colorKind} onChange={(e) => {
+                      const nextKind = e.target.value;
+                      setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? {
+                        ...x,
+                        colorSlot: (nextKind === 'principal' ? 'principal' : nextKind === 'cualquiera' ? 'cualquiera' : nextKind === 'secundaria' ? (secondaryColorSlotIndex(normalizeComponentColorSlot(x.colorSlot, x.colorId)) > 0 ? normalizeComponentColorSlot(x.colorSlot, x.colorId) : 'secundaria_1') : 'ninguna') as ComponentColorSlot,
+                      } : x) });
+                    }}>
+                      <option value="ninguna">Sin color vinculado</option><option value="cualquiera">Cualquier color</option><option value="principal">Color principal 1</option><option value="secundaria">Color secundario</option>
+                    </select>
+                    {colorIndex > 0 && <span className="component-piece-secondary-index">
+                      <span>N.º de color secundario</span>
+                      <input className="large-input" type="number" min="1" step="1" aria-label="Número de color secundario" value={colorIndex} onChange={(e) => {
+                        const slotIndex = Number(e.target.value);
+                        if (!Number.isInteger(slotIndex) || slotIndex < 1) return;
+                        setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, colorSlot: ('secundaria_' + slotIndex) as ComponentColorSlot } : x) });
+                      }} />
+                    </span>}
+                    <small>Una posición numerada hereda el color del modelo; «Cualquier color» permite resolverlo al configurar cada modelo.</small>
+                  </label>
+                  <label className="field-label">Piezas por prenda
+                    <input className="large-input" type="number" inputMode="numeric" min="1" step="1" value={piece.unitsPerGarment} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, unitsPerGarment: Number(e.target.value) } : x) })} />
+                  </label>
+                  <label className="field-label">Lateralidad
+                    <select className="large-input" value={piece.laterality} onChange={(e) => setComponentDraft({ ...componentDraft, pieces: componentDraft.pieces.map((x, i) => i === index ? { ...x, laterality: e.target.value as ComponentPiece['laterality'] } : x) })}>
+                      <option value="ninguna">Sin lado</option><option value="simetrica">Simétrica</option><option value="izquierda">Solo izquierda</option><option value="derecha">Solo derecha</option>
+                    </select>
+                  </label>
+                </div>
+              </article>;
+            })}
+            {componentDraft.pieces.length === 0 && <div className="pattern-editor-empty"><strong>Este componente aún no tiene piezas</strong><span>Añade una pieza para describir su construcción.</span><button type="button" className="button secondary" onClick={() => setComponentDraft({ ...componentDraft, pieces: [...componentDraft.pieces, { id: id(), name: '', unitsPerGarment: 1, laterality: 'ninguna', fabricSlot: 'cualquiera', textileId: null, colorSlot: 'cualquiera', colorId: null }] })}>＋ Añadir primera pieza</button></div>}
+          </div>
+        </section>
+
+        <section className="pattern-editor-section pattern-editor-material-section">
+          <div className="pattern-editor-section-heading"><div><strong>3. Materiales y consumos</strong><small>Define los avíos y materiales asociados a este componente.</small></div></div>
+          <MaterialEditor materials={componentDraft.materials} onChange={(materials) => setComponentDraft({ ...componentDraft, materials })} variants={variants} supplies={supplies} sizes={sizes} title="Materiales y consumos del componente" onCreateSupplyVariant={createSupplyVariantFromMaterial} allowSizeSpecifications />
+        </section>
+
+        <div className="form-actions pattern-editor-actions"><button type="button" className="button secondary" onClick={cancelComponentDraft}>Cancelar</button><button className="button primary">Guardar componente</button></div>
       </form>}
       <div className="production-component-grid">
         {data.components.filter((x) => x.active).map((component) => <article className="production-card" key={component.id}>
