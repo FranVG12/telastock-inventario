@@ -233,3 +233,12 @@ Al completar una orden, el operador confirma las cantidades reales de cada avío
 - Cuando un modelo combina una tela y un color que todavía no tenían relación, se crea la asociación de esa tela con el color global. Sus códigos HEX/CMYK permanecen vacíos hasta que se configuren expresamente.
 - Los respaldos completos pasan a `schemaVersion: 13`; el módulo de producción local pasa a la versión 9 y conserva la compatibilidad con datos anteriores.
 - La migración `202611060010_configured_product_colors_and_wildcards.sql` incorpora posiciones de color, comodines, excepciones por modelo y la tabla `configured_product_colors`. Está preparada en la rama; **no se ejecuta automáticamente**. La aplicación sigue usando `localStorage` hasta completar la integración con Supabase y sus políticas RLS.
+
+### Corrección: colores secundarios por patrón y modelo comercial
+
+- El patrón base permite definir directamente la cantidad de colores secundarios (0–99). Cada pieza puede usar `Color principal 1`, `Color secundario 1..N`, `Cualquier color` o `Sin color`.
+- Los selectores y validadores utilizan el mismo analizador de posiciones; las posiciones numeradas se conservan al editar y restaurar patrones.
+- Al crear un modelo comercial, se solicitan únicamente las posiciones compartidas que utilizan los moldes del patrón base y los componentes auxiliares elegidos. Las posiciones duplicadas se solicitan una sola vez y se muestran en orden (principal, secundario 1, secundario 2…).
+- Las piezas marcadas como `Cualquier color` mantienen una selección concreta independiente por pieza, dentro de ese modelo comercial; no generan una posición compartida artificial.
+- Al editar los colores de un modelo existente se utiliza el mismo conjunto de posiciones realmente usadas y se conservan las asignaciones antiguas que ya no estén en uso.
+- Se corrigió el reconocimiento de identificadores `secundaria_N` al guardar y reabrir patrones; antes, el escape incorrecto impedía reconocer esos índices en la pantalla de moldes.
