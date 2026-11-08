@@ -1354,7 +1354,7 @@ export default function Home() {
                   </label>;
                 })}
               </div> : <div className="pattern-editor-empty"><strong>Esta tabla no tiene tallas</strong><span>Agrega tallas desde «Administrar tallas» para poder usar el patrón.</span></div>}
-              <small className="pattern-size-selection-help">Las tallas desactivadas no aparecerán al configurar el modelo comercial, registrar stock ni planificar la producción.</small>
+              <small className="pattern-size-selection-help">Las tallas desactivadas no aparecerán en el modelo comercial, el registro de stock ni la planificación. No se borran de la tabla maestra ni se eliminan sus movimientos anteriores; puedes reactivarlas cuando lo necesites.</small>
             </section>
 
             <section className="pattern-editor-section">
@@ -1447,7 +1447,7 @@ export default function Home() {
              const changed = draft !== undefined && draft.trim() !== size.label;
              return <div className="size-manager-row" key={size.id}><span className="size-order">{index + 1}</span><div className="size-name-editor"><label className="size-name-label">Nombre visible<input className="large-input" aria-label={`Editar nombre de talla ${size.label}`} title="Puedes cambiar este nombre; el ID histórico de la talla se conserva." value={draft ?? size.label} onChange={(event) => setSizeNameDrafts((previous) => ({ ...previous, [size.id]: event.target.value }))} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); saveSizeName(size.id); } if (event.key === 'Escape') setSizeNameDrafts((previous) => { const next = { ...previous }; delete next[size.id]; return next; }); }} /></label>{changed && <button type="button" className="text-action size-save-name" onClick={() => saveSizeName(size.id)}>Guardar nombre</button>}</div><div className="size-manager-actions"><button type="button" className="order-mold" disabled={index === 0} onClick={() => reorderSize(size.id, -1)} aria-label="Subir talla">↑</button><button type="button" className="order-mold" disabled={index === groupSizes(sizeManagerGroupId).length - 1} onClick={() => reorderSize(size.id, 1)} aria-label="Bajar talla">↓</button><button type="button" className="remove-piece" onClick={() => deleteSize(size)}>Eliminar</button></div></div>;
            })}{groupSizes(sizeManagerGroupId).length === 0 && <div className="empty">Este grupo todavía no tiene tallas. Agrega la primera arriba.</div>}</div>
-          <div className="symmetry-help">Si una talla ya tiene movimientos, no se elimina físicamente para no romper el historial. Puedes renombrarla o dejar de usarla. Los cambios de nombre y orden se guardan automáticamente en este prototipo.</div>
+          <div className="symmetry-help">Para cambiar un nombre, edítalo y pulsa «Guardar nombre». El orden se guarda automáticamente. Renombrar una talla conserva su identificador y su historial; si tiene movimientos, no se puede eliminar físicamente.</div>
           <div className="form-actions"><button type="button" className="button primary" onClick={closeSizeManager}>Listo</button></div>
         </section>
       </div>}
