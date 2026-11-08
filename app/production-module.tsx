@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { getCompleteUnits, getPieceStock, getSymmetricStock, type PieceMovement as DomainPieceMovement, type ManufacturingModel, type ModelPiece, type Size, type SizeGroup } from '@/lib/inventory-domain';
 import { FABRIC_STORAGE_KEYS, createGlobalColorQuickly, createTextileColorQuickly, createTextileQuickly, type RollMovement as FabricRollMovement } from '@/app/fabric-module';
 import { componentFabricSlotLabel, isComponentFabricSlot, isComponentFabricSlotAvailableForModel, normalizeComponentFabricSlot, resolveComponentPieceTextileId, secondaryFabricSlotIndex, type ComponentFabricSlot } from '@/lib/component-fabric-slots';
-import { componentColorSlotLabel, isComponentColorSlot, isComponentColorSlotAvailableForModel, normalizeComponentColorSlot, resolveComponentPieceColorId, secondaryColorSlotIndex, type ComponentColorSlot } from '@/lib/component-color-slots';
+import { componentColorSlotLabel, isComponentColorSlot, isComponentColorSlotAvailableForModel, normalizeComponentColorSlot, requiredProductColorSlots, resolveComponentPieceColorId, secondaryColorSlotIndex, type ComponentColorSlot } from '@/lib/component-color-slots';
 import { mapSizeSpecificationRules, validateSizeSpecification, type SizeSpecification, type SizeSpecificationRule } from '@/lib/material-size-specifications';
 
 export type ProductionView = 'insumos' | 'compras-avios' | 'componentes' | 'modelos-producto' | 'recetas' | 'planificacion' | 'ordenes';
@@ -471,12 +471,12 @@ const families = [
   { value: 'otro', label: 'Otro' },
 ];
 const componentTypes = ['Cuello', 'Bolsillo', 'Puño', 'Pretina', 'Tapetera', 'Cierre', 'Terminación', 'Otro'];
-const productColorSlotsForBaseModel = (model: ManufacturingModel) => ['principal', ...Array.from({ length: Math.max(0, Math.floor(model.secondaryColorSlots ?? 0)) }, (_, index) => 'secundaria_' + (index + 1))];
-const productColorSlotLabel = (slot: string) => {
-  if (slot === 'principal') return 'Color principal 1';
-  const match = /^secundaria_(\\d+)$/.exec(slot);
-  return match ? 'Color secundario ' + Number(match[1]) : slot;
-};
+const productColorSlotsForConfiguredModel = (baseModelId: string, basePieces: ModelPiece[], components: GarmentComponent[]) =>
+  requiredProductColorSlots([
+    ...basePieces.filter((piece) => piece.modelId === baseModelId && !piece.archived),
+    ...components.flatMap((component) => component.pieces),
+  ]);
+const productColorSlotLabel = (slot: string) => componentColorSlotLabel(slot);
 const unitLabel: Record<StockUnit, string> = { und: 'unidades', m: 'm', cm: 'cm', g: 'g', kg: 'kg', l: 'l', ml: 'ml' };
 const id = () => typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : 'prod-' + Date.now() + '-' + Math.random().toString(36).slice(2);
 const productFabricSlotsForBaseModel = (model: ManufacturingModel) => ['principal', ...Array.from({ length: Math.max(0, Math.floor(model.secondaryFabricSlots ?? 0)) }, (_, index) => 'secundaria_' + (index + 1))];
@@ -1319,7 +1319,8 @@ export function ProductionModule({
     if (data.productModels.some((x) => x.name.toLocaleLowerCase('es') === productName.trim().toLocaleLowerCase('es'))) return tell('Ya existe un modelo configurado con ese nombre.', 'error');
 
     const requiredFabricSlots = productFabricSlotsForBaseModel(selectedBaseModel);
-    const requiredColorSlots = productColorSlotsForBaseModel(selectedBaseModel);
+    const selectedComponents = data.components.filter((component) => component.active && productComponentIds.includes(component.id));
+    const requiredColorSlots = productColorSlotsForConfiguredModel(selectedBaseModel.id, basePieces, selectedComponents);
     const activeTextileIds = new Set(textileContext.telas.filter((textile) => textile.activo !== false).map((textile) => textile.id));
     const activeColorIds = new Set(textileContext.colores.map((color) => color.id));
     const missingSlots = requiredFabricSlots.filter((slot) => !activeTextileIds.has(productFabricAssignments[slot] ?? ''));
@@ -1341,7 +1342,6 @@ export function ProductionModule({
       basePieceOverrides[piece.id] = { textileId: needsTextile ? selection.textileId : null, colorId: needsColor ? selection.colorId : null };
     }
 
-    const selectedComponents = data.components.filter((component) => component.active && productComponentIds.includes(component.id));
     for (const component of selectedComponents) {
       const incompatiblePiece = component.pieces.find((piece) => !isComponentFabricSlotAvailableForModel(piece.fabricSlot, selectedBaseModel.secondaryFabricSlots ?? 0));
       if (incompatiblePiece) return tell('El componente "' + component.name + '" tiene la pieza "' + incompatiblePiece.name + '" vinculada a ' + componentFabricSlotLabel(incompatiblePiece.fabricSlot) + ', pero el patrón base "' + selectedBaseModel.name + '" no define esa posición. Añade esa tela secundaria al patrón base o cambia la posición de la pieza.', 'error');
@@ -1465,7 +1465,11 @@ export function ProductionModule({
   function openProductColorEditor(product: ConfiguredProductModel) {
     const base = baseModels.find((model) => model.id === product.baseModelId);
     if (!base) return tell('No se encontró el patrón base de este modelo.', 'error');
-    const slots = productColorSlotsForBaseModel(base);
+    const productComponents = product.components.flatMap((selection) => {
+      const component = data.components.find((item) => item.id === selection.componentId && item.active);
+      return component ? [component] : [];
+    });
+    const slots = productColorSlotsForConfiguredModel(base.id, basePieces, productComponents);
     const selected = Object.fromEntries(slots.map((slot) => [
       slot,
       data.productColors.find((assignment) => assignment.productModelId === product.id && assignment.colorSlot === slot)?.colorId ?? '',
@@ -1479,7 +1483,11 @@ export function ProductionModule({
     const product = data.productModels.find((item) => item.id === editingProductColorId && item.active);
     const base = product ? baseModels.find((model) => model.id === product.baseModelId) : undefined;
     if (!product || !base) return tell('No se encontró el modelo o su patrón base.', 'error');
-    const slots = productColorSlotsForBaseModel(base);
+    const productComponents = product.components.flatMap((selection) => {
+      const component = data.components.find((item) => item.id === selection.componentId && item.active);
+      return component ? [component] : [];
+    });
+    const slots = productColorSlotsForConfiguredModel(base.id, basePieces, productComponents);
     const activeColorIds = new Set(textileContext.colores.map((color) => color.id));
     const missing = slots.filter((slot) => !activeColorIds.has(editingProductColorAssignments[slot] ?? ''));
     if (missing.length > 0) return tell('Asigna un color del catálogo a: ' + missing.map(productColorSlotLabel).join(', ') + '.', 'error');
@@ -1487,6 +1495,7 @@ export function ProductionModule({
     const rows: ProductColorAssignment[] = slots.map((colorSlot) => ({
       id: id(), productModelId: product.id, colorSlot, colorId: editingProductColorAssignments[colorSlot], createdAt: timestamp, updatedAt: timestamp,
     }));
+    const preservedUnusedRows = data.productColors.filter((item) => item.productModelId === product.id && !slots.includes(item.colorSlot));
     const basePiecesForProduct = basePieces.filter((piece) => piece.modelId === base.id && !piece.archived);
     basePiecesForProduct.forEach((piece) => {
       const colorSlot = piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna');
@@ -1508,7 +1517,7 @@ export function ProductionModule({
     setData((current) => ({
       ...current,
       productModels: current.productModels.map((item) => item.id === product.id ? { ...item, updatedAt: timestamp } : item),
-      productColors: [...current.productColors.filter((item) => item.productModelId !== product.id), ...rows],
+      productColors: [...current.productColors.filter((item) => item.productModelId !== product.id), ...preservedUnusedRows, ...rows],
     }));
     setEditingProductColorId('');
     setEditingProductColorAssignments({});
@@ -1557,10 +1566,11 @@ export function ProductionModule({
   const componentColorName = (colorId: string | null | undefined) => colorId ? textileContext.colores.find((x) => x.id === colorId)?.nombre ?? 'Color no disponible' : 'Sin color';
   const selectedProductBasePattern = baseModels.find((model) => model.id === productBaseId);
   const selectedProductFabricSlots = selectedProductBasePattern ? productFabricSlotsForBaseModel(selectedProductBasePattern) : [];
-  const selectedProductColorSlots = selectedProductBasePattern ? productColorSlotsForBaseModel(selectedProductBasePattern) : [];
+  const selectedProductComponents = data.components.filter((component) => component.active && productComponentIds.includes(component.id));
+  const selectedProductColorSlots = selectedProductBasePattern ? productColorSlotsForConfiguredModel(selectedProductBasePattern.id, basePieces, selectedProductComponents) : [];
   const selectedProductBaseSizes = selectedProductBasePattern ? sizes.filter((size) => size.groupId === selectedProductBasePattern.sizeGroupId) : [];
   const selectedProductBaseWildcardPieces = selectedProductBasePattern ? basePieces.filter((piece) => piece.modelId === selectedProductBasePattern.id && !piece.archived && (piece.fabricSlot === 'cualquiera' || piece.colorSlot === 'cualquiera')) : [];
-  const selectedProductComponentWildcardPieces = data.components.filter((component) => component.active && productComponentIds.includes(component.id)).flatMap((component) => component.pieces.filter((piece) => piece.fabricSlot === 'cualquiera' || (piece.colorSlot ?? (piece.colorId ? 'principal' : 'cualquiera')) === 'cualquiera').map((piece) => ({ component, piece })));
+  const selectedProductComponentWildcardPieces = selectedProductComponents.flatMap((component) => component.pieces.filter((piece) => piece.fabricSlot === 'cualquiera' || (piece.colorSlot ?? (piece.colorId ? 'principal' : 'cualquiera')) === 'cualquiera').map((piece) => ({ component, piece })));
   const selectedProductMaterialRows = data.components.filter((component) => component.active && productComponentIds.includes(component.id)).flatMap((component) => component.materials.filter((material) => Boolean(material.specificationLabel?.trim())).map((material) => ({ component, material })));
   const activeTextiles = textileContext.telas.filter((textile) => textile.activo !== false).slice().sort((a, b) => a.nombreTela.localeCompare(b.nombreTela, 'es'));
   const editingFabricProduct = data.productModels.find((product) => product.id === editingProductFabricId);
@@ -1568,7 +1578,11 @@ export function ProductionModule({
   const editingFabricSlots = editingFabricBasePattern ? productFabricSlotsForBaseModel(editingFabricBasePattern) : [];
   const editingColorProduct = data.productModels.find((product) => product.id === editingProductColorId);
   const editingColorBasePattern = editingColorProduct ? baseModels.find((model) => model.id === editingColorProduct.baseModelId) : undefined;
-  const editingColorSlots = editingColorBasePattern ? productColorSlotsForBaseModel(editingColorBasePattern) : [];
+  const editingColorComponents = editingColorProduct ? editingColorProduct.components.flatMap((selection) => {
+    const component = data.components.find((item) => item.id === selection.componentId && item.active);
+    return component ? [component] : [];
+  }) : [];
+  const editingColorSlots = editingColorBasePattern ? productColorSlotsForConfiguredModel(editingColorBasePattern.id, basePieces, editingColorComponents) : [];
   const textileColorOptions = textileContext.telaColores.filter((x) => x.idTela === variantTextileId && x.activo);
   const activeProduct = data.productModels.find((x) => x.id === selectedProductId && x.active);
   const selectedStockProductModel = data.productModels.find((x) => x.id === selectedStockProductModelId && x.active);
@@ -2581,7 +2595,11 @@ export function ProductionModule({
           return productFabricSlotLabel(slot) + ': ' + (textile?.nombreTela ?? 'Sin asignar');
         }).join(' · ') : 'Sin patrón base';
         const productColorRows = data.productColors.filter((assignment) => assignment.productModelId === product.id);
-        const productColorSummary = base ? productColorSlotsForBaseModel(base).map((slot) => {
+        const productComponentsForColors = product.components.flatMap((selection) => {
+          const component = data.components.find((item) => item.id === selection.componentId && item.active);
+          return component ? [component] : [];
+        });
+        const productColorSummary = base ? productColorSlotsForConfiguredModel(base.id, basePieces, productComponentsForColors).map((slot) => {
           const assignment = productColorRows.find((item) => item.colorSlot === slot);
           const color = assignment ? textileContext.colores.find((item) => item.id === assignment.colorId) : undefined;
           return productColorSlotLabel(slot) + ': ' + (color?.nombre ?? 'Sin asignar');
