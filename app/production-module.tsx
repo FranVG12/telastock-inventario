@@ -190,6 +190,14 @@ export type ProductColorAssignment = {
 
 export type ProductPieceOverride = { textileId?: string | null; colorId?: string | null };
 type ProductPieceOverrideField = 'textileId' | 'colorId';
+type ProductInventoryPiece = ModelPiece & {
+  scope: 'base' | 'component';
+  componentId: string | null;
+  componentName: string;
+  textileName: string;
+  colorName: string;
+};
+
 type ProductMaterialPieceRow = {
   key: string;
   pieceId: string;
@@ -734,6 +742,17 @@ export function ProductionModule({
   const [textileContext, setTextileContext] = useState<TextileContext>({ telas: [], rollos: [], telaColores: [], colores: [], proveedores: [] });
   const [showPurchaseForm, setShowPurchaseForm] = useState(false);
   const [selectedStockProductModelId, setSelectedStockProductModelId] = useState('');
+  const [inventorySearch, setInventorySearch] = useState('');
+  const [inventoryFilter, setInventoryFilter] = useState<'Con stock' | 'Vacío' | 'Todos'>('Con stock');
+  const [inventoryIncludeEmptySizes, setInventoryIncludeEmptySizes] = useState(false);
+  const [inventoryExpandedProducts, setInventoryExpandedProducts] = useState<string[]>([]);
+  const [inventoryProductId, setInventoryProductId] = useState('');
+  const [inventoryOperation, setInventoryOperation] = useState<'entrada' | 'salida'>('entrada');
+  const [inventorySizeIds, setInventorySizeIds] = useState<string[]>([]);
+  const [inventoryAmounts, setInventoryAmounts] = useState<Record<string, string>>({});
+  const [inventoryEntryModes, setInventoryEntryModes] = useState<Record<string, 'paridad' | 'lados'>>({});
+  const [inventoryNote, setInventoryNote] = useState('Ingreso de piezas');
+  const [showProductInventoryForm, setShowProductInventoryForm] = useState(false);
   const [selectedPieceConfigurationProductId, setSelectedPieceConfigurationProductId] = useState('');
   const [selectedStockComponentId, setSelectedStockComponentId] = useState('');
   const [showComponentPieceMovement, setShowComponentPieceMovement] = useState(false);
