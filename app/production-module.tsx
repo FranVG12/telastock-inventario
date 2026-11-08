@@ -1864,16 +1864,27 @@ export function ProductionModule({
   function unassignedLegacyBaseMovements(product: ConfiguredProductModel): DomainPieceMovement[] {
     const pieceIds = new Set(basePieces.filter((piece) => piece.modelId === product.baseModelId && !piece.archived).map((piece) => piece.id));
     const importedIds = new Set(data.productBasePieceMovements.map((movement) => movement.sourceMovementId).filter((value): value is string => Boolean(value)));
-    return baseMovements.filter((movement) => pieceIds.has(movement.pieceId) && !importedIds.has(movement.id));
+    const ordersById = new Map(data.productionOrders.map((order) => [order.id, order]));
+    return baseMovements.filter((movement) => {
+      if (!pieceIds.has(movement.pieceId) || importedIds.has(movement.id)) return false;
+      // Historical order consumption already has a reliable commercial owner.
+      // Never offer it to another product that merely reuses the same pattern.
+      const sourceOrder = movement.sourceProductionOrderId ? ordersById.get(movement.sourceProductionOrderId) : undefined;
+      return !sourceOrder || sourceOrder.productModelId === product.id;
+    });
   }
 
   function importLegacyBaseStock(product: ConfiguredProductModel) {
     const legacy = unassignedLegacyBaseMovements(product);
-    if (legacy.length === 0) return tell('No hay movimientos históricos pendientes de asignar para este patrón.', 'info');
+    if (legacy.length === 0) return tell('No hay movimientos históricos pendientes de asignar para este modelo.', 'info');
+    const linkedToOrders = legacy.filter((movement) => movement.sourceProductionOrderId && data.productionOrders.some((order) => order.id === movement.sourceProductionOrderId && order.productModelId === product.id)).length;
+    const manualEntries = legacy.length - linkedToOrders;
     const baseName = baseModels.find((model) => model.id === product.baseModelId)?.name ?? 'Patrón base';
     const confirmed = window.confirm(
       'Se asignarán ' + legacy.length + ' movimientos históricos de «' + baseName + '» al modelo comercial «' + product.name + '».\n\n' +
-      'Esto evita que el mismo stock aparezca en otros modelos que reutilizan el patrón. Los movimientos originales se conservarán en el historial antiguo y no se borrarán.\n\n¿Continuar?'
+      linkedToOrders + ' movimiento(s) se reconocen por sus órdenes de producción de este modelo. ' +
+      manualEntries + ' movimiento(s) sin modelo de origen se asignarán manualmente al modelo seleccionado.\n\n' +
+      'No se copiarán los movimientos asociados a órdenes de otros modelos. Los registros originales se conservarán y no se borrarán.\n\n¿Continuar?'
     );
     if (!confirmed) return;
     const imported: ProductBasePieceMovement[] = legacy.map((movement) => ({
@@ -1885,7 +1896,7 @@ export function ProductionModule({
       ...current,
       productBasePieceMovements: [...current.productBasePieceMovements, ...imported],
     }));
-    tell('Stock histórico asignado a ' + product.name + '. Los demás modelos no recibirán estas existencias.');
+    tell('Stock histórico asignado a ' + product.name + '. Los movimientos de órdenes de otros modelos permanecen separados.');
   }
 
   const activeInventoryProducts = data.productModels.filter((product) => product.active);
