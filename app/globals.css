@@ -1377,3 +1377,74 @@
 .pattern-editor-slot-stepper button:last-child{background:#f0efff;border-color:#e5e2ff}
 .pattern-editor-slot-stepper button:disabled{opacity:.35;background:#f7f8fb;color:#9aa2b1}
 @media(max-width:720px){.pattern-editor-slot-stepper{gap:6px}.pattern-editor-slot-stepper button{width:40px;height:40px;border-radius:10px;font-size:20px}}
+
+
+/* Biblioteca de patrones: separar estructura reusable de asignaciones comerciales */
+.pattern-library-panel>.panel-heading{align-items:flex-start;gap:12px}
+.pattern-library-panel>.panel-heading p{max-width:660px;line-height:1.55}
+.pattern-library-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,390px),1fr));gap:13px;padding:0 16px 16px}
+.pattern-library-card{display:flex;flex-direction:column;gap:14px;min-width:0;padding:17px;border:1px solid #e5e9f1;border-radius:16px;background:#fff;box-shadow:0 3px 14px #24334a08;transition:border-color .18s ease,box-shadow .18s ease}
+.pattern-library-card:hover{border-color:#d8d5fa;box-shadow:0 7px 20px #24334a0e}
+.pattern-library-card-header{display:grid;grid-template-columns:44px minmax(0,1fr) auto;align-items:center;gap:11px;min-width:0}
+.pattern-library-symbol{display:grid;place-items:center;width:44px;height:44px;border-radius:13px;background:#f0efff;color:#6157d5;font:700 23px Manrope,sans-serif}
+.pattern-library-title{display:grid;gap:6px;min-width:0}
+.pattern-library-title>strong{font:800 16px Manrope,sans-serif;letter-spacing:-.35px;color:#28354a;overflow-wrap:anywhere}
+.pattern-library-badges{display:flex;flex-wrap:wrap;align-items:center;gap:5px}
+.pattern-family-badge,.pattern-group-badge{display:inline-flex;align-items:center;max-width:100%;padding:5px 8px;border-radius:7px;font-size:9px;font-weight:800;line-height:1.2}
+.pattern-family-badge{background:#f1f0ff;color:#5b50c3}
+.pattern-group-badge{background:#f3f6fa;color:#68758a;font-weight:600}
+.pattern-library-edit{min-width:78px;min-height:40px;border-radius:10px;font-size:11px}
+.pattern-library-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;padding:10px;background:#f8f9fc;border:1px solid #edf0f5;border-radius:12px}
+.pattern-library-metrics>div{display:grid;gap:3px;min-width:0;text-align:center}
+.pattern-library-metrics>div+div{border-left:1px solid #e5e9f0}
+.pattern-library-metrics strong{font:800 18px Manrope,sans-serif;color:#34435b;letter-spacing:-.4px}
+.pattern-library-metrics span{font-size:9px;color:#8792a4;font-weight:600;line-height:1.3}
+.pattern-library-composition{display:grid;gap:9px;min-width:0}
+.pattern-library-section-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.pattern-library-section-heading strong{font-size:11px;font-weight:900;color:#49566c;letter-spacing:.3px}
+.pattern-library-section-heading span{font-size:9px;color:#98a1b0}
+.pattern-library-piece-list{display:grid;gap:6px}
+.pattern-library-piece-row{display:grid;grid-template-columns:26px minmax(0,1fr) auto;align-items:center;gap:9px;min-width:0;padding:8px 10px;border:1px solid #edf0f5;border-radius:10px;background:#fff}
+.pattern-library-piece-index{display:grid;place-items:center;width:25px;height:25px;border-radius:8px;background:#f5f6fa;color:#8792a4;font:800 9px Manrope,sans-serif}
+.pattern-library-piece-name{display:grid;gap:2px;min-width:0}
+.pattern-library-piece-name strong{font-size:11px;font-weight:700;color:#354258;overflow-wrap:anywhere}
+.pattern-library-piece-name small{font-size:9px;color:#8a94a5}
+.pattern-library-piece-quantity{display:inline-flex;align-items:center;justify-content:center;min-width:34px;padding:5px 8px;border-radius:8px;background:#f0efff;color:#5c51c5;font-size:10px;font-weight:900}
+.pattern-library-assignment-note{display:flex;align-items:flex-start;gap:9px;padding:10px 11px;border:1px solid #e8e8fa;border-radius:11px;background:#fafaff}
+.pattern-library-assignment-note>span{display:grid;place-items:center;width:19px;height:19px;flex:0 0 auto;border-radius:50%;background:#e9e8ff;color:#6258ca;font-size:11px;font-weight:900}
+.pattern-library-assignment-note>div{display:grid;gap:3px;min-width:0}
+.pattern-library-assignment-note strong{font-size:10px;color:#5b53b4}
+.pattern-library-assignment-note small{font-size:9px;line-height:1.45;color:#858da2}
+.pattern-library-empty{padding:13px;border:1px dashed #dfe3ec;border-radius:10px;color:#8b95a6;font-size:10px;text-align:center}
+.pattern-library-panel .schema-note{margin:0 16px 16px}
+@media(max-width:1100px){
+  .pattern-library-list{grid-template-columns:repeat(auto-fit,minmax(min(100%,390px),1fr))}
+}
+@media(max-width:720px){
+  .pattern-library-panel>.panel-heading{padding:14px 13px 12px;align-items:center}
+  .pattern-library-panel>.panel-heading h2{font-size:14px}
+  .pattern-library-panel>.panel-heading p{font-size:10px;line-height:1.45}
+  .pattern-library-list{grid-template-columns:minmax(0,1fr);gap:10px;padding:0 10px 12px}
+  .pattern-library-card{gap:11px;padding:13px;border-radius:14px}
+  .pattern-library-card-header{grid-template-columns:39px minmax(0,1fr) auto;gap:9px}
+  .pattern-library-symbol{width:39px;height:39px;border-radius:11px;font-size:21px}
+  .pattern-library-title{gap:5px}
+  .pattern-library-title>strong{font-size:15px;line-height:1.2}
+  .pattern-family-badge,.pattern-group-badge{font-size:8px;padding:5px 7px}
+  .pattern-library-edit{min-width:66px;min-height:42px;padding:8px 11px;font-size:10px}
+  .pattern-library-metrics{gap:5px;padding:9px 6px;border-radius:10px}
+  .pattern-library-metrics strong{font-size:17px}
+  .pattern-library-metrics span{font-size:8px}
+  .pattern-library-composition{gap:7px}
+  .pattern-library-section-heading strong{font-size:10px}
+  .pattern-library-piece-list{gap:5px}
+  .pattern-library-piece-row{grid-template-columns:24px minmax(0,1fr) auto;gap:8px;padding:8px 9px;border-radius:9px}
+  .pattern-library-piece-index{width:24px;height:24px}
+  .pattern-library-piece-name strong{font-size:11px}
+  .pattern-library-piece-name small{font-size:9px}
+  .pattern-library-piece-quantity{font-size:10px;min-width:32px}
+  .pattern-library-assignment-note{padding:9px 10px;gap:8px}
+  .pattern-library-assignment-note strong{font-size:10px}
+  .pattern-library-assignment-note small{font-size:9px}
+  .pattern-library-panel .schema-note{margin:0 10px 12px;padding:10px}
+}
