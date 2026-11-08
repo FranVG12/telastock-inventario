@@ -1845,6 +1845,22 @@ export function ProductionModule({
     return pieces.flatMap((piece) => productPieceDomainLedger(product.id, piece, sizeId));
   }
 
+  function productInventoryEffectiveLedger(product: ConfiguredProductModel, pieces: ProductInventoryPiece[], sizeId: string): DomainPieceMovement[] {
+    const ledger = productInventoryDomainLedger(product, pieces, sizeId);
+    const activeOrders = ordersHoldingStock.filter((order) => order.productModelId === product.id);
+    for (const order of activeOrders) {
+      for (const line of order.basePieces.filter((item) => item.sizeId === sizeId)) {
+        ledger.push({ id: 'reserved:' + line.id, pieceId: line.pieceId, sizeId, delta: -line.quantity, kind: 'salida', side: line.side ?? undefined, note: 'Reserva de orden', date: '' });
+      }
+      for (const line of order.componentPieces.filter((item) => item.sizeId === sizeId)) {
+        const selection = product.components.find((item) => item.componentId === line.componentId);
+        const piece = pieces.find((item) => item.scope === 'component' && item.selectionId === selection?.id && item.sourcePieceId === line.pieceId);
+        if (piece) ledger.push({ id: 'reserved:' + line.id, pieceId: piece.id, sizeId, delta: -line.quantity, kind: 'salida', side: line.side ?? undefined, note: 'Reserva de orden', date: '' });
+      }
+    }
+    return ledger;
+  }
+
   function unassignedLegacyBaseMovements(product: ConfiguredProductModel): DomainPieceMovement[] {
     const pieceIds = new Set(basePieces.filter((piece) => piece.modelId === product.baseModelId && !piece.archived).map((piece) => piece.id));
     const importedIds = new Set(data.productBasePieceMovements.map((movement) => movement.sourceMovementId).filter((value): value is string => Boolean(value)));
@@ -1881,7 +1897,7 @@ export function ProductionModule({
       getPieceStock(productPieceDomainLedger(product.id, piece, size.id), piece.id, size.id) > 0
     ));
     const complete = productSizes.reduce((sum, size) =>
-      sum + getCompleteUnits(productPieces, productInventoryDomainLedger(product, productPieces, size.id), size.id), 0);
+      sum + getCompleteUnits(productPieces, productInventoryEffectiveLedger(product, productPieces, size.id), size.id), 0);
     const physical = productSizes.reduce((sum, size) => sum + productPieces.reduce((pieceSum, piece) => {
       const ledger = productPieceDomainLedger(product.id, piece, size.id);
       return pieceSum + (piece.laterality === 'simetrica'
