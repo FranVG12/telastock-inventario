@@ -1249,11 +1249,17 @@ export default function Home() {
               <div className="pattern-editor-settings-grid">
                 <div className="pattern-editor-setting">
                   <div><strong>{modelForm.secondaryFabricSlots + 1} posiciones de tela</strong><small>Principal 1{modelForm.secondaryFabricSlots ? ' · ' + Array.from({ length: modelForm.secondaryFabricSlots }, (_, i) => `Sec. ${i + 1}`).join(' · ') : ''}</small></div>
-                  <button type="button" className="text-action" onClick={() => setModelForm((prev) => ({ ...prev, secondaryFabricSlots: prev.secondaryFabricSlots + 1 }))}>＋ Añadir tela</button>
+                  <div className="pattern-editor-slot-stepper">
+                    <button type="button" aria-label="Quitar última tela secundaria" title="Quitar última posición de tela" disabled={modelForm.secondaryFabricSlots <= 0 || modelForm.pieces.some((piece) => secondaryFabricSlotIndex(piece.fabricSlot) === modelForm.secondaryFabricSlots)} onClick={() => setModelForm((prev) => ({ ...prev, secondaryFabricSlots: Math.max(0, prev.secondaryFabricSlots - 1) }))}>−</button>
+                    <button type="button" aria-label="Añadir tela secundaria" title="Añadir posición de tela" onClick={() => setModelForm((prev) => ({ ...prev, secondaryFabricSlots: prev.secondaryFabricSlots + 1 }))}>＋</button>
+                  </div>
                 </div>
                 <div className="pattern-editor-setting">
                   <div><strong>{modelForm.secondaryColorSlots + 1} posiciones de color</strong><small>Principal 1{modelForm.secondaryColorSlots ? ' · ' + Array.from({ length: modelForm.secondaryColorSlots }, (_, i) => `Sec. ${i + 1}`).join(' · ') : ''}</small></div>
-                  <button type="button" className="text-action" onClick={() => setModelForm((prev) => ({ ...prev, secondaryColorSlots: prev.secondaryColorSlots + 1 }))}>＋ Añadir color</button>
+                  <div className="pattern-editor-slot-stepper">
+                    <button type="button" aria-label="Quitar último color secundario" title="Quitar última posición de color" disabled={modelForm.secondaryColorSlots <= 0 || modelForm.pieces.some((piece) => secondaryColorSlotIndex(piece.colorSlot) === modelForm.secondaryColorSlots)} onClick={() => setModelForm((prev) => ({ ...prev, secondaryColorSlots: Math.max(0, prev.secondaryColorSlots - 1) }))}>−</button>
+                    <button type="button" aria-label="Añadir color secundario" title="Añadir posición de color" onClick={() => setModelForm((prev) => ({ ...prev, secondaryColorSlots: prev.secondaryColorSlots + 1 }))}>＋</button>
+                  </div>
                 </div>
               </div>
 
