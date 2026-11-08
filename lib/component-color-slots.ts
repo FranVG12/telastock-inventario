@@ -51,3 +51,26 @@ export function resolveComponentPieceColorId(
     assignment.productModelId === productModelId && assignment.colorSlot === colorSlot
   )?.colorId ?? null;
 }
+
+export type ProductColorSlotPieceLike = {
+  colorSlot?: unknown;
+  colorId?: unknown;
+};
+
+/**
+ * Returns only the shared color positions actually used by a pattern and its
+ * selected auxiliary components. "ninguna" and "cualquiera" are handled per
+ * piece and must not force a shared product-level color assignment.
+ */
+export function requiredProductColorSlots(pieces: readonly ProductColorSlotPieceLike[]): string[] {
+  const positions = new Set<string>();
+  for (const piece of pieces) {
+    const slot = normalizeComponentColorSlot(piece.colorSlot, piece.colorId);
+    if (slot === 'principal' || secondaryColorSlotIndex(slot) > 0) positions.add(slot);
+  }
+  return [...positions].sort((left, right) => {
+    if (left === 'principal') return right === 'principal' ? 0 : -1;
+    if (right === 'principal') return 1;
+    return secondaryColorSlotIndex(left) - secondaryColorSlotIndex(right);
+  });
+}
