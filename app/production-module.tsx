@@ -1901,6 +1901,190 @@ export function ProductionModule({
   const inventoryPhysicalTotal = inventoryProductSummaries.reduce((sum, item) => sum + item.physical, 0);
   const inventoryCompleteUnits = inventoryProductSummaries.reduce((sum, item) => sum + item.complete, 0);
 
+  function inventoryReservedPieceQuantity(productId: string, piece: ProductInventoryPiece, sizeId: string, side: 'izquierda' | 'derecha' | null): number {
+    const productOrders = ordersHoldingStock.filter((order) => order.productModelId === productId);
+    if (piece.scope === 'base') {
+      return reservedPieceQuantity(productOrders.flatMap((order) => order.basePieces), piece.sourcePieceId, sizeId, side);
+    }
+    return reservedPieceQuantity(productOrders.flatMap((order) => order.componentPieces)
+      .filter((line) => line.componentId === piece.componentId), piece.sourcePieceId, sizeId, side);
+  }
+
+  function inventoryStockLabel(productId: string, piece: ProductInventoryPiece, sizeId: string): string {
+    const ledger = productPieceDomainLedger(productId, piece, sizeId);
+    if (piece.laterality !== 'simetrica') return format(Math.max(0, getPieceStock(ledger, piece.id, sizeId)));
+    const stock = getSymmetricStock(ledger, piece.id, sizeId);
+    return stock.left === stock.right ? format(stock.parity) + ' par.' : format(stock.left) + '/' + format(stock.right);
+  }
+
+  function openProductInventoryForm(operation: 'entrada' | 'salida', productModelId?: string) {
+    if (activeInventoryProducts.length === 0) {
+      tell('Primero crea un modelo comercial a partir de un patrón base y sus componentes.', 'info');
+      onNavigate('modelos-producto');
+      return;
+    }
+    const selected = activeInventoryProducts.find((product) => product.id === productModelId) ?? activeInventoryProducts[0];
+    setInventoryProductId(selected.id);
+    setInventoryOperation(operation);
+    setInventorySizeIds([]);
+    setInventoryAmounts({});
+    setInventoryEntryModes({});
+    setInventoryNote(operation === 'entrada' ? 'Ingreso de piezas' : 'Retiro / merma');
+    setShowProductInventoryForm(true);
+  }
+
+  function changeInventoryProduct(productId: string) {
+    setInventoryProductId(productId);
+    setInventorySizeIds([]);
+    setInventoryAmounts({});
+    setInventoryEntryModes({});
+  }
+
+  function toggleInventorySize(sizeId: string) {
+    setInventorySizeIds((previous) => previous.includes(sizeId) ? previous.filter((value) => value !== sizeId) : [...previous, sizeId]);
+  }
+
+  function updateInventoryAmount(sizeId: string, pieceId: string, slot: 'paridad' | 'izquierda' | 'derecha' | undefined, value: string) {
+    const key = slot ? sizeId + '::' + pieceId + '::' + slot : sizeId + '::' + pieceId;
+    setInventoryAmounts((previous) => ({ ...previous, [key]: value }));
+  }
+
+  function readInventoryAmount(sizeId: string, pieceId: string, slot?: 'paridad' | 'izquierda' | 'derecha') {
+    const key = slot ? sizeId + '::' + pieceId + '::' + slot : sizeId + '::' + pieceId;
+    const raw = inventoryAmounts[key] ?? '';
+    return raw.trim() === '' ? 0 : Number(raw);
+  }
+
+  function bumpInventoryAmount(sizeId: string, pieceId: string, slot: 'paridad' | 'izquierda' | 'derecha' | undefined, amount: number) {
+    updateInventoryAmount(sizeId, pieceId, slot, String(Math.max(0, (readInventoryAmount(sizeId, pieceId, slot) || 0) + amount)));
+  }
+
+  function changeInventoryEntryMode(pieceId: string, mode: 'paridad' | 'lados') {
+    setInventoryEntryModes((previous) => ({ ...previous, [pieceId]: mode }));
+    setInventoryAmounts((previous) => Object.fromEntries(Object.entries(previous).filter(([key]) => key.split('::')[1] !== pieceId)));
+  }
+
+  function inventoryQuantityControl(sizeId: string, piece: ProductInventoryPiece, slot: 'paridad' | 'izquierda' | 'derecha' | undefined, label: string) {
+    const key = slot ? sizeId + '::' + piece.id + '::' + slot : sizeId + '::' + piece.id;
+    return <span className="quantity-control">
+      <button type="button" aria-label={'Restar ' + label} onClick={() => bumpInventoryAmount(sizeId, piece.id, slot, -1)}>−</button>
+      <input type="number" min="0" step="1" inputMode="numeric" value={inventoryAmounts[key] ?? ''} placeholder="0" onChange={(event) => updateInventoryAmount(sizeId, piece.id, slot, event.target.value)} aria-label={label} />
+      <button type="button" aria-label={'Agregar ' + label} onClick={() => bumpInventoryAmount(sizeId, piece.id, slot, 1)}>＋</button>
+    </span>;
+  }
+
+  function submitProductInventoryMovement(event: FormEvent) {
+    event.preventDefault();
+    const product = data.productModels.find((item) => item.id === inventoryProductId && item.active);
+    if (!product) return tell('Selecciona un modelo comercial válido.', 'error');
+    const productSizes = productSizeOptions(product);
+    const selectedSizes = productSizes.filter((size) => inventorySizeIds.includes(size.id));
+    if (selectedSizes.length === 0) return tell('Selecciona al menos una talla.', 'error');
+    const productPieces = productInventoryPieces(product);
+    const baseRows: ProductBasePieceMovement[] = [];
+    const componentRows: ComponentPieceMovement[] = [];
+    const note = inventoryNote.trim() || (inventoryOperation === 'entrada' ? 'Ingreso de piezas' : 'Retiro / merma');
+    const timestamp = now();
+    const sign = inventoryOperation === 'entrada' ? 1 : -1;
+    const push = (piece: ProductInventoryPiece, sizeId: string, quantity: number, side?: 'izquierda' | 'derecha') => {
+      if (quantity <= 0) return;
+      const common = { id: id(), productModelId: product.id, pieceId: piece.sourcePieceId, sizeId, delta: sign * quantity, kind: inventoryOperation, side, note, date: timestamp };
+      if (piece.scope === 'base') baseRows.push(common as ProductBasePieceMovement);
+      else componentRows.push({ ...common, componentId: piece.componentId! } as ComponentPieceMovement);
+    };
+    const validAmount = (amount: number, piece: ProductInventoryPiece, sizeId: string, side?: string) => {
+      if (!Number.isFinite(amount) || amount < 0 || !Number.isInteger(amount)) {
+        tell('La cantidad de ' + piece.name + (side ? ' (' + side + ')' : '') + ' debe ser un entero igual o mayor que cero.', 'error');
+        return false;
+      }
+      return true;
+    };
+
+    for (const size of selectedSizes) {
+      for (const piece of productPieces) {
+        const ledger = productPieceDomainLedger(product.id, piece, size.id);
+        if (piece.laterality === 'simetrica') {
+          const mode = inventoryEntryModes[piece.id] ?? 'paridad';
+          const current = getSymmetricStock(ledger, piece.id, size.id);
+          if (mode === 'paridad') {
+            const quantity = readInventoryAmount(size.id, piece.id, 'paridad');
+            if (!validAmount(quantity, piece, size.id)) return;
+            const availableLeft = current.left - inventoryReservedPieceQuantity(product.id, piece, size.id, 'izquierda');
+            const availableRight = current.right - inventoryReservedPieceQuantity(product.id, piece, size.id, 'derecha');
+            if (inventoryOperation === 'salida' && quantity > Math.min(availableLeft, availableRight)) {
+              tell('No puedes retirar ' + format(quantity) + ' paridades de ' + piece.name + ' en talla ' + size.label + ': quedan ' + format(Math.max(0, availableLeft)) + ' izquierdas y ' + format(Math.max(0, availableRight)) + ' derechas disponibles.', 'error');
+              return;
+            }
+            push(piece, size.id, quantity, 'izquierda');
+            push(piece, size.id, quantity, 'derecha');
+          } else {
+            const left = readInventoryAmount(size.id, piece.id, 'izquierda');
+            const right = readInventoryAmount(size.id, piece.id, 'derecha');
+            if (!validAmount(left, piece, size.id, 'izquierda') || !validAmount(right, piece, size.id, 'derecha')) return;
+            const availableLeft = current.left - inventoryReservedPieceQuantity(product.id, piece, size.id, 'izquierda');
+            const availableRight = current.right - inventoryReservedPieceQuantity(product.id, piece, size.id, 'derecha');
+            if (inventoryOperation === 'salida' && left > availableLeft) { tell('No puedes retirar ' + format(left) + ' piezas izquierdas de ' + piece.name + ': disponibles ' + format(Math.max(0, availableLeft)) + '.', 'error'); return; }
+            if (inventoryOperation === 'salida' && right > availableRight) { tell('No puedes retirar ' + format(right) + ' piezas derechas de ' + piece.name + ': disponibles ' + format(Math.max(0, availableRight)) + '.', 'error'); return; }
+            push(piece, size.id, left, 'izquierda');
+            push(piece, size.id, right, 'derecha');
+          }
+          continue;
+        }
+        const quantity = readInventoryAmount(size.id, piece.id);
+        if (!validAmount(quantity, piece, size.id)) return;
+        const current = Math.max(0, getPieceStock(ledger, piece.id, size.id));
+        const reserved = inventoryReservedPieceQuantity(product.id, piece, size.id, null);
+        if (inventoryOperation === 'salida' && quantity > current - reserved) {
+          tell('No puedes retirar ' + format(quantity) + ' de ' + piece.name + ' en talla ' + size.label + ': disponibles ' + format(Math.max(0, current - reserved)) + '.', 'error');
+          return;
+        }
+        push(piece, size.id, quantity);
+      }
+    }
+    if (baseRows.length + componentRows.length === 0) return tell('Ingresa una cantidad mayor que cero en al menos una pieza.', 'error');
+    setData((current) => ({
+      ...current,
+      productBasePieceMovements: [...current.productBasePieceMovements, ...baseRows],
+      componentPieceMovements: [...current.componentPieceMovements, ...componentRows],
+    }));
+    setShowProductInventoryForm(false);
+    setInventorySizeIds([]);
+    setInventoryAmounts({});
+    setInventoryEntryModes({});
+    const physicalTotal = [...baseRows, ...componentRows].reduce((sum, movement) => sum + Math.abs(movement.delta), 0);
+    tell((inventoryOperation === 'entrada' ? 'Stock registrado: ' : 'Stock retirado: ') + format(physicalTotal) + ' piezas físicas en ' + selectedSizes.length + ' talla(s).');
+  }
+
+  function exportProductInventoryCsv() {
+    const rows = [['Modelo comercial', 'Patrón base', 'Tipo de pieza', 'Componente', 'Pieza', 'Grupo de tallas', 'Talla', 'Tela asignada', 'Color asignado', 'Stock físico', 'Izquierda', 'Derecha', 'Paridades', 'Piezas por prenda', 'Unidades fabricables']];
+    for (const { product, base, productPieces, productSizes } of inventoryProductSummaries) {
+      for (const size of productSizes) {
+        const ledger = productInventoryDomainLedger(product, productPieces, size.id);
+        const capacity = getCompleteUnits(productPieces, ledger, size.id);
+        for (const piece of productPieces) {
+          const pieceLedger = productPieceDomainLedger(product.id, piece, size.id);
+          const symmetric = piece.laterality === 'simetrica' ? getSymmetricStock(pieceLedger, piece.id, size.id) : undefined;
+          const raw = symmetric ? symmetric.physicalTotal : Math.max(0, getPieceStock(pieceLedger, piece.id, size.id));
+          if (raw === 0) continue;
+          rows.push([
+            product.name, base?.name ?? '', piece.scope === 'base' ? 'Molde base' : 'Pieza auxiliar',
+            piece.componentName, piece.name, sizeGroups.find((group) => group.id === base?.sizeGroupId)?.name ?? '',
+            size.label, piece.textileName, piece.colorName, String(raw),
+            symmetric ? String(symmetric.left) : '', symmetric ? String(symmetric.right) : '',
+            symmetric ? String(symmetric.parity) : '', String(piece.unitsPerGarment), String(capacity),
+          ]);
+        }
+      }
+    }
+    const csv = '\uFEFF' + rows.map((row) => row.map((value) => '"' + String(value).replaceAll('"', '""') + '"').join(';')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'inventario-piezas-por-modelo.csv';
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
   const plan = useMemo(() => {
     type PlannedMaterial = MaterialRequirement & { productSpecification?: SizeSpecification };
     type PlannedRow = { bySize: Record<string, number>; missingSizes: string[]; specificationsBySize: Record<string, string[]> };
