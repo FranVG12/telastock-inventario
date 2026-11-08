@@ -785,6 +785,7 @@ export function ProductionModule({
   const [finishedInventorySearch, setFinishedInventorySearch] = useState('');
   const [finishedInventoryFilter, setFinishedInventoryFilter] = useState<'Con stock' | 'Vacío' | 'Todos'>('Con stock');
   const [selectedPieceConfigurationProductId, setSelectedPieceConfigurationProductId] = useState('');
+  const [componentToAddInPieceConfiguration, setComponentToAddInPieceConfiguration] = useState('');
   const [selectedStockComponentId, setSelectedStockComponentId] = useState('');
   const [showComponentPieceMovement, setShowComponentPieceMovement] = useState(false);
   const [componentStockPieceId, setComponentStockPieceId] = useState('');
@@ -1576,6 +1577,38 @@ export function ProductionModule({
     setEditingProductFabricId('');
     setEditingProductFabricAssignments({});
     tell('Telas del modelo actualizadas.');
+  }
+
+  function addComponentToPieceConfiguration(productModelId: string, componentId: string) {
+    const product = data.productModels.find((item) => item.id === productModelId && item.active);
+    const base = product ? baseModels.find((item) => item.id === product.baseModelId) : undefined;
+    const component = data.components.find((item) => item.id === componentId && item.active);
+    if (!product || !base || !component) return tell('No se encontró el modelo o el componente seleccionado.', 'error');
+    if (product.components.some((selection) => selection.componentId === component.id)) return tell('Este componente ya está asociado al modelo.', 'error');
+    if (component.pieces.length === 0) return tell('Este componente todavía no tiene piezas auxiliares. Completa sus moldes en la biblioteca de componentes antes de incorporarlo.', 'error');
+    const incompatibleFabricPiece = component.pieces.find((piece) => !isComponentFabricSlotAvailableForModel(piece.fabricSlot, base.secondaryFabricSlots ?? 0));
+    if (incompatibleFabricPiece) return tell('La pieza «' + incompatibleFabricPiece.name + '» usa ' + componentFabricSlotLabel(incompatibleFabricPiece.fabricSlot) + ', una posición que no existe en el patrón base. Ajusta el patrón o el componente antes de incorporarlo.', 'error');
+    const incompatibleColorPiece = component.pieces.find((piece) => !isComponentColorSlotAvailableForModel(piece.colorSlot ?? (piece.colorId ? 'principal' : 'cualquiera'), base.secondaryColorSlots ?? 0));
+    if (incompatibleColorPiece) return tell('La pieza «' + incompatibleColorPiece.name + '» usa ' + componentColorSlotLabel(incompatibleColorPiece.colorSlot ?? 'cualquiera') + ', una posición que no existe en el patrón base.', 'error');
+    const sizeSpecificMaterial = component.materials.find((material) => material.specificationLabel?.trim());
+    if (sizeSpecificMaterial) return tell('Este componente requiere configurar «' + sizeSpecificMaterial.specificationLabel + '» por talla. Incorpóralo durante la configuración completa del modelo para definir esas medidas antes de producir.', 'error');
+    const selection: ProductComponentSelection = {
+      id: id(),
+      componentId: component.id,
+      quantity: 1,
+      location: '',
+      variantOverrides: {},
+      materialSpecifications: {},
+      pieceOverrides: {},
+    };
+    setData((current) => ({
+      ...current,
+      productModels: current.productModels.map((item) => item.id === product.id
+        ? { ...item, components: [...item.components, selection], updatedAt: now() }
+        : item),
+    }));
+    setComponentToAddInPieceConfiguration('');
+    tell('Componente «' + component.name + '» añadido. Ahora puedes asignar la tela y el color de cada pieza en esta vista.');
   }
 
   function updateProductPieceOverride(
@@ -3281,6 +3314,8 @@ export function ProductionModule({
             hasColorOverride,
           };
         });
+      const linkedComponentIds = new Set(product.components.map((selection) => selection.componentId));
+      const availableComponentsToAdd = data.components.filter((component) => component.active && !linkedComponentIds.has(component.id) && component.pieces.length > 0);
       const componentPieceGroups = product.components.flatMap((selection) => {
         const component = data.components.find((item) => item.id === selection.componentId);
         if (!component) return [];
@@ -3353,7 +3388,31 @@ export function ProductionModule({
           <div className="piece-material-group-heading"><h3>Moldes del patrón base</h3><span>{basePieceRows.length}</span></div>
           {basePieceRows.map(renderMaterialPiece)}
         </section>}
-        {componentPieceGroups.map(({ selection, component, rows }) => <section className="piece-material-group" key={selection.id}>
+        <section className="piece-material-auxiliary-manager">
+          <div className="piece-material-auxiliary-heading">
+            <div><strong>Componentes auxiliares del modelo</strong><small>Agrega aquí un cuello, bolsillo, puño, pretina u otro componente de tu biblioteca.</small></div>
+            <span>{componentPieceGroups.reduce((sum, group) => sum + group.rows.length, 0)} piezas</span>
+          </div>
+          {componentPieceGroups.length === 0 && <div className="piece-material-auxiliary-empty">
+            <strong>Este modelo todavía no tiene piezas auxiliares.</strong>
+            <span>Selecciona un componente de la biblioteca para incorporarlo. Sus piezas aparecerán debajo con sus asignaciones de tela y color.</span>
+          </div>}
+          {availableComponentsToAdd.length > 0 ? <div className="piece-material-add-component">
+            <label className="field-label">Componente disponible
+              <select className="large-input" value={componentToAddInPieceConfiguration} onChange={(event) => setComponentToAddInPieceConfiguration(event.target.value)}>
+                <option value="">Seleccionar componente de la biblioteca</option>
+                {availableComponentsToAdd.map((component) => <option key={component.id} value={component.id}>{component.name} · {component.pieces.length} {component.pieces.length === 1 ? 'pieza' : 'piezas'}</option>)}
+              </select>
+            </label>
+            <button type="button" className="button primary" disabled={!componentToAddInPieceConfiguration} onClick={() => addComponentToPieceConfiguration(product.id, componentToAddInPieceConfiguration)}>＋ Añadir al modelo</button>
+          </div> : <div className="piece-material-no-components">
+            {data.components.some((component) => component.active && !linkedComponentIds.has(component.id))
+              ? 'Los componentes disponibles no tienen piezas auxiliares definidas.'
+              : 'Todos los componentes con piezas de la biblioteca ya están asociados a este modelo.'}
+            <button type="button" className="text-action" onClick={() => onNavigate('componentes')}>Abrir biblioteca de componentes</button>
+          </div>}
+        </section>
+        {componentPieceGroups.map(({ selection, component, rows }) => <section className="piece-material-group piece-material-auxiliary-group" key={selection.id}>
           <div className="piece-material-group-heading"><h3>{component.name}</h3><span>{rows.length} piezas</span></div>
           {rows.map(renderMaterialPiece)}
         </section>)}
