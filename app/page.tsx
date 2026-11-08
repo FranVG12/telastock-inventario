@@ -628,19 +628,22 @@ export default function Home() {
   }
 
   function deleteSize(size: Size) {
-    if (movements.some((movement) => movement.sizeId === size.id)) {
-      setNoticeMessage(`No se puede borrar la talla ${size.label} porque tiene movimientos históricos. Renómbrala o déjala sin usar para conservar la trazabilidad.`, 'error'); return;
-    }
-    const orders = productionOrdersSnapshot();
-    if (!orders) { setNoticeMessage('No se pudo verificar las órdenes guardadas. Exporta un respaldo válido antes de borrar tallas.', 'error'); return; }
-    const referencedInProduction = orders.some((order) =>
-      Boolean(order.quantities?.[size.id]) ||
-      order.materials?.some((line) => line.sizeId === size.id) ||
-      order.basePieces?.some((line) => line.sizeId === size.id) ||
-      order.componentPieces?.some((line) => line.sizeId === size.id)
-    );
-    if (referencedInProduction) {
-      setNoticeMessage(`No se puede borrar la talla ${size.label}: está referenciada por una orden de producción. Renómbrala o déjala sin usar para conservar la trazabilidad.`, 'error'); return;
+    const existsInSavedSizes = sizes.some((item) => item.id === size.id);
+    if (existsInSavedSizes) {
+      if (movements.some((movement) => movement.sizeId === size.id)) {
+        setNoticeMessage(`No se puede borrar la talla ${size.label} porque tiene movimientos históricos. Renómbrala o déjala sin usar para conservar la trazabilidad.`, 'error'); return;
+      }
+      const orders = productionOrdersSnapshot();
+      if (!orders) { setNoticeMessage('No se pudo verificar las órdenes guardadas. Exporta un respaldo válido antes de borrar tallas.', 'error'); return; }
+      const referencedInProduction = orders.some((order) =>
+        Boolean(order.quantities?.[size.id]) ||
+        order.materials?.some((line) => line.sizeId === size.id) ||
+        order.basePieces?.some((line) => line.sizeId === size.id) ||
+        order.componentPieces?.some((line) => line.sizeId === size.id)
+      );
+      if (referencedInProduction) {
+        setNoticeMessage(`No se puede borrar la talla ${size.label}: está referenciada por una orden de producción. Renómbrala o déjala sin usar para conservar la trazabilidad.`, 'error'); return;
+      }
     }
     setDraftSizes((previous) => previous.filter((item) => item.id !== size.id));
   }
@@ -673,15 +676,17 @@ export default function Home() {
     if (removedIds.some((sizeId) => movements.some((movement) => movement.sizeId === sizeId))) {
       setNoticeMessage('No se puede aplicar: una talla pendiente de eliminar tiene movimientos históricos.', 'error'); return;
     }
-    const orders = productionOrdersSnapshot();
-    if (!orders) { setNoticeMessage('No se pudo verificar las órdenes guardadas. Exporta un respaldo válido antes de aplicar los cambios.', 'error'); return; }
-    const referencedSize = removedIds.find((sizeId) => orders.some((order) =>
-      Boolean(order.quantities?.[sizeId]) ||
-      order.materials?.some((line) => line.sizeId === sizeId) ||
-      order.basePieces?.some((line) => line.sizeId === sizeId) ||
-      order.componentPieces?.some((line) => line.sizeId === sizeId)
-    ));
-    if (referencedSize) { setNoticeMessage('No se puede aplicar: una talla pendiente de eliminar está referenciada por una orden.', 'error'); return; }
+    if (removedIds.length > 0) {
+      const orders = productionOrdersSnapshot();
+      if (!orders) { setNoticeMessage('No se pudo verificar las órdenes guardadas. Exporta un respaldo válido antes de eliminar tallas.', 'error'); return; }
+      const referencedSize = removedIds.find((sizeId) => orders.some((order) =>
+        Boolean(order.quantities?.[sizeId]) ||
+        order.materials?.some((line) => line.sizeId === sizeId) ||
+        order.basePieces?.some((line) => line.sizeId === sizeId) ||
+        order.componentPieces?.some((line) => line.sizeId === sizeId)
+      ));
+      if (referencedSize) { setNoticeMessage('No se puede aplicar: una talla pendiente de eliminar está referenciada por una orden.', 'error'); return; }
+    }
 
     const nextGroups = draftSizeGroups.map((group) => ({ ...group, name: group.name.trim() }));
     const nextSizes = draftSizes.map((size) => ({ ...size, label: size.label.trim() }));
