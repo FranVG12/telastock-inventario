@@ -248,6 +248,7 @@ export default function Home() {
   const managerGroupSizes = (groupId: string) => draftSizes.filter((size) => size.groupId === groupId).sort((a, b) => a.sortOrder - b.sortOrder);
   const selectedManagerGroup = draftSizeGroups.find((group) => group.id === sizeManagerGroupId);
   const hasPendingSizeManagerChanges = JSON.stringify(draftSizeGroups) !== JSON.stringify(sizeGroups) || JSON.stringify(draftSizes) !== JSON.stringify(sizes);
+  const hasPendingFamilyChanges = JSON.stringify(draftFamilies) !== JSON.stringify(families);
   const modelSizes = (model: ManufacturingModel) => {
     const excluded = new Set(model.excludedSizeIds ?? []);
     return groupSizes(model.sizeGroupId).filter((size) => !excluded.has(size.id));
@@ -625,6 +626,67 @@ export default function Home() {
     });
   }
 
+  function familyUsage(value: string) {
+    const patternCount = models.filter((model) => model.family === value).length + (showModelForm && modelForm.family === value ? 1 : 0);
+    let recipeCount = 0;
+    try {
+      const raw = localStorage.getItem(PRODUCTION_STORAGE_KEYS.familyRecipes);
+      const recipes = raw ? JSON.parse(raw) as Array<{ family?: string }> : [];
+      recipeCount = Array.isArray(recipes) ? recipes.filter((recipe) => recipe.family === value).length : 0;
+    } catch { recipeCount = 0; }
+    return { patternCount, recipeCount, total: patternCount + recipeCount };
+  }
+
+  function openFamilyManager() {
+    setDraftFamilies(families.map((family) => ({ ...family })));
+    setNewFamilyLabel('');
+    setShowFamilyManager(true);
+  }
+
+  function addDraftFamily() {
+    const label = newFamilyLabel.trim();
+    if (!label) { setNoticeMessage('Escribe el nombre de la nueva familia.', 'error'); return; }
+    if (draftFamilies.some((family) => family.label.trim().toLocaleLowerCase('es') === label.toLocaleLowerCase('es'))) {
+      setNoticeMessage('Ya existe una familia con ese nombre.', 'error'); return;
+    }
+    setDraftFamilies((previous) => [...previous, { value: `family-${newId()}`, label }]);
+    setNewFamilyLabel('');
+  }
+
+  function removeDraftFamily(value: string) {
+    const family = draftFamilies.find((item) => item.value === value);
+    if (!family) return;
+    const usage = familyUsage(value);
+    if (usage.total > 0) {
+      setNoticeMessage(`No se puede eliminar «${family.label}»: está en uso por ${usage.patternCount} patrones y ${usage.recipeCount} recetas. Reasigna esos registros primero.`, 'error');
+      return;
+    }
+    setDraftFamilies((previous) => previous.filter((item) => item.value !== value));
+  }
+
+  function cancelFamilyManager() {
+    setShowFamilyManager(false);
+    setDraftFamilies([]);
+    setNewFamilyLabel('');
+  }
+
+  function applyFamilyManager() {
+    if (draftFamilies.length === 0) { setNoticeMessage('Debe existir al menos una familia.', 'error'); return; }
+    if (draftFamilies.some((family) => !family.label.trim())) { setNoticeMessage('Todas las familias deben tener un nombre.', 'error'); return; }
+    const labels = draftFamilies.map((family) => family.label.trim().toLocaleLowerCase('es'));
+    if (new Set(labels).size !== labels.length) { setNoticeMessage('Hay nombres de familia duplicados.', 'error'); return; }
+    const values = new Set(draftFamilies.map((family) => family.value));
+    const removedInUse = families.find((family) => !values.has(family.value) && familyUsage(family.value).total > 0);
+    if (removedInUse) { setNoticeMessage(`No se puede eliminar «${removedInUse.label}» porque todavía está asociada a patrones o recetas.`, 'error'); return; }
+    const nextFamilies = draftFamilies.map((family) => ({ ...family, label: family.label.trim() }));
+    setFamilies(nextFamilies);
+    if (!nextFamilies.some((family) => family.value === patternFamilyFilter)) setPatternFamilyFilter('Todas');
+    setShowFamilyManager(false);
+    setDraftFamilies([]);
+    setNewFamilyLabel('');
+    setNoticeMessage('Catálogo de familias actualizado.');
+  }
+
   function beginSizeManager(groupId: string, returnToModelForm: boolean) {
     setDraftSizeGroups(sizeGroups.map((group) => ({ ...group })));
     setDraftSizes(sizes.map((size) => ({ ...size })));
@@ -754,7 +816,7 @@ export default function Home() {
   }
 
   function exportConfiguration() {
-    const payload = { schemaVersion: 3, exportedAt: new Date().toISOString(), sizeGroups, sizes, models, pieces: pieces.filter((piece) => !piece.archived), colors: fabricColors };
+    const payload = { schemaVersion: 4, exportedAt: new Date().toISOString(), sizeGroups, sizes, families, models, pieces: pieces.filter((piece) => !piece.archived), colors: fabricColors };
     const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' }));
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'telastock-moldes-y-tallas.json'; anchor.click(); URL.revokeObjectURL(url);
   }
@@ -763,7 +825,7 @@ export default function Home() {
   async function importConfiguration(file?: File) {
     if (!file) return;
     try {
-      const parsed = JSON.parse(await file.text()) as { sizeGroups?: SizeGroup[]; sizes?: Size[]; models?: ManufacturingModel[]; pieces?: ModelPiece[]; colors?: ColorDefinition[] };
+      const parsed = JSON.parse(await file.text()) as { sizeGroups?: SizeGroup[]; sizes?: Size[]; families?: PatternFamily[]; models?: ManufacturingModel[]; pieces?: ModelPiece[]; colors?: ColorDefinition[] };
       if (!Array.isArray(parsed.sizeGroups) || !Array.isArray(parsed.sizes) || !Array.isArray(parsed.models) || !Array.isArray(parsed.pieces)) {
         throw new Error('El archivo debe contener sizeGroups, sizes, models y pieces.');
       }
@@ -773,6 +835,10 @@ export default function Home() {
         incoming.forEach((item) => map.set(item.id, item));
         return [...map.values()];
       };
+      const familyMap = new Map(families.map((family) => [family.value, family]));
+      (parsed.families ?? []).forEach((family) => familyMap.set(family.value, family));
+      const mergedFamilies = normalizePatternFamilies([...familyMap.values()]);
+      setFamilies(mergedFamilies);
       const mergedColors = merge(fabricColors, parsed.colors ?? []);
       setFabricColors(mergedColors);
       localStorage.setItem(FABRIC_STORAGE_KEYS.colores, JSON.stringify(mergedColors));
@@ -803,7 +869,7 @@ export default function Home() {
           family: model.family || current.find((item) => item.id === model.id)?.family || '',
           excludedSizeIds: Array.isArray(model.excludedSizeIds) ? model.excludedSizeIds.filter((sizeId) => typeof sizeId === 'string' && parsed.sizes!.some((size) => size.id === sizeId && size.groupId === model.sizeGroupId)) : [],
         }));
-        return migrateBaseModelFamilies(merged, legacyProductModels);
+        return migrateBaseModelFamilies(merged, legacyProductModels, mergedFamilies);
       });
       setPieces((current) => merge(current, incomingPieces));
       window.dispatchEvent(new Event('telastock-fabric-data-updated'));
@@ -841,10 +907,10 @@ export default function Home() {
       const payload = {
         app: 'TelaStock',
         backupType: 'full',
-        schemaVersion: 13,
+        schemaVersion: 14,
         exportedAt: new Date().toISOString(),
         data: {
-          sizeGroups, sizes, models, pieces, movements, fabricInventory,
+          sizeGroups, sizes, families, models, pieces, movements, fabricInventory,
           production: Object.fromEntries((Object.keys(emptyProductionBackupData()) as (keyof ReturnType<typeof emptyProductionBackupData>)[]).map((key) => {
             const raw = localStorage.getItem(PRODUCTION_STORAGE_KEYS[key]);
             return [key, raw ? JSON.parse(raw) : []];
@@ -872,7 +938,7 @@ export default function Home() {
       const raw = JSON.parse(await file.text()) as unknown;
       const isRecord = (value: unknown): value is Record<string, unknown> =>
         Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-      if (!isRecord(raw) || raw.app !== 'TelaStock' || raw.backupType !== 'full' || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].includes(Number(raw.schemaVersion)) || !isRecord(raw.data)) {
+      if (!isRecord(raw) || raw.app !== 'TelaStock' || raw.backupType !== 'full' || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14].includes(Number(raw.schemaVersion)) || !isRecord(raw.data)) {
         throw new Error('Este no es un respaldo completo de TelaStock compatible.');
       }
       const data = raw.data;
@@ -890,6 +956,7 @@ export default function Home() {
       };
 
       const importedGroups = getRows('sizeGroups') as unknown as SizeGroup[];
+      const importedFamilies = normalizePatternFamilies(Array.isArray(data.families) ? data.families : DEFAULT_PATTERN_FAMILIES);
       const importedSizes = getRows('sizes') as unknown as Size[];
       const importedModelsRaw = getRows('models') as unknown as ManufacturingModel[];
       const importedPieces = getRows('pieces') as unknown as ModelPiece[];
@@ -897,7 +964,7 @@ export default function Home() {
       const importedMovements = getRows('movements') as unknown as PieceMovement[];
       const importedFabric = Number(raw.schemaVersion) >= 2 ? validateFabricBackupData(data.fabricInventory) : emptyFabricBackupData();
       const importedProduction = Number(raw.schemaVersion) >= 4 ? validateProductionBackupData(data.production) : emptyProductionBackupData();
-      const importedModels = normalizeModelsWithSlots(migrateBaseModelFamilies(importedModelsRaw, importedProduction.productModels), normalizedImportedPieces).map((model) => ({
+      const importedModels = normalizeModelsWithSlots(migrateBaseModelFamilies(importedModelsRaw, importedProduction.productModels, importedFamilies), normalizedImportedPieces).map((model) => ({
         ...model,
         excludedSizeIds: Array.isArray(model.excludedSizeIds) ? model.excludedSizeIds.filter((sizeId) => typeof sizeId === 'string' && importedSizes.some((size) => size.id === sizeId && size.groupId === model.sizeGroupId)) : [],
       }));
@@ -997,6 +1064,7 @@ export default function Home() {
 
       setSizeGroups(importedGroups);
       setSizes(importedSizes);
+      setFamilies(importedFamilies);
       setModels(importedModels);
       setPieces(normalizedImportedPieces.map((piece) => ({
         ...piece,
@@ -1350,7 +1418,7 @@ export default function Home() {
           </section>}
 
           {(['telas', 'rollos', 'compras', 'proveedores'] as View[]).includes(view) && <FabricModule view={view as FabricView} />}
-          {(view === 'inventario' || view === 'inventario-prendas' || (['insumos', 'compras-avios', 'componentes', 'modelos-producto', 'recetas', 'planificacion', 'ordenes'] as View[]).includes(view)) && <ProductionModule view={view === 'inventario' ? 'inventario-piezas' : view as ProductionView} baseModels={models} baseModelsReady={ready} basePieces={pieces} baseMovements={movements} sizes={sizes} sizeGroups={sizeGroups} onAddBaseMovements={replaceBaseMovements} onNavigate={(next) => setView(next)} onQuickCreateBaseModel={openCreateModel} />}
+          {(view === 'inventario' || view === 'inventario-prendas' || (['insumos', 'compras-avios', 'componentes', 'modelos-producto', 'recetas', 'planificacion', 'ordenes'] as View[]).includes(view)) && <ProductionModule view={view === 'inventario' ? 'inventario-piezas' : view as ProductionView} families={families} baseModels={models} baseModelsReady={ready} basePieces={pieces} baseMovements={movements} sizes={sizes} sizeGroups={sizeGroups} onAddBaseMovements={replaceBaseMovements} onNavigate={(next) => setView(next)} onQuickCreateBaseModel={openCreateModel} />}
 
           <div className="prototype-note"><span>ⓘ</span><div><strong>Prototipo de validación · datos de demostración</strong><p>Los registros se guardan en este navegador y no se sincronizan entre dispositivos todavía. El proyecto incluye una migración SQL normalizada para Supabase; antes de producción se deben configurar autenticación, políticas de acceso y pruebas de concurrencia.</p></div></div>
         </div>
@@ -1407,6 +1475,7 @@ export default function Home() {
                     <option value="">Seleccionar familia</option>
                     {families.map((family) => <option key={family.value} value={family.value}>{family.label}</option>)}
                   </select>
+                  <button type="button" className="text-action pattern-editor-inline-action" onClick={openFamilyManager}>＋ Administrar familias</button>
                   <small>La familia se hereda en los modelos comerciales.</small>
                 </label>
                 <label className="field-label">Grupo de tallas
