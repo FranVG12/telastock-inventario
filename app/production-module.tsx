@@ -1131,9 +1131,13 @@ export function ProductionModule({
       kind: movement.kind, side: movement.side, note: movement.note, date: movement.date,
     }));
   }
+  function basePatternSizeOptions(baseModel: ManufacturingModel | undefined): Size[] {
+    if (!baseModel) return [];
+    const excludedSizeIds = new Set(baseModel.excludedSizeIds ?? []);
+    return sizes.filter((size) => size.groupId === baseModel.sizeGroupId && !excludedSizeIds.has(size.id));
+  }
   function productSizeOptions(product: ConfiguredProductModel): Size[] {
-    const groupId = baseModels.find((model) => model.id === product.baseModelId)?.sizeGroupId;
-    return groupId ? sizes.filter((size) => size.groupId === groupId) : [];
+    return basePatternSizeOptions(baseModels.find((model) => model.id === product.baseModelId));
   }
   function componentPieceStockLabel(productModelId: string, piece: ComponentPiece, sizeId: string): string {
     const ledger = componentPieceDomainLedger(productModelId, piece.id, sizeId);
@@ -1476,7 +1480,7 @@ export function ProductionModule({
       }
     }
 
-    const productSizes = sizes.filter((size) => size.groupId === selectedBaseModel.sizeGroupId);
+    const productSizes = basePatternSizeOptions(selectedBaseModel);
     const componentSelections: ProductComponentSelection[] = [];
     for (const component of selectedComponents) {
       const materialSpecifications: Record<string, SizeSpecification> = {};
@@ -1725,7 +1729,7 @@ export function ProductionModule({
   const selectedProductFabricSlots = selectedProductBasePattern ? productFabricSlotsForBaseModel(selectedProductBasePattern) : [];
   const selectedProductComponents = data.components.filter((component) => component.active && productComponentIds.includes(component.id));
   const selectedProductColorSlots = selectedProductBasePattern ? productColorSlotsForConfiguredModel(selectedProductBasePattern.id, basePieces, selectedProductComponents) : [];
-  const selectedProductBaseSizes = selectedProductBasePattern ? sizes.filter((size) => size.groupId === selectedProductBasePattern.sizeGroupId) : [];
+  const selectedProductBaseSizes = basePatternSizeOptions(selectedProductBasePattern);
   const selectedProductBaseWildcardPieces = selectedProductBasePattern ? basePieces.filter((piece) => piece.modelId === selectedProductBasePattern.id && !piece.archived && (piece.fabricSlot === 'cualquiera' || piece.colorSlot === 'cualquiera')) : [];
   const selectedProductComponentWildcardPieces = selectedProductComponents.flatMap((component) => component.pieces.filter((piece) => piece.fabricSlot === 'cualquiera' || (piece.colorSlot ?? (piece.colorId ? 'principal' : 'cualquiera')) === 'cualquiera').map((piece) => ({ component, piece })));
   const selectedProductMaterialRows = data.components.filter((component) => component.active && productComponentIds.includes(component.id)).flatMap((component) => component.materials.filter((material) => Boolean(material.specificationLabel?.trim())).map((material) => ({ component, material })));
@@ -2253,8 +2257,7 @@ export function ProductionModule({
     activeProduct.additionalMaterials.forEach((material) => { requirements.push(material); multipliers.set(material.id, 1); });
     const grouped = new Map<string, PlannedRow>();
     const unresolved: string[] = [];
-    const productSizeGroupId = baseModels.find((model) => model.id === activeProduct.baseModelId)?.sizeGroupId;
-    const productSizes = sizes.filter((size) => size.groupId === productSizeGroupId);
+    const productSizes = productSizeOptions(activeProduct);
     for (const material of requirements) {
       const variant = variantsBySupply.get(material.variantId);
       const supply = variant ? supplies.find((x) => x.id === variant.supplyId) : undefined;
@@ -2413,8 +2416,7 @@ export function ProductionModule({
     if (!activeProduct) return tell('Selecciona un modelo configurado antes de crear una orden.', 'error');
     if (plan.unresolved.length > 0) return tell('No se puede crear la orden: hay materiales con unidades o variantes sin resolver.', 'error');
     if (plan.rows.some((row) => row.missingSizes.length > 0)) return tell('Completa los consumos por talla que faltan antes de crear la orden.', 'error');
-    const groupId = baseModels.find((model) => model.id === activeProduct.baseModelId)?.sizeGroupId;
-    const productSizes = sizes.filter((size) => size.groupId === groupId);
+    const productSizes = productSizeOptions(activeProduct);
     const quantities: Record<string, number> = {};
     for (const size of productSizes) {
       const raw = planCounts[size.id] ?? '';
@@ -3624,8 +3626,7 @@ export function ProductionModule({
       <div className="panel-heading"><div><h2>Planificación de materiales</h2><p>Indica cuántas prendas necesitas por talla. TelaStock calcula los consumos configurados.</p></div></div>
       <label className="field-label">Modelo de prenda<select className="large-input" value={selectedProductId} onChange={(e) => { setSelectedProductId(e.target.value); setPlanCounts({}); }}><option value="">Seleccionar modelo</option>{data.productModels.filter((x) => x.active).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
       {activeProduct && (() => {
-        const groupId = baseModels.find((x) => x.id === activeProduct.baseModelId)?.sizeGroupId;
-        const productSizes = sizes.filter((x) => x.groupId === groupId);
+        const productSizes = productSizeOptions(activeProduct);
         return <>
           <div className="production-size-grid planning-counts">
             {productSizes.map((size) => <label key={size.id}><span>{size.label}</span><input type="number" min="0" step="1" inputMode="numeric" placeholder="0" value={planCounts[size.id] ?? ''} onChange={(e) => setPlanCounts((current) => ({ ...current, [size.id]: e.target.value }))} /></label>)}
