@@ -177,8 +177,6 @@ export default function Home() {
   const [showBackupModal, setShowBackupModal] = useState(false);
   const [modelForm, setModelForm] = useState<ModelFormState>(() => blankModelForm(demoSizeGroups[0].id));
   const [notice, setNotice] = useState<{ message: string; kind: 'success' | 'error' | 'info' } | null>(null);
-  const [historySearch, setHistorySearch] = useState('');
-  const [adminMode, setAdminMode] = useState(false);
   const quickBaseModelCreatedCallbackRef = useRef<((modelId: string) => void) | null>(null);
 
   // Cargar datos una sola vez. Las claves propias de este módulo no pisan el inventario
@@ -1152,53 +1150,6 @@ Esto reemplazará los datos del navegador actual. Exporta un respaldo previo si 
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'inventario-piezas-fabricacion.csv'; anchor.click(); URL.revokeObjectURL(url);
   }
 
-  // Correcciones administrativas del ledger antiguo. Se valida que ningún saldo quede negativo.
-  function adminEditMovement(movement: PieceMovement) {
-    if (!adminMode) return;
-    const amountInput = window.prompt('Nueva cantidad del movimiento (positivo = entrada, negativo = salida):', String(movement.delta));
-    if (amountInput === null) return;
-    const nextDelta = Number(amountInput);
-    if (!Number.isInteger(nextDelta) || nextDelta === 0) {
-      setNoticeMessage('La cantidad debe ser un entero distinto de cero.', 'error'); return;
-    }
-    const nextNote = window.prompt('Motivo / observación corregida:', movement.note);
-    if (nextNote === null) return;
-    const candidate = movements.map((item) => item.id === movement.id ? { ...item, delta: nextDelta, kind: nextDelta > 0 ? 'entrada' as const : 'salida' as const, note: nextNote.trim() || 'Corrección administrativa' } : item);
-    const affectedPiece = pieces.find((item) => item.id === movement.pieceId);
-    if (!affectedPiece || !hasNonNegativeBalances(candidate, affectedPiece, movement.sizeId)) { setNoticeMessage('No se guardó: esta corrección dejaría el stock total o uno de los lados por debajo de cero.', 'error'); return; }
-    if (affectedPiece.laterality === 'simetrica') {
-      const balance = getSymmetricStock(candidate, affectedPiece.id, movement.sizeId);
-      if (balance.left < reservedBasePieceQuantity(affectedPiece.id, movement.sizeId, 'izquierda') || balance.right < reservedBasePieceQuantity(affectedPiece.id, movement.sizeId, 'derecha')) { setNoticeMessage('No se guardó: la corrección invadiría piezas reservadas para órdenes de producción.', 'error'); return; }
-    } else if (getPieceStock(candidate, affectedPiece.id, movement.sizeId) < reservedBasePieceQuantity(affectedPiece.id, movement.sizeId, null)) { setNoticeMessage('No se guardó: la corrección invadiría piezas reservadas para órdenes de producción.', 'error'); return; }
-    setMovements(candidate);
-    setNoticeMessage('Movimiento histórico corregido por administración.', 'success');
-  }
-
-  function adminDeleteMovement(movement: PieceMovement) {
-    if (!adminMode) return;
-    const piece = pieces.find((item) => item.id === movement.pieceId);
-    const size = sizes.find((item) => item.id === movement.sizeId);
-    if (!window.confirm(`¿Eliminar definitivamente este movimiento creado por error?\n${piece?.name ?? 'Molde'} · talla ${size?.label ?? '—'} · ${movement.delta > 0 ? '+' : ''}${movement.delta} piezas\nEl saldo se recalculará y esta acción no se puede deshacer.`)) return;
-    const candidate = movements.filter((item) => item.id !== movement.id);
-    if (!piece || !hasNonNegativeBalances(candidate, piece, movement.sizeId)) { setNoticeMessage('No se puede eliminar: el stock total o uno de los lados quedaría negativo. Corrige primero los movimientos relacionados.', 'error'); return; }
-    if (piece.laterality === 'simetrica') {
-      const balance = getSymmetricStock(candidate, piece.id, movement.sizeId);
-      if (balance.left < reservedBasePieceQuantity(piece.id, movement.sizeId, 'izquierda') || balance.right < reservedBasePieceQuantity(piece.id, movement.sizeId, 'derecha')) { setNoticeMessage('No se puede eliminar: ese movimiento respalda piezas reservadas para órdenes de producción.', 'error'); return; }
-    } else if (getPieceStock(candidate, piece.id, movement.sizeId) < reservedBasePieceQuantity(piece.id, movement.sizeId, null)) { setNoticeMessage('No se puede eliminar: ese movimiento respalda piezas reservadas para órdenes de producción.', 'error'); return; }
-    setMovements(candidate);
-    setNoticeMessage('Movimiento erróneo eliminado. El inventario se recalculó.', 'success');
-  }
-
-  const historyRows = useMemo(() => {
-    const q = historySearch.trim().toLocaleLowerCase('es');
-    return movements.filter((movement) => {
-      const piece = pieces.find((item) => item.id === movement.pieceId);
-      const model = piece ? models.find((item) => item.id === piece.modelId) : undefined;
-      const size = sizes.find((item) => item.id === movement.sizeId);
-      return !q || `${model?.name ?? ''} ${piece?.name ?? ''} ${size?.label ?? ''} ${movement.note}`.toLocaleLowerCase('es').includes(q);
-    }).sort((a, b) => b.date.localeCompare(a.date));
-  }, [movements, pieces, models, sizes, historySearch]);
-
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -1250,14 +1201,13 @@ Esto reemplazará los datos del navegador actual. Exporta un respaldo previo si 
 
         <div className="content">
           <div className="page-heading">
-            <div><div className="eyebrow">{view === 'inventario-prendas' ? 'INVENTARIO DE PRENDAS TERMINADAS' : ['telas','rollos','compras','proveedores','insumos','compras-avios'].includes(view) ? 'INVENTARIO DE INSUMOS' : ['componentes','modelos-producto','recetas','planificacion','ordenes'].includes(view) ? 'CONFIGURACIÓN DE CONFECCIÓN' : 'INVENTARIO DE FABRICACIÓN'}</div><h1>{view === 'inventario' ? 'Inventario por modelo' : view === 'inventario-prendas' ? 'Prendas terminadas' : view === 'modelos' ? 'Patrones base' : view === 'historial' ? 'Movimientos de piezas' : view === 'telas' ? 'Catálogo de telas' : view === 'rollos' ? 'Inventario de rollos' : view === 'compras' ? 'Compras de telas' : view === 'proveedores' ? 'Proveedores' : view === 'insumos' ? 'Insumos y avíos' : view === 'compras-avios' ? 'Compras de avíos' : view === 'componentes' ? 'Biblioteca de componentes' : view === 'modelos-producto' ? 'Modelos configurados' : view === 'recetas' ? 'Recetas estándar' : view === 'ordenes' ? 'Órdenes de producción' : 'Planificación de materiales'}</h1><p>{view === 'inventario' ? 'Controla todas las piezas de cada modelo comercial: moldes base y componentes auxiliares, con sus telas, colores y tallas.' : view === 'inventario-prendas' ? 'Consulta rápidamente cuántas prendas terminadas tienes de cada modelo y talla.' : view === 'modelos' ? 'Define la estructura reutilizable de la prenda. Las telas y los colores concretos se asignan en cada modelo comercial.' : view === 'historial' ? 'Revisa las entradas registradas y el detalle de cada molde y talla.' : view === 'telas' ? 'Administra los tipos de tela, unidades habituales y características.' : view === 'rollos' ? 'Controla cada rollo físico y sus mediciones reales en KG y metros.' : view === 'compras' ? 'Registra compras por proveedor y conserva sus precios históricos.' : view === 'proveedores' ? 'Administra contactos, teléfonos y rubros de proveedores.' : view === 'insumos' ? 'Administra avíos, consumibles, variantes y existencias.' : view === 'compras-avios' ? 'Registra comprobantes, precios históricos e ingresos de avíos al inventario.' : view === 'componentes' ? 'Crea cuellos, bolsillos, puños y acabados reutilizables.' : view === 'modelos-producto' ? 'Combina patrones base con los acabados que lleva cada prenda.' : view === 'recetas' ? 'Define consumos habituales por familia de prenda.' : view === 'ordenes' ? 'Controla las reservas, el avance y el consumo real de cada orden.' : 'Calcula materiales necesarios por talla y faltantes de compra.'}</p></div>
+            <div><div className="eyebrow">{view === 'inventario-prendas' ? 'INVENTARIO DE PRENDAS TERMINADAS' : ['telas','rollos','compras','proveedores','insumos','compras-avios'].includes(view) ? 'INVENTARIO DE INSUMOS' : ['componentes','modelos-producto','recetas','planificacion','ordenes'].includes(view) ? 'CONFIGURACIÓN DE CONFECCIÓN' : 'INVENTARIO DE FABRICACIÓN'}</div><h1>{view === 'inventario' ? 'Inventario por modelo' : view === 'inventario-prendas' ? 'Prendas terminadas' : view === 'modelos' ? 'Patrones base' : view === 'historial' ? 'Movimientos de piezas' : view === 'telas' ? 'Catálogo de telas' : view === 'rollos' ? 'Inventario de rollos' : view === 'compras' ? 'Compras de telas' : view === 'proveedores' ? 'Proveedores' : view === 'insumos' ? 'Insumos y avíos' : view === 'compras-avios' ? 'Compras de avíos' : view === 'componentes' ? 'Biblioteca de componentes' : view === 'modelos-producto' ? 'Modelos configurados' : view === 'recetas' ? 'Recetas estándar' : view === 'ordenes' ? 'Órdenes de producción' : 'Planificación de materiales'}</h1><p>{view === 'inventario' ? 'Controla todas las piezas de cada modelo comercial: moldes base y componentes auxiliares, con sus telas, colores y tallas.' : view === 'inventario-prendas' ? 'Consulta rápidamente cuántas prendas terminadas tienes de cada modelo y talla.' : view === 'modelos' ? 'Define la estructura reutilizable de la prenda. Las telas y los colores concretos se asignan en cada modelo comercial.' : view === 'historial' ? 'Consulta las entradas y salidas que has registrado en cada modelo comercial.' : view === 'telas' ? 'Administra los tipos de tela, unidades habituales y características.' : view === 'rollos' ? 'Controla cada rollo físico y sus mediciones reales en KG y metros.' : view === 'compras' ? 'Registra compras por proveedor y conserva sus precios históricos.' : view === 'proveedores' ? 'Administra contactos, teléfonos y rubros de proveedores.' : view === 'insumos' ? 'Administra avíos, consumibles, variantes y existencias.' : view === 'compras-avios' ? 'Registra comprobantes, precios históricos e ingresos de avíos al inventario.' : view === 'componentes' ? 'Crea cuellos, bolsillos, puños y acabados reutilizables.' : view === 'modelos-producto' ? 'Combina patrones base con los acabados que lleva cada prenda.' : view === 'recetas' ? 'Define consumos habituales por familia de prenda.' : view === 'ordenes' ? 'Controla las reservas, el avance y el consumo real de cada orden.' : 'Calcula materiales necesarios por talla y faltantes de compra.'}</p></div>
             <div className="heading-actions">
               {false && view === 'inventario' && <button className="button secondary" onClick={exportCsv}>↧ <span>Exportar</span></button>}
               {false && view === 'inventario' && <button className="button secondary" onClick={() => openStockForm('salida')}>− <span>Retirar / merma</span></button>}
               {false && view === 'inventario' && <button className="button primary" onClick={() => openStockForm('entrada')}>＋ <span>Registrar stock</span></button>}
               {view === 'modelos' && <><button className="button secondary" onClick={openFamilyManager}>▦ <span>Familias</span></button><button className="button secondary" onClick={() => beginSizeManager(sizeGroups[0]?.id ?? '', false)}>↕ <span>Editar tallas</span></button><button className="button secondary" onClick={exportConfiguration}>↧ <span>Exportar moldes/tallas</span></button><button className="button secondary" onClick={() => importInputRef.current?.click()}>↥ <span>Importar</span></button><input ref={importInputRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importConfiguration(event.target.files?.[0])} /><button className="button primary" onClick={() => openCreateModel()}>＋ <span>Nuevo patrón</span></button></>}
-              {view === 'historial' && <button className="button secondary" onClick={exportCsv}>↧ <span>Exportar inventario</span></button>}
-            </div>
+                </div>
           </div>
 
           {notice && <div className={`notice ${notice.kind}`} role="status"><span>{notice.message}</span><button onClick={() => setNotice(null)} aria-label="Cerrar aviso">×</button></div>}
@@ -1410,22 +1360,8 @@ Esto reemplazará los datos del navegador actual. Exporta un respaldo previo si 
             </div>
             <div className="schema-note"><span>ⓘ</span><p><strong>Cómo funciona la biblioteca:</strong> un patrón define sus piezas, cantidades, lateralidad y posiciones reutilizables. Las tallas activas determinan las variantes que estarán disponibles en los modelos comerciales.</p></div>
           </section>}
-          {view === 'historial' && <section className="panel history-panel">
-            <div className="panel-heading"><div><h2>Movimientos de inventario</h2><p>Consulta los registros anteriores. La edición y eliminación de errores están reservadas al administrador.</p></div><div className="history-heading-actions"><span className="count-badge">{historyRows.length} movimientos</span><button className={`button ${adminMode ? 'primary' : 'secondary'}`} onClick={() => setAdminMode((value) => !value)}>{adminMode ? '✓ Modo administrador activo' : '🔒 Administrar historial'}</button></div></div>
-            {adminMode && <div className="notice info"><span><strong>Modo administrador:</strong> puedes editar cantidades y observaciones o eliminar movimientos registrados por error. Los cambios afectan el saldo y no se permiten saldos negativos. Este control es solo visual mientras no exista autenticación; no es una barrera de seguridad real.</span></div>}
-            <div className="filters"><label className="search-box"><span aria-hidden="true">⌕</span><input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder="Buscar modelo, talla o molde…" aria-label="Buscar movimientos" /></label></div>
-            <div className="history-list">{historyRows.map((movement) => {
-              const piece = pieces.find((item) => item.id === movement.pieceId);
-              const model = piece ? models.find((item) => item.id === piece.modelId) : undefined;
-              const size = sizes.find((item) => item.id === movement.sizeId);
-              const sideLabel = piece?.laterality === 'simetrica' ? movement.side === 'izquierda' ? ' · Lado izquierdo' : movement.side === 'derecha' ? ' · Lado derecho' : ' · Histórico sin lado asignado' : '';
-              return <article className="history-row" key={movement.id}><span className={`movement-icon ${movement.delta < 0 ? 'movement-out' : ''}`}>{movement.delta < 0 ? '−' : '＋'}</span><div className="history-main"><strong>{piece?.name ?? 'Molde archivado'}{sideLabel}</strong><span>{model?.name ?? 'Modelo archivado'} · Talla {size?.label ?? '—'}</span><small>{movement.kind.toLocaleUpperCase('es')} · {movement.note}</small></div><div className="history-amount"><strong>{movement.delta > 0 ? '+' : ''}{fmt(movement.delta)}</strong><span>{new Date(movement.date).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' })}</span>{adminMode && <div className="history-admin-actions"><button className="text-action" onClick={() => adminEditMovement(movement)}>Editar</button><button className="text-action danger-action" onClick={() => adminDeleteMovement(movement)}>Eliminar</button></div>}</div></article>;
-            })}{historyRows.length === 0 && <div className="empty">No se encontraron movimientos.</div>}</div>
-            <div className="panel-footer"><span>Historial actual: almacenamiento del navegador.</span><span>Al conectar Supabase, cada movimiento tendrá fecha y usuario de origen.</span></div>
-          </section>}
-
           {(['telas', 'rollos', 'compras', 'proveedores'] as View[]).includes(view) && <FabricModule view={view as FabricView} />}
-          {(view === 'inventario' || view === 'inventario-prendas' || (['insumos', 'compras-avios', 'componentes', 'modelos-producto', 'recetas', 'planificacion', 'ordenes'] as View[]).includes(view)) && <ProductionModule view={view === 'inventario' ? 'inventario-piezas' : view as ProductionView} families={families} baseModels={models} baseModelsReady={ready} basePieces={pieces} baseMovements={movements} sizes={sizes} sizeGroups={sizeGroups} onAddBaseMovements={replaceBaseMovements} onNavigate={(next) => setView(next)} onQuickCreateBaseModel={openCreateModel} />}
+          {(view === 'inventario' || view === 'inventario-prendas' || view === 'historial' || (['insumos', 'compras-avios', 'componentes', 'modelos-producto', 'recetas', 'planificacion', 'ordenes'] as View[]).includes(view)) && <ProductionModule view={view === 'inventario' ? 'inventario-piezas' : view === 'historial' ? 'historial-piezas' : view as ProductionView} families={families} baseModels={models} baseModelsReady={ready} basePieces={pieces} sizes={sizes} sizeGroups={sizeGroups} onNavigate={(next) => setView(next)} onQuickCreateBaseModel={openCreateModel} />}
 
           <div className="prototype-note"><span>ⓘ</span><div><strong>Prototipo de validación · datos de demostración</strong><p>Los registros se guardan en este navegador y no se sincronizan entre dispositivos todavía. El proyecto incluye una migración SQL normalizada para Supabase; antes de producción se deben configurar autenticación, políticas de acceso y pruebas de concurrencia.</p></div></div>
         </div>
