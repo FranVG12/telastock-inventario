@@ -428,17 +428,6 @@ export default function Home() {
     } catch { return 0; }
   }
 
-  function replaceBaseMovements(next: PieceMovement[]): boolean {
-    try {
-      localStorage.setItem(STORAGE.movements, JSON.stringify(next));
-      setMovements(next);
-      return true;
-    } catch {
-      setNoticeMessage('No se pudo guardar el consumo de moldes base en el navegador.', 'error');
-      return false;
-    }
-  }
-
   function productionOrdersSnapshot(): Array<{
     status?: string;
     baseModelId?: string;
