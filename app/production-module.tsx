@@ -577,6 +577,21 @@ const productColorSlotLabel = (slot: string) => componentColorSlotLabel(slot);
 const unitLabel: Record<StockUnit, string> = { und: 'unidades', m: 'm', cm: 'cm', g: 'g', kg: 'kg', l: 'l', ml: 'ml' };
 const id = () => typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : 'prod-' + Date.now() + '-' + Math.random().toString(36).slice(2);
 const productFabricSlotsForBaseModel = (model: ManufacturingModel) => ['principal', ...Array.from({ length: Math.max(0, Math.floor(model.secondaryFabricSlots ?? 0)) }, (_, index) => 'secundaria_' + (index + 1))];
+/** A commercial model can require extra textile positions through its selected auxiliary components.
+ * These positions belong to the commercial model and must not be forced into the reusable base pattern.
+ */
+const productFabricSlotsForConfiguredModel = (model: ManufacturingModel, components: GarmentComponent[] = []) => {
+  const slots = new Set(productFabricSlotsForBaseModel(model));
+  components.forEach((component) => component.pieces.forEach((piece) => {
+    const slot = normalizeComponentFabricSlot(piece.fabricSlot, piece.textileId);
+    if (slot === 'principal' || secondaryFabricSlotIndex(slot) > 0) slots.add(slot);
+  }));
+  return [...slots].sort((left, right) => {
+    if (left === 'principal') return right === 'principal' ? 0 : -1;
+    if (right === 'principal') return 1;
+    return secondaryFabricSlotIndex(left) - secondaryFabricSlotIndex(right);
+  });
+};
 const productFabricSlotLabel = (slot: string) => {
   if (slot === 'principal') return 'Tela principal 1';
   const match = /^secundaria_(\d+)$/.exec(slot);
@@ -1509,7 +1524,7 @@ export function ProductionModule({
     if (!selectedBaseModel.family) return tell('El patrón base no tiene familia asignada. Edítalo en Modelos antes de guardar el modelo comercial.', 'error');
     if (data.productModels.some((x) => x.id !== editingProduct?.id && x.name.toLocaleLowerCase('es') === productName.trim().toLocaleLowerCase('es'))) return tell('Ya existe otro modelo configurado con ese nombre.', 'error');
 
-    const requiredFabricSlots = productFabricSlotsForBaseModel(selectedBaseModel);
+    const requiredFabricSlots = productFabricSlotsForConfiguredModel(selectedBaseModel, selectedComponents);
     const selectedComponents = data.components.filter((component) =>
       productComponentIds.includes(component.id) &&
       (component.active || Boolean(editingProduct?.components.some((selection) => selection.componentId === component.id))),
@@ -1557,10 +1572,8 @@ export function ProductionModule({
     }
 
     for (const component of selectedComponents) {
-      const incompatiblePiece = component.pieces.find((piece) => !isComponentFabricSlotAvailableForModel(piece.fabricSlot, selectedBaseModel.secondaryFabricSlots ?? 0));
-      if (incompatiblePiece) return tell('El componente "' + component.name + '" tiene la pieza "' + incompatiblePiece.name + '" vinculada a ' + componentFabricSlotLabel(incompatiblePiece.fabricSlot) + ', pero el patrón base "' + selectedBaseModel.name + '" no define esa posición. Añade esa tela secundaria al patrón base o cambia la posición de la pieza.', 'error');
-      const incompatibleColorPiece = component.pieces.find((piece) => !isComponentColorSlotAvailableForModel(piece.colorSlot ?? (piece.colorId ? 'principal' : 'cualquiera'), selectedBaseModel.secondaryColorSlots ?? 0));
-      if (incompatibleColorPiece) return tell('El componente "' + component.name + '" tiene la pieza "' + incompatibleColorPiece.name + '" vinculada a ' + componentColorSlotLabel(incompatibleColorPiece.colorSlot ?? 'cualquiera') + ', pero el patrón base "' + selectedBaseModel.name + '" no define esa posición de color.', 'error');
+      // Auxiliary components may introduce their own secondary textile/color slots.
+      // Their positions are assigned at the commercial-model level; the base pattern stays reusable.
       for (const piece of component.pieces) {
         const fabricSlot = piece.fabricSlot;
         const colorSlot = piece.colorSlot ?? (piece.colorId ? 'principal' : 'cualquiera');
@@ -1652,6 +1665,7 @@ export function ProductionModule({
       const previous = previousFabricRows.find((assignment) => assignment.fabricSlot === fabricSlot);
       return { id: previous?.id ?? id(), productModelId: row.id, fabricSlot, textileId: productFabricAssignments[fabricSlot], createdAt: previous?.createdAt ?? timestamp, updatedAt: timestamp };
     });
+    const preservedUnusedFabricRows = previousFabricRows.filter((assignment) => !requiredFabricSlots.includes(assignment.fabricSlot));
     const colorRows: ProductColorAssignment[] = requiredColorSlots.map((colorSlot) => {
       const previous = previousColorRows.find((assignment) => assignment.colorSlot === colorSlot);
       return { id: previous?.id ?? id(), productModelId: row.id, colorSlot, colorId: productColorAssignments[colorSlot], createdAt: previous?.createdAt ?? timestamp, updatedAt: timestamp };
@@ -1662,7 +1676,7 @@ export function ProductionModule({
       productModels: editingProduct
         ? current.productModels.map((item) => item.id === productModelId ? row : item)
         : [...current.productModels, row],
-      productFabrics: [...current.productFabrics.filter((item) => item.productModelId !== productModelId), ...fabricRows],
+      productFabrics: [...current.productFabrics.filter((item) => item.productModelId !== productModelId), ...preservedUnusedFabricRows, ...fabricRows],
       productColors: [...current.productColors.filter((item) => item.productModelId !== productModelId), ...preservedUnusedColorRows, ...colorRows],
     }));
     setSelectedProductId(productModelId);
@@ -1674,7 +1688,11 @@ export function ProductionModule({
   function openProductFabricEditor(product: ConfiguredProductModel) {
     const base = baseModels.find((model) => model.id === product.baseModelId);
     if (!base) return tell('No se encontró el patrón base de este modelo.', 'error');
-    const slots = productFabricSlotsForBaseModel(base);
+    const selectedComponents = product.components.flatMap((selection) => {
+      const component = data.components.find((item) => item.id === selection.componentId);
+      return component ? [component] : [];
+    });
+    const slots = productFabricSlotsForConfiguredModel(base, selectedComponents);
     const selected = Object.fromEntries(slots.map((slot) => [
       slot,
       data.productFabrics.find((assignment) => assignment.productModelId === product.id && assignment.fabricSlot === slot)?.textileId ?? '',
@@ -1688,18 +1706,25 @@ export function ProductionModule({
     const product = data.productModels.find((item) => item.id === editingProductFabricId && item.active);
     const base = product ? baseModels.find((model) => model.id === product.baseModelId) : undefined;
     if (!product || !base) return tell('No se encontró el modelo o su patrón base.', 'error');
-    const slots = productFabricSlotsForBaseModel(base);
+    const selectedComponents = product.components.flatMap((selection) => {
+      const component = data.components.find((item) => item.id === selection.componentId);
+      return component ? [component] : [];
+    });
+    const slots = productFabricSlotsForConfiguredModel(base, selectedComponents);
     const activeTextileIds = new Set(textileContext.telas.filter((textile) => textile.activo !== false).map((textile) => textile.id));
     const missingSlots = slots.filter((slot) => !activeTextileIds.has(editingProductFabricAssignments[slot] ?? ''));
     if (missingSlots.length > 0) return tell('Asigna una tela del catálogo a: ' + missingSlots.map(productFabricSlotLabel).join(', ') + '.', 'error');
     const timestamp = now();
-    const rows: ProductFabricAssignment[] = slots.map((fabricSlot) => ({
-      id: id(), productModelId: product.id, fabricSlot, textileId: editingProductFabricAssignments[fabricSlot], createdAt: timestamp, updatedAt: timestamp,
-    }));
+    const previousRows = data.productFabrics.filter((item) => item.productModelId === product.id);
+    const rows: ProductFabricAssignment[] = slots.map((fabricSlot) => {
+      const previous = previousRows.find((item) => item.fabricSlot === fabricSlot);
+      return { id: previous?.id ?? id(), productModelId: product.id, fabricSlot, textileId: editingProductFabricAssignments[fabricSlot], createdAt: previous?.createdAt ?? timestamp, updatedAt: timestamp };
+    });
+    const preservedUnusedRows = previousRows.filter((item) => !slots.includes(item.fabricSlot));
     setData((current) => ({
       ...current,
       productModels: current.productModels.map((item) => item.id === product.id ? { ...item, updatedAt: timestamp } : item),
-      productFabrics: [...current.productFabrics.filter((item) => item.productModelId !== product.id), ...rows],
+      productFabrics: [...current.productFabrics.filter((item) => item.productModelId !== product.id), ...preservedUnusedRows, ...rows],
     }));
     setEditingProductFabricId('');
     setEditingProductFabricAssignments({});
@@ -1713,10 +1738,8 @@ export function ProductionModule({
     if (!product || !base || !component) return tell('No se encontró el modelo o el componente seleccionado.', 'error');
     if (product.components.some((selection) => selection.componentId === component.id)) return tell('Este componente ya está asociado al modelo.', 'error');
     if (component.pieces.length === 0) return tell('Este componente todavía no tiene piezas auxiliares. Completa sus moldes en la biblioteca de componentes antes de incorporarlo.', 'error');
-    const incompatibleFabricPiece = component.pieces.find((piece) => !isComponentFabricSlotAvailableForModel(piece.fabricSlot, base.secondaryFabricSlots ?? 0));
-    if (incompatibleFabricPiece) return tell('La pieza «' + incompatibleFabricPiece.name + '» usa ' + componentFabricSlotLabel(incompatibleFabricPiece.fabricSlot) + ', una posición que no existe en el patrón base. Ajusta el patrón o el componente antes de incorporarlo.', 'error');
-    const incompatibleColorPiece = component.pieces.find((piece) => !isComponentColorSlotAvailableForModel(piece.colorSlot ?? (piece.colorId ? 'principal' : 'cualquiera'), base.secondaryColorSlots ?? 0));
-    if (incompatibleColorPiece) return tell('La pieza «' + incompatibleColorPiece.name + '» usa ' + componentColorSlotLabel(incompatibleColorPiece.colorSlot ?? 'cualquiera') + ', una posición que no existe en el patrón base.', 'error');
+    // Component positions are independent requirements of this commercial model, even when
+    // the reusable base pattern does not declare the same secondary slot count.
     const sizeSpecificMaterial = component.materials.find((material) => material.specificationLabel?.trim());
     if (sizeSpecificMaterial) return tell('Este componente requiere configurar «' + sizeSpecificMaterial.specificationLabel + '» por talla. Incorpóralo durante la configuración completa del modelo para definir esas medidas antes de producir.', 'error');
     const selection: ProductComponentSelection = {
@@ -1882,7 +1905,7 @@ export function ProductionModule({
   const componentColorName = (colorId: string | null | undefined) => colorId ? textileContext.colores.find((x) => x.id === colorId)?.nombre ?? 'Color no disponible' : 'Sin color';
   const editingProductForForm = data.productModels.find((product) => product.id === editingProductModelId && product.active);
   const selectedProductBasePattern = baseModels.find((model) => model.id === productBaseId);
-  const selectedProductFabricSlots = selectedProductBasePattern ? productFabricSlotsForBaseModel(selectedProductBasePattern) : [];
+  const selectedProductFabricSlots = selectedProductBasePattern ? productFabricSlotsForConfiguredModel(selectedProductBasePattern, selectedProductComponents) : [];
   const selectedProductComponents = data.components.filter((component) =>
     productComponentIds.includes(component.id) &&
     (component.active || Boolean(editingProductForForm?.components.some((selection) => selection.componentId === component.id))),
@@ -1898,7 +1921,11 @@ export function ProductionModule({
   const activeTextiles = textileContext.telas.filter((textile) => textile.activo !== false).slice().sort((a, b) => a.nombreTela.localeCompare(b.nombreTela, 'es'));
   const editingFabricProduct = data.productModels.find((product) => product.id === editingProductFabricId);
   const editingFabricBasePattern = editingFabricProduct ? baseModels.find((model) => model.id === editingFabricProduct.baseModelId) : undefined;
-  const editingFabricSlots = editingFabricBasePattern ? productFabricSlotsForBaseModel(editingFabricBasePattern) : [];
+  const editingFabricComponents = editingFabricProduct ? editingFabricProduct.components.flatMap((selection) => {
+    const component = data.components.find((item) => item.id === selection.componentId);
+    return component ? [component] : [];
+  }) : [];
+  const editingFabricSlots = editingFabricBasePattern ? productFabricSlotsForConfiguredModel(editingFabricBasePattern, editingFabricComponents) : [];
   const editingColorProduct = data.productModels.find((product) => product.id === editingProductColorId);
   const editingColorBasePattern = editingColorProduct ? baseModels.find((model) => model.id === editingColorProduct.baseModelId) : undefined;
   const editingColorComponents = editingColorProduct ? editingColorProduct.components.flatMap((selection) => {
@@ -3591,8 +3618,8 @@ export function ProductionModule({
           <div className="product-inherited-size-tag"><span>Tallas habilitadas por el patrón</span><strong>{sizeGroups.find((group) => group.id === selectedProductBasePattern?.sizeGroupId)?.name ?? 'Selecciona un patrón base'}{selectedProductBasePattern ? ` · ${selectedProductBaseSizes.length} tallas` : ''}</strong></div>
         </div>
         {selectedProductBasePattern && <section className="product-fabric-assignment-section">
-          <div className="production-subheading"><strong>Telas del modelo</strong><span className="production-muted">Asigna una tela a cada posición del patrón</span></div>
-          <p className="production-muted">Estas telas se seleccionan del catálogo existente. El molde base conserva sus posiciones; cada modelo comercial puede usar telas diferentes.</p>
+          <div className="production-subheading"><strong>Telas del modelo</strong><span className="production-muted">Asigna una tela a cada posición requerida por el patrón y sus componentes</span></div>
+          <p className="production-muted">Estas telas se seleccionan del catálogo existente. El patrón base y sus componentes pueden requerir posiciones secundarias distintas; cada modelo comercial resuelve todas aquí sin modificar las bibliotecas.</p>
           {activeTextiles.length === 0 && <div className="notice info">No hay telas activas todavía. Usa «Crear tela y asignarla aquí» debajo de cada posición.</div>}
           <div className="product-fabric-slots">{selectedProductFabricSlots.map((slot) => <label className="field-label" key={slot}>
             <span>{productFabricSlotLabel(slot)}</span>
@@ -3732,7 +3759,11 @@ export function ProductionModule({
         const collectionName = data.productCollections.find((collection) => collection.id === product.collectionId)?.name ?? 'Sin colección';
         const productSizeGroup = sizeGroups.find((group) => group.id === base?.sizeGroupId);
         const productFabricRows = data.productFabrics.filter((assignment) => assignment.productModelId === product.id);
-        const productFabricSummary = base ? productFabricSlotsForBaseModel(base).map((slot) => {
+        const productFabricComponents = product.components.flatMap((selection) => {
+          const component = data.components.find((item) => item.id === selection.componentId);
+          return component ? [component] : [];
+        });
+        const productFabricSummary = base ? productFabricSlotsForConfiguredModel(base, productFabricComponents).map((slot) => {
           const assignment = productFabricRows.find((item) => item.fabricSlot === slot);
           const textile = assignment ? textileContext.telas.find((item) => item.id === assignment.textileId) : undefined;
           return productFabricSlotLabel(slot) + ': ' + (textile?.nombreTela ?? 'Sin asignar');
