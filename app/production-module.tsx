@@ -3156,10 +3156,13 @@ export function ProductionModule({
                         <div className="inventory-target-limits"><span>Actual: {format(complete)}</span><span>Máximo: {format(maximumTarget)}</span></div>
                         {targetUnits > complete ? missingToTarget.length > 0 ? <>
                           <div className="inventory-target-shortages">
-                            {missingToTarget.map((item) => <div className="inventory-target-shortage" key={item.piece.id}>
-                              <span><strong>{item.piece.name}</strong><small>{item.piece.scope === 'base' ? 'Molde del patrón base' : item.piece.componentName}</small></span>
-                              <b>{item.symmetricStock ? 'I: ' + format(item.missingLeft ?? 0) + ' · D: ' + format(item.missingRight ?? 0) : format(item.missing) + ' pzas.'}</b>
-                            </div>)}
+                            {missingToTarget.map((item) => {
+                              const productPiece = productPieces.find((piece) => piece.id === item.piece.id);
+                              return <div className="inventory-target-shortage" key={item.piece.id}>
+                                <span><strong>{item.piece.name}</strong><small>{productPiece?.scope === 'base' ? 'Molde del patrón base' : productPiece?.componentName ?? 'Pieza auxiliar'}</small></span>
+                                <b>{item.symmetricStock ? 'I: ' + format(item.missingLeft ?? 0) + ' · D: ' + format(item.missingRight ?? 0) : format(item.missing) + ' pzas.'}</b>
+                              </div>;
+                            })}
                           </div>
                           <div className="inventory-target-actions"><span>{format(totalMissingToTarget)} piezas por reponer</span><button type="button" className="button primary" onClick={() => openProductInventoryShortages(product.id, size.id, targetUnits, targetShortages)}>Registrar piezas faltantes</button></div>
                         </> : <p className="inventory-target-hint success">La disponibilidad actual permite alcanzar esta meta.</p> : <p className="inventory-target-hint">Desliza para estimar las piezas necesarias para una meta mayor.</p>}
