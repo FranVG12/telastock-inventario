@@ -1898,11 +1898,11 @@ export function ProductionModule({
   const componentColorName = (colorId: string | null | undefined) => colorId ? textileContext.colores.find((x) => x.id === colorId)?.nombre ?? 'Color no disponible' : 'Sin color';
   const editingProductForForm = data.productModels.find((product) => product.id === editingProductModelId && product.active);
   const selectedProductBasePattern = baseModels.find((model) => model.id === productBaseId);
-  const selectedProductFabricSlots = selectedProductBasePattern ? productFabricSlotsForConfiguredModel(selectedProductBasePattern, selectedProductComponents) : [];
   const selectedProductComponents = data.components.filter((component) =>
     productComponentIds.includes(component.id) &&
     (component.active || Boolean(editingProductForForm?.components.some((selection) => selection.componentId === component.id))),
   );
+  const selectedProductFabricSlots = selectedProductBasePattern ? productFabricSlotsForConfiguredModel(selectedProductBasePattern, selectedProductComponents) : [];
   const productFormComponents = data.components.filter((component) =>
     component.active || Boolean(editingProductForForm?.components.some((selection) => selection.componentId === component.id)),
   );
