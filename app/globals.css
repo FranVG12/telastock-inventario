@@ -1695,3 +1695,48 @@
  .piece-material-no-components{align-items:flex-start;flex-direction:column;font-size:9px}
  .piece-material-auxiliary-group{padding-left:10px}
 }
+
+
+/* Fabrication target slider and shortage prefill for commercial-model inventory. */
+.inventory-target-planner{display:grid;gap:11px;margin:11px 0 3px;padding:17px 14px 14px;border-top:1px solid #edf0f4;border-bottom:1px solid #edf0f4;background:#fff}
+.inventory-target-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.inventory-target-heading strong{color:#171b22;font:800 17px Manrope,sans-serif;letter-spacing:-.35px}
+.inventory-target-heading b{color:#087b42;font:800 27px Manrope,sans-serif;letter-spacing:-.7px;text-align:right;white-space:nowrap}
+.inventory-target-slider{display:block;width:100%;height:34px;margin:0;padding:0;background:transparent;appearance:none;-webkit-appearance:none;cursor:pointer;touch-action:pan-y}
+.inventory-target-slider:focus-visible{outline:3px solid #a8d8ba;outline-offset:3px;border-radius:20px}
+.inventory-target-slider::-webkit-slider-runnable-track{height:10px;background:#e1e1e1;border-radius:999px}
+.inventory-target-slider::-moz-range-track{height:10px;background:#e1e1e1;border-radius:999px}
+.inventory-target-slider::-webkit-slider-thumb{width:27px;height:27px;margin-top:-8.5px;appearance:none;-webkit-appearance:none;border:2px solid #d5d5d5;border-radius:50%;background:#fff;box-shadow:0 4px 15px rgba(0,0,0,.16)}
+.inventory-target-slider::-moz-range-thumb{width:24px;height:24px;border:2px solid #d5d5d5;border-radius:50%;background:#fff;box-shadow:0 4px 15px rgba(0,0,0,.16)}
+.inventory-target-slider:disabled{cursor:not-allowed;opacity:.6}
+.inventory-target-limits{display:flex;justify-content:space-between;gap:10px;color:#777;font-size:14px;font-weight:500;font-variant-numeric:tabular-nums}
+.inventory-target-shortages{display:grid;gap:0;margin-top:3px;border-top:1px solid #edf0f4}
+.inventory-target-shortage{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid #f0f2f5}
+.inventory-target-shortage>span{display:grid;gap:3px;min-width:0}
+.inventory-target-shortage strong{color:#34445c;font-size:11px;overflow-wrap:anywhere}
+.inventory-target-shortage small{color:#8994a5;font-size:9px}
+.inventory-target-shortage>b{color:#956522;font-size:11px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.inventory-target-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:2px}
+.inventory-target-actions>span{color:#788396;font-size:10px;font-weight:700}
+.inventory-target-actions .button{min-height:37px;padding:8px 12px;font-size:10px}
+.inventory-target-hint{margin:0;color:#8791a1;font-size:10px;line-height:1.45}
+.inventory-target-hint.success{color:#258466}
+@media(max-width:720px){
+  .inventory-target-planner{gap:10px;margin:9px 0 2px;padding:15px 3px 13px}
+  .inventory-target-heading strong{font-size:16px}
+  .inventory-target-heading b{font-size:23px}
+  .inventory-target-slider{height:38px}
+  .inventory-target-slider::-webkit-slider-runnable-track{height:9px}
+  .inventory-target-slider::-moz-range-track{height:9px}
+  .inventory-target-slider::-webkit-slider-thumb{width:28px;height:28px;margin-top:-9.5px}
+  .inventory-target-slider::-moz-range-thumb{width:25px;height:25px}
+  .inventory-target-limits{font-size:13px}
+  .inventory-target-shortage{padding:10px 0}
+  .inventory-target-shortage strong{font-size:12px}
+  .inventory-target-shortage small{font-size:10px}
+  .inventory-target-shortage>b{font-size:11px}
+  .inventory-target-actions{align-items:stretch;flex-direction:column;gap:8px}
+  .inventory-target-actions>span{font-size:11px}
+  .inventory-target-actions .button{width:100%;min-height:42px;font-size:12px}
+  .inventory-target-hint{font-size:11px}
+}
