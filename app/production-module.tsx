@@ -7,7 +7,7 @@ import { componentFabricSlotLabel, isComponentFabricSlot, normalizeComponentFabr
 import { componentColorSlotLabel, isComponentColorSlot, normalizeComponentColorSlot, requiredProductColorSlots, resolveComponentPieceColorId, secondaryColorSlotIndex, type ComponentColorSlot } from '@/lib/component-color-slots';
 import { mapSizeSpecificationRules, validateSizeSpecification, type SizeSpecification, type SizeSpecificationRule } from '@/lib/material-size-specifications';
 
-export type ProductionView = 'inventario-piezas' | 'inventario-prendas' | 'insumos' | 'compras-avios' | 'componentes' | 'modelos-producto' | 'recetas' | 'planificacion' | 'ordenes';
+export type ProductionView = 'inventario-piezas' | 'historial-piezas' | 'inventario-prendas' | 'insumos' | 'compras-avios' | 'componentes' | 'modelos-producto' | 'recetas' | 'planificacion' | 'ordenes';
 export type StockUnit = 'und' | 'm' | 'cm' | 'g' | 'kg' | 'l' | 'ml';
 export type SupplyCategory =
   | 'Hilos' | 'Botones y broches' | 'Cintas elásticas' | 'Cintas para vena'
@@ -765,17 +765,15 @@ function variantLabel(variant: SupplyVariant, variants: SupplyVariant[], supplie
 }
 
 export function ProductionModule({
-  view, families, baseModels, baseModelsReady, basePieces, baseMovements, sizes, sizeGroups, onAddBaseMovements, onNavigate, onQuickCreateBaseModel,
+  view, families, baseModels, baseModelsReady, basePieces, sizes, sizeGroups, onNavigate, onQuickCreateBaseModel,
 }: {
   view: ProductionView;
   families: { value: string; label: string }[];
   baseModels: ManufacturingModel[];
   baseModelsReady: boolean;
   basePieces: ModelPiece[];
-  baseMovements: DomainPieceMovement[];
   sizes: Size[];
   sizeGroups: SizeGroup[];
-  onAddBaseMovements: (movements: DomainPieceMovement[]) => boolean;
   onNavigate: (view: ProductionView) => void;
   onQuickCreateBaseModel: (onCreated: (modelId: string) => void) => void;
 }) {
@@ -1980,8 +1978,10 @@ export function ProductionModule({
   const ordersHoldingStock = data.productionOrders.filter((order) => holdingStatuses.includes(order.status));
 
   function productBasePieceDomainLedger(productModelId: string, pieceId: string, sizeId: string): DomainPieceMovement[] {
+    // Pattern-only movements copied from older versions are retained only in backups.
+    // They are not operational stock for a commercial model.
     return data.productBasePieceMovements.filter((movement) =>
-      movement.productModelId === productModelId && movement.pieceId === pieceId && movement.sizeId === sizeId
+      !movement.sourceMovementId && movement.productModelId === productModelId && movement.pieceId === pieceId && movement.sizeId === sizeId
     ).map((movement) => ({
       id: movement.id, pieceId: movement.pieceId, sizeId: movement.sizeId, delta: movement.delta,
       kind: movement.kind, side: movement.side, note: movement.note, date: movement.date,
@@ -2080,44 +2080,6 @@ export function ProductionModule({
       }
     }
     return ledger;
-  }
-
-  function unassignedLegacyBaseMovements(product: ConfiguredProductModel): DomainPieceMovement[] {
-    const pieceIds = new Set(basePieces.filter((piece) => piece.modelId === product.baseModelId && !piece.archived).map((piece) => piece.id));
-    const importedIds = new Set(data.productBasePieceMovements.map((movement) => movement.sourceMovementId).filter((value): value is string => Boolean(value)));
-    const ordersById = new Map(data.productionOrders.map((order) => [order.id, order]));
-    return baseMovements.filter((movement) => {
-      if (!pieceIds.has(movement.pieceId) || importedIds.has(movement.id)) return false;
-      // Historical order consumption already has a reliable commercial owner.
-      // Never offer it to another product that merely reuses the same pattern.
-      const sourceOrder = movement.sourceProductionOrderId ? ordersById.get(movement.sourceProductionOrderId) : undefined;
-      return !sourceOrder || sourceOrder.productModelId === product.id;
-    });
-  }
-
-  function importLegacyBaseStock(product: ConfiguredProductModel) {
-    const legacy = unassignedLegacyBaseMovements(product);
-    if (legacy.length === 0) return tell('No hay movimientos históricos pendientes de asignar para este modelo.', 'info');
-    const linkedToOrders = legacy.filter((movement) => movement.sourceProductionOrderId && data.productionOrders.some((order) => order.id === movement.sourceProductionOrderId && order.productModelId === product.id)).length;
-    const manualEntries = legacy.length - linkedToOrders;
-    const baseName = baseModels.find((model) => model.id === product.baseModelId)?.name ?? 'Patrón base';
-    const confirmed = window.confirm(
-      'Se asignarán ' + legacy.length + ' movimientos históricos de «' + baseName + '» al modelo comercial «' + product.name + '».\n\n' +
-      linkedToOrders + ' movimiento(s) se reconocen por sus órdenes de producción de este modelo. ' +
-      manualEntries + ' movimiento(s) sin modelo de origen se asignarán manualmente al modelo seleccionado.\n\n' +
-      'No se copiarán los movimientos asociados a órdenes de otros modelos. Los registros originales se conservarán y no se borrarán.\n\n¿Continuar?'
-    );
-    if (!confirmed) return;
-    const imported: ProductBasePieceMovement[] = legacy.map((movement) => ({
-      id: id(), productModelId: product.id, pieceId: movement.pieceId, sizeId: movement.sizeId,
-      delta: movement.delta, kind: movement.kind, side: movement.side, note: movement.note,
-      date: movement.date, sourceMovementId: movement.id, sourceProductionOrderId: movement.sourceProductionOrderId ?? null,
-    }));
-    setData((current) => ({
-      ...current,
-      productBasePieceMovements: [...current.productBasePieceMovements, ...imported],
-    }));
-    tell('Stock histórico asignado a ' + product.name + '. Los movimientos de órdenes de otros modelos permanecen separados.');
   }
 
   const activeInventoryProducts = data.productModels.filter((product) => product.active);
@@ -2548,7 +2510,7 @@ export function ProductionModule({
       };
     });
     return { rows, unresolved };
-  }, [activeProduct, data.familyRecipes, data.components, data.productionOrders, variantsBySupply, supplies, sizes, baseModels, basePieces, baseMovements, planCounts, textileContext, data.supplyMovements, stockForVariant, ordersHoldingStock, reservedSupplyQuantity]);
+  }, [activeProduct, data.familyRecipes, data.components, data.productionOrders, variantsBySupply, supplies, sizes, baseModels, basePieces, planCounts, textileContext, data.supplyMovements, stockForVariant, ordersHoldingStock, reservedSupplyQuantity]);
 
 
   function latestUnitCost(variant: SupplyVariant, unit: StockUnit): number | null {
@@ -3023,7 +2985,92 @@ export function ProductionModule({
     }
   }
 
+  const pieceHistoryRows = (() => {
+    type HistoryRow = {
+      id: string; productName: string; pieceName: string; ownerName: string; sizeLabel: string;
+      kind: 'entrada' | 'salida' | 'ajuste'; delta: number; side?: 'izquierda' | 'derecha';
+      note: string; date: string; origin: string;
+    };
+    const productsById = new Map(data.productModels.map((product) => [product.id, product]));
+    const piecesByProduct = new Map<string, ProductInventoryPiece[]>();
+    const resolvePieces = (productId: string) => {
+      const cached = piecesByProduct.get(productId);
+      if (cached) return cached;
+      const product = productsById.get(productId);
+      const pieces = product ? productInventoryPieces(product) : [];
+      piecesByProduct.set(productId, pieces);
+      return pieces;
+    };
+    const rows: HistoryRow[] = [];
+    for (const movement of data.productBasePieceMovements) {
+      if (movement.sourceMovementId) continue;
+      const product = productsById.get(movement.productModelId);
+      const piece = resolvePieces(movement.productModelId).find((item) => item.scope === 'base' && item.sourcePieceId === movement.pieceId);
+      const size = sizes.find((item) => item.id === movement.sizeId);
+      rows.push({
+        id: 'base:' + movement.id, productName: product?.name ?? 'Modelo archivado',
+        pieceName: piece?.name ?? 'Pieza archivada', ownerName: 'Molde del patrón base',
+        sizeLabel: size?.label ?? '—', kind: movement.kind, delta: movement.delta,
+        side: movement.side, note: movement.note, date: movement.date,
+        origin: movement.sourceProductionOrderId ? 'Orden de producción' : 'Registro manual',
+      });
+    }
+    for (const movement of data.componentPieceMovements) {
+      if (!movement.productModelId) continue;
+      const product = productsById.get(movement.productModelId);
+      const piece = resolvePieces(movement.productModelId).find((item) =>
+        item.scope === 'component' && item.componentId === movement.componentId && item.sourcePieceId === movement.pieceId
+      );
+      const size = sizes.find((item) => item.id === movement.sizeId);
+      rows.push({
+        id: 'component:' + movement.id, productName: product?.name ?? 'Modelo archivado',
+        pieceName: piece?.name ?? 'Pieza auxiliar archivada', ownerName: piece?.componentName ?? 'Componente archivado',
+        sizeLabel: size?.label ?? '—', kind: movement.kind, delta: movement.delta,
+        side: movement.side, note: movement.note, date: movement.date,
+        origin: movement.sourceProductionOrderId ? 'Orden de producción' : 'Registro manual',
+      });
+    }
+    return rows.sort((a, b) => b.date.localeCompare(a.date));
+  })();
+  const pieceHistoryQuery = pieceHistorySearch.trim().toLocaleLowerCase('es');
+  const visiblePieceHistory = pieceHistoryRows.filter((row) =>
+    !pieceHistoryQuery || [row.productName, row.pieceName, row.ownerName, row.sizeLabel, row.note, row.origin]
+      .join(' ').toLocaleLowerCase('es').includes(pieceHistoryQuery)
+  );
+
   const mainPanel = (() => {
+    if (view === 'historial-piezas') return <section className="panel production-panel product-piece-history">
+      <div className="panel-heading">
+        <div><h2>Historial de movimientos</h2><p>Entradas y salidas registradas en los modelos comerciales. Los movimientos antiguos de patrones base no se mezclan con este historial.</p></div>
+        <span className="count-badge">{visiblePieceHistory.length} movimientos</span>
+      </div>
+      <div className="filters inventory-filters">
+        <label className="search-box"><span aria-hidden="true">⌕</span><input value={pieceHistorySearch} onChange={(event) => setPieceHistorySearch(event.target.value)} placeholder="Buscar modelo, pieza o talla…" aria-label="Buscar movimientos de modelos comerciales" /></label>
+      </div>
+      <div className="product-piece-history-list">
+        {visiblePieceHistory.map((row) => {
+          const operation = row.kind === 'entrada' ? 'Entrada' : row.kind === 'salida' ? 'Salida' : 'Ajuste';
+          const sideLabel = row.side === 'izquierda' ? ' · Izquierda' : row.side === 'derecha' ? ' · Derecha' : '';
+          const dateLabel = row.date && !Number.isNaN(Date.parse(row.date))
+            ? new Date(row.date).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' })
+            : 'Sin fecha';
+          return <article className="product-piece-history-row" key={row.id}>
+            <span className={'product-piece-history-icon ' + (row.delta < 0 ? 'out' : 'in')} aria-hidden="true">{row.delta < 0 ? '−' : '＋'}</span>
+            <div className="product-piece-history-main">
+              <strong>{row.pieceName}{sideLabel}</strong>
+              <span>{row.productName} · Talla {row.sizeLabel}</span>
+              <small>{row.ownerName} · {operation} · {row.note || 'Sin observación'} · {row.origin}</small>
+            </div>
+            <div className="product-piece-history-amount">
+              <strong>{row.delta > 0 ? '+' : ''}{format(row.delta)}</strong>
+              <small>{dateLabel}</small>
+            </div>
+          </article>;
+        })}
+        {visiblePieceHistory.length === 0 && <div className="empty">{pieceHistoryRows.length === 0 ? 'Todavía no has registrado movimientos en modelos comerciales.' : 'No hay movimientos que coincidan con la búsqueda.'}</div>}
+      </div>
+    </section>;
+
     if (view === 'inventario-piezas') return <section className="panel production-panel product-model-inventory">
       <div className="panel-heading">
         <div><h2>Inventario por modelo comercial</h2><p>Cada modelo lleva su propio stock de moldes base y piezas auxiliares, con la tabla de tallas, telas y colores que realmente utiliza.</p></div>
@@ -3059,7 +3106,6 @@ export function ProductionModule({
               getPieceStock(productPieceDomainLedger(product.id, piece, size.id), piece.id, size.id) > 0
             ));
             const visibleSizes = inventoryIncludeEmptySizes ? productSizes : sizesWithStock;
-            const legacyMovements = unassignedLegacyBaseMovements(product);
             const fabrics = [...new Set(productPieces.map((piece) => piece.textileName).filter((name) => name && name !== 'Sin asignar' && name !== 'Sin tela definida'))];
             const colors = [...new Set(productPieces.map((piece) => piece.colorName).filter((name) => name && name !== 'Sin asignar' && name !== 'Sin color'))];
             return <article className={'model-card product-model-inventory-card ' + (expanded ? 'expanded' : '')} key={product.id}>
@@ -3078,10 +3124,6 @@ export function ProductionModule({
                   <button className="button secondary" onClick={() => openProductInventoryForm('entrada', product.id)}>＋ Registrar stock</button>
                   <button className="button secondary" onClick={() => openProductInventoryForm('salida', product.id)}>− Retirar / merma</button>
                 </div>
-                {legacyMovements.length > 0 && <div className="notice info inventory-legacy-notice">
-                  <span>Hay {legacyMovements.length} movimientos históricos del patrón base que todavía no pertenecen a un modelo comercial. Elige a qué modelo asignarlos; no se copiarán a los demás.</span>
-                  <button type="button" className="button secondary" onClick={() => importLegacyBaseStock(product)}>Asignar stock antiguo a este modelo</button>
-                </div>}
                 {visibleSizes.length === 0 ? <div className="empty size-empty">Este modelo todavía no tiene piezas registradas en ninguna talla. <button className="text-action" onClick={() => openProductInventoryForm('entrada', product.id)}>Registrar stock</button></div> : <div className="size-list">
                   {visibleSizes.map((size) => {
                     const ledger = productInventoryEffectiveLedger(product, productPieces, size.id);
@@ -3118,9 +3160,9 @@ export function ProductionModule({
                       const shortage = shortages.find((item) => item.piece.id === piece.id);
                       const missingText = shortage && shortage.missing > 0
                         ? shortage.symmetricStock
-                          ? 'Faltan I:' + format(shortage.missingLeft ?? 0) + ' · D:' + format(shortage.missingRight ?? 0) + ' para otra prenda'
-                          : 'Faltan ' + format(shortage.missing) + ' para otra prenda'
-                        : 'Stock suficiente para la siguiente prenda';
+                          ? 'Falta I:' + format(shortage.missingLeft ?? 0) + ' · D:' + format(shortage.missingRight ?? 0)
+                          : 'Faltan ' + format(shortage.missing) + ' pzas.'
+                        : 'Disponible para otra prenda';
                       return <article className="inventory-product-piece-row" key={piece.id}>
                         <div className="inventory-product-piece-main">
                           <strong>{piece.name}</strong>
