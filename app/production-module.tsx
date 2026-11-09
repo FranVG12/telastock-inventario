@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { getCompleteUnits, getPieceShortages, getPieceStock, getSymmetricStock, type PieceMovement as DomainPieceMovement, type ManufacturingModel, type ModelPiece, type Size, type SizeGroup } from '@/lib/inventory-domain';
 import { FABRIC_STORAGE_KEYS, createGlobalColorQuickly, createTextileColorQuickly, createTextileQuickly, type RollMovement as FabricRollMovement } from '@/app/fabric-module';
-import { componentFabricSlotLabel, isComponentFabricSlot, isComponentFabricSlotAvailableForModel, normalizeComponentFabricSlot, resolveComponentPieceTextileId, secondaryFabricSlotIndex, type ComponentFabricSlot } from '@/lib/component-fabric-slots';
-import { componentColorSlotLabel, isComponentColorSlot, isComponentColorSlotAvailableForModel, normalizeComponentColorSlot, requiredProductColorSlots, resolveComponentPieceColorId, secondaryColorSlotIndex, type ComponentColorSlot } from '@/lib/component-color-slots';
+import { componentFabricSlotLabel, isComponentFabricSlot, normalizeComponentFabricSlot, resolveComponentPieceTextileId, secondaryFabricSlotIndex, type ComponentFabricSlot } from '@/lib/component-fabric-slots';
+import { componentColorSlotLabel, isComponentColorSlot, normalizeComponentColorSlot, requiredProductColorSlots, resolveComponentPieceColorId, secondaryColorSlotIndex, type ComponentColorSlot } from '@/lib/component-color-slots';
 import { mapSizeSpecificationRules, validateSizeSpecification, type SizeSpecification, type SizeSpecificationRule } from '@/lib/material-size-specifications';
 
 export type ProductionView = 'inventario-piezas' | 'inventario-prendas' | 'insumos' | 'compras-avios' | 'componentes' | 'modelos-producto' | 'recetas' | 'planificacion' | 'ordenes';
@@ -1342,15 +1342,8 @@ export function ProductionModule({
       })),
       updatedAt: now(),
     };
-    for (const product of data.productModels) {
-      if (!product.components.some((selection) => selection.componentId === row.id)) continue;
-      const basePattern = baseModels.find((model) => model.id === product.baseModelId);
-      if (!basePattern) return tell('No se puede cambiar el componente: el modelo ' + product.name + ' no tiene un patrón base disponible.', 'error');
-      const incompatiblePiece = row.pieces.find((piece) => !isComponentFabricSlotAvailableForModel(piece.fabricSlot, basePattern.secondaryFabricSlots ?? 0));
-      if (incompatiblePiece) return tell('La pieza auxiliar "' + incompatiblePiece.name + '" usa ' + componentFabricSlotLabel(incompatiblePiece.fabricSlot) + ', pero el patrón base de "' + product.name + '" no tiene esa posición.', 'error');
-      const incompatibleColorPiece = row.pieces.find((piece) => !isComponentColorSlotAvailableForModel(piece.colorSlot ?? 'cualquiera', basePattern.secondaryColorSlots ?? 0));
-      if (incompatibleColorPiece) return tell('La pieza auxiliar "' + incompatibleColorPiece.name + '" usa ' + componentColorSlotLabel(incompatibleColorPiece.colorSlot ?? 'cualquiera') + ', pero el patrón base de "' + product.name + '" no tiene esa posición de color.', 'error');
-    }
+    // A shared component may introduce additional secondary textile/color positions.
+    // These are resolved per commercial model and do not need to exist on its base pattern.
     const otherPieceIds = new Set(data.components.filter((component) => component.id !== row.id).flatMap((component) => component.pieces.map((piece) => piece.id)));
     const draftPieceIds = row.pieces.map((piece) => piece.id);
     if (new Set(draftPieceIds).size !== draftPieceIds.length || row.pieces.some((piece) => otherPieceIds.has(piece.id))) return tell('Cada pieza necesita un identificador propio. Vuelve a agregar la pieza duplicada.', 'error');
