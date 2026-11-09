@@ -1063,7 +1063,15 @@ export default function Home() {
 
       const legacyWarning = raw.schemaVersion === 1 ? '\\nEste respaldo antiguo no contiene datos de telas, rollos ni compras; al restaurarlo, esas colecciones quedarán vacías.' : '';
       const confirmed = window.confirm(
-        `Vas a restaurar ${importedFamilies.length} familias, ${importedModels.length} patrones, ${importedPieces.length} moldes y ${importedMovements.length} movimientos, además de ${importedFabric.rollos.length} rollos, ${importedFabric.compras.length} compras y ${importedProduction.supplies.length} insumos. Esto reemplazará los datos del navegador actual. Exporta un respaldo previo si necesitas conservarlos.${legacyWarning} ¿Continuar?`
+        `Vas a restaurar:
+• ${importedFamilies.length} familias, ${importedGroups.length} grupos y ${importedSizes.length} tallas.
+• ${importedModels.length} patrones y ${importedPieces.length} moldes base.
+• ${importedProduction.productModels.length} modelos comerciales, ${importedProduction.components.length} componentes y ${importedProduction.productFabrics.length + importedProduction.productColors.length} asignaciones de tela/color.
+• ${importedMovements.length + importedProduction.productBasePieceMovements.length + importedProduction.componentPieceMovements.length + importedProduction.finishedGarmentMovements.length} movimientos de piezas y prendas terminadas.
+• ${importedFabric.telas.length} telas, ${importedFabric.rollos.length} rollos, ${importedFabric.compras.length} compras, ${importedFabric.proveedores.length} proveedores.
+• ${importedProduction.supplies.length} insumos, ${importedProduction.variants.length} variantes, ${importedProduction.supplyPurchases.length} compras de avíos y ${importedProduction.productionOrders.length} órdenes.
+Esto reemplazará los datos del navegador actual. Exporta un respaldo previo si necesitas conservarlos.${legacyWarning}
+¿Continuar?`
       );
       if (!confirmed) return;
 
@@ -1096,7 +1104,7 @@ export default function Home() {
       (Object.keys(emptyProductionBackupData()) as (keyof ReturnType<typeof emptyProductionBackupData>)[]).forEach((key) => {
         localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(importedProduction[key]));
       });
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '6');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '11');
       window.dispatchEvent(new Event('telastock-production-data-restored'));
       window.dispatchEvent(new Event('telastock-fabric-data-updated'));
       window.dispatchEvent(new Event('telastock-fabric-data-restored'));
@@ -1106,7 +1114,7 @@ export default function Home() {
       setStockAmounts({});
       setStockEntryModes({});
       setShowBackupModal(false);
-      setNoticeMessage(`Respaldo restaurado: ${importedModels.length} modelos, ${importedMovements.length} movimientos, ${importedFabric.rollos.length} rollos, ${importedFabric.compras.length} compras y ${importedProduction.supplies.length} insumos.`);
+      setNoticeMessage(`Respaldo restaurado: ${importedModels.length} patrones, ${importedProduction.productModels.length} modelos comerciales, ${importedProduction.components.length} componentes, ${importedFabric.rollos.length} rollos, ${importedProduction.productionOrders.length} órdenes y todos sus historiales.`);
     } catch (error) {
       setNoticeMessage(`No se pudo restaurar el respaldo: ${error instanceof Error ? error.message : 'archivo no válido'}`, 'error');
     } finally {
