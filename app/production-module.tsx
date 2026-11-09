@@ -794,6 +794,7 @@ export function ProductionModule({
   const [inventoryAmounts, setInventoryAmounts] = useState<Record<string, string>>({});
   const [inventoryEntryModes, setInventoryEntryModes] = useState<Record<string, 'paridad' | 'lados'>>({});
   const [inventoryTargetUnits, setInventoryTargetUnits] = useState<Record<string, number>>({});
+  const [pieceHistorySearch, setPieceHistorySearch] = useState('');
   const [inventoryNote, setInventoryNote] = useState('Ingreso de piezas');
   const [showProductInventoryForm, setShowProductInventoryForm] = useState(false);
   const [finishedInventorySearch, setFinishedInventorySearch] = useState('');
