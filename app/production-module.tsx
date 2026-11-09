@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { getCompleteUnits, getPieceShortages, getPieceStock, getSymmetricStock, type PieceMovement as DomainPieceMovement, type ManufacturingModel, type ModelPiece, type Size, type SizeGroup } from '@/lib/inventory-domain';
+import { getCompleteUnits, getMaximumTargetUnits, getPieceShortages, getPieceStock, getSymmetricStock, type PieceMovement as DomainPieceMovement, type ManufacturingModel, type ModelPiece, type Size, type SizeGroup } from '@/lib/inventory-domain';
 import { FABRIC_STORAGE_KEYS, createGlobalColorQuickly, createTextileColorQuickly, createTextileQuickly, type RollMovement as FabricRollMovement } from '@/app/fabric-module';
 import { componentFabricSlotLabel, isComponentFabricSlot, normalizeComponentFabricSlot, resolveComponentPieceTextileId, secondaryFabricSlotIndex, type ComponentFabricSlot } from '@/lib/component-fabric-slots';
 import { componentColorSlotLabel, isComponentColorSlot, normalizeComponentColorSlot, requiredProductColorSlots, resolveComponentPieceColorId, secondaryColorSlotIndex, type ComponentColorSlot } from '@/lib/component-color-slots';
@@ -795,6 +795,7 @@ export function ProductionModule({
   const [inventorySizeIds, setInventorySizeIds] = useState<string[]>([]);
   const [inventoryAmounts, setInventoryAmounts] = useState<Record<string, string>>({});
   const [inventoryEntryModes, setInventoryEntryModes] = useState<Record<string, 'paridad' | 'lados'>>({});
+  const [inventoryTargetUnits, setInventoryTargetUnits] = useState<Record<string, number>>({});
   const [inventoryNote, setInventoryNote] = useState('Ingreso de piezas');
   const [showProductInventoryForm, setShowProductInventoryForm] = useState(false);
   const [finishedInventorySearch, setFinishedInventorySearch] = useState('');
@@ -2189,7 +2190,11 @@ export function ProductionModule({
     return stock.left === stock.right ? format(stock.parity) + ' par.' : format(stock.left) + '/' + format(stock.right);
   }
 
-  function openProductInventoryForm(operation: 'entrada' | 'salida', productModelId?: string) {
+  function openProductInventoryForm(
+    operation: 'entrada' | 'salida',
+    productModelId?: string,
+    prefill?: { sizeId: string; amounts: Record<string, string>; entryModes: Record<string, 'paridad' | 'lados'>; note?: string },
+  ) {
     if (activeInventoryProducts.length === 0) {
       tell('Primero crea un modelo comercial a partir de un patrón base y sus componentes.', 'info');
       onNavigate('modelos-producto');
@@ -2198,11 +2203,39 @@ export function ProductionModule({
     const selected = activeInventoryProducts.find((product) => product.id === productModelId) ?? activeInventoryProducts[0];
     setInventoryProductId(selected.id);
     setInventoryOperation(operation);
-    setInventorySizeIds([]);
-    setInventoryAmounts({});
-    setInventoryEntryModes({});
-    setInventoryNote(operation === 'entrada' ? 'Ingreso de piezas' : 'Retiro / merma');
+    setInventorySizeIds(prefill ? [prefill.sizeId] : []);
+    setInventoryAmounts(prefill?.amounts ?? {});
+    setInventoryEntryModes(prefill?.entryModes ?? {});
+    setInventoryNote(prefill?.note ?? (operation === 'entrada' ? 'Ingreso de piezas' : 'Retiro / merma'));
     setShowProductInventoryForm(true);
+  }
+
+  function openProductInventoryShortages(
+    productModelId: string,
+    sizeId: string,
+    targetUnits: number,
+    shortages: ReturnType<typeof getPieceShortages>,
+  ) {
+    const amounts: Record<string, string> = {};
+    const entryModes: Record<string, 'paridad' | 'lados'> = {};
+    for (const shortage of shortages) {
+      if (shortage.missing <= 0) continue;
+      const pieceId = shortage.piece.id;
+      if (shortage.symmetricStock) {
+        entryModes[pieceId] = 'lados';
+        if ((shortage.missingLeft ?? 0) > 0) amounts[sizeId + '::' + pieceId + '::izquierda'] = String(shortage.missingLeft);
+        if ((shortage.missingRight ?? 0) > 0) amounts[sizeId + '::' + pieceId + '::derecha'] = String(shortage.missingRight);
+      } else {
+        amounts[sizeId + '::' + pieceId] = String(shortage.missing);
+      }
+    }
+    setInventoryExpandedProducts((previous) => previous.includes(productModelId) ? previous : [...previous, productModelId]);
+    openProductInventoryForm('entrada', productModelId, {
+      sizeId,
+      amounts,
+      entryModes,
+      note: 'Reposición para alcanzar ' + targetUnits + ' conjuntos',
+    });
   }
 
   function changeInventoryProduct(productId: string) {
@@ -3060,6 +3093,15 @@ export function ProductionModule({
                         : Math.max(0, getPieceStock(pieceLedger, piece.id, size.id)));
                     }, 0);
                     const shortages = getPieceShortages(productPieces, ledger, size.id, complete + 1);
+                    const maximumTarget = getMaximumTargetUnits(productPieces, ledger, size.id);
+                    const targetKey = product.id + '::' + size.id;
+                    const targetUnits = Math.min(
+                      Math.max(complete, inventoryTargetUnits[targetKey] ?? complete),
+                      Math.max(complete, maximumTarget),
+                    );
+                    const targetShortages = getPieceShortages(productPieces, ledger, size.id, targetUnits);
+                    const missingToTarget = targetShortages.filter((item) => item.missing > 0);
+                    const totalMissingToTarget = missingToTarget.reduce((sum, item) => sum + item.missing, 0);
                     const baseRows = productPieces.filter((piece) => piece.scope === 'base');
                     const componentGroups = product.components.flatMap((selection) => {
                       const component = data.components.find((item) => item.id === selection.componentId);
@@ -3108,6 +3150,21 @@ export function ProductionModule({
                         <div><strong>{format(finishedGarmentStock(product.id, size.id))}</strong><small>prendas terminadas de esta talla</small></div>
                         <button type="button" className="button primary" disabled={complete < 1} onClick={() => convertPieceSetToFinishedGarment(product, size.id)}>⇢ Convertir 1 prenda</button>
                       </div>
+                      <section className="inventory-target-planner" aria-label={'Meta de fabricación para talla ' + size.label}>
+                        <div className="inventory-target-heading"><strong>Meta de fabricación</strong><b>{format(targetUnits)} conjuntos</b></div>
+                        <input className="inventory-target-slider" type="range" min={complete} max={Math.max(complete, maximumTarget)} step="1" value={targetUnits} disabled={maximumTarget <= complete || productPieces.length === 0} aria-label={'Cantidad objetivo de conjuntos para talla ' + size.label} onChange={(event) => setInventoryTargetUnits((previous) => ({ ...previous, [targetKey]: Number(event.target.value) }))} />
+                        <div className="inventory-target-limits"><span>Actual: {format(complete)}</span><span>Máximo: {format(maximumTarget)}</span></div>
+                        {targetUnits > complete ? missingToTarget.length > 0 ? <>
+                          <div className="inventory-target-shortages">
+                            {missingToTarget.map((item) => <div className="inventory-target-shortage" key={item.piece.id}>
+                              <span><strong>{item.piece.name}</strong><small>{item.piece.scope === 'base' ? 'Molde del patrón base' : item.piece.componentName}</small></span>
+                              <b>{item.symmetricStock ? 'I: ' + format(item.missingLeft ?? 0) + ' · D: ' + format(item.missingRight ?? 0) : format(item.missing) + ' pzas.'}</b>
+                            </div>)}
+                          </div>
+                          <div className="inventory-target-actions"><span>{format(totalMissingToTarget)} piezas por reponer</span><button type="button" className="button primary" onClick={() => openProductInventoryShortages(product.id, size.id, targetUnits, targetShortages)}>Registrar piezas faltantes</button></div>
+                        </> : <p className="inventory-target-hint success">La disponibilidad actual permite alcanzar esta meta.</p> : <p className="inventory-target-hint">Desliza para estimar las piezas necesarias para una meta mayor.</p>}
+                        {maximumTarget <= complete && <p className="inventory-target-hint">No hay capacidad adicional estimable con el stock actual.</p>}
+                      </section>
                       {baseRows.length > 0 && <section className="inventory-product-piece-group"><h4>Moldes del patrón base <span>{baseRows.length}</span></h4>{baseRows.map(renderPiece)}</section>}
                       {componentGroups.map(({ selection, component, rows }) => <section className="inventory-product-piece-group" key={selection.id}><h4>{component.name} <span>{rows.length} piezas</span></h4>{rows.map(renderPiece)}</section>)}
                     </div>;
