@@ -2790,6 +2790,7 @@ export function ProductionModule({
                         ? getSymmetricStock(pieceLedger, piece.id, size.id).physicalTotal
                         : Math.max(0, getPieceStock(pieceLedger, piece.id, size.id)));
                     }, 0);
+                    const shortages = getPieceShortages(productPieces, ledger, size.id, complete + 1);
                     const maximumTarget = getMaximumTargetUnits(productPieces, ledger, size.id);
                     const targetKey = product.id + '::' + size.id;
                     const targetUnits = Math.min(
