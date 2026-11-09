@@ -19,8 +19,8 @@ import {
   type SizeGroup,
 } from '@/lib/inventory-domain';
 import { demoModels, demoMovements, demoPieces, demoSizes, demoSizeGroups } from '@/lib/demo-data';
-import { isComponentFabricSlotAvailableForModel, secondaryFabricSlotIndex } from '@/lib/component-fabric-slots';
-import { isComponentColorSlotAvailableForModel, secondaryColorSlotIndex } from '@/lib/component-color-slots';
+import { isComponentFabricSlot, isComponentFabricSlotAvailableForModel, secondaryFabricSlotIndex } from '@/lib/component-fabric-slots';
+import { isComponentColorSlot, isComponentColorSlotAvailableForModel, secondaryColorSlotIndex } from '@/lib/component-color-slots';
 import { validateSizeSpecification } from '@/lib/material-size-specifications';
 import { FabricModule, FABRIC_STORAGE_KEYS, emptyFabricBackupData, validateFabricBackupData, type FabricView, type ColorDefinition } from '@/app/fabric-module';
 import { ProductionModule, PRODUCTION_STORAGE_KEYS, emptyProductionBackupData, validateProductionBackupData, type ProductionView } from '@/app/production-module';
@@ -996,14 +996,14 @@ export default function Home() {
         const product = importedProduction.productModels.find((item) => item.id === assignment.productModelId);
         const baseModel = product ? importedModels.find((item) => item.id === product.baseModelId) : undefined;
         return Boolean(product && baseModel &&
-          isValidFabricSlot(assignment.fabricSlot, baseModel.secondaryFabricSlots ?? 0) &&
+          isComponentFabricSlot(assignment.fabricSlot) &&
           importedFabric.telas.some((textile) => textile.id === assignment.textileId));
       });
       const productColorLinksValid = importedProduction.productColors.every((assignment) => {
         const product = importedProduction.productModels.find((item) => item.id === assignment.productModelId);
         const baseModel = product ? importedModels.find((item) => item.id === product.baseModelId) : undefined;
         return Boolean(product && baseModel &&
-          isValidColorSlot(assignment.colorSlot, baseModel.secondaryColorSlots ?? 0) &&
+          isComponentColorSlot(assignment.colorSlot) &&
           importedFabric.colores.some((color) => color.id === assignment.colorId));
       });
       const productionSizeLinksValid =
@@ -1025,17 +1025,11 @@ export default function Home() {
           (piece.colorId == null || importedFabric.colores.some((color) => color.id === piece.colorId))
         )
       );
-      const componentPieceSlotsValidForProducts = importedProduction.productModels.every((product) => {
-        const basePattern = importedModels.find((model) => model.id === product.baseModelId);
-        return Boolean(basePattern && product.components.every((selection) => {
-          const component = importedProduction.components.find((item) => item.id === selection.componentId);
-          return Boolean(component && component.pieces.every((piece) =>
-            isComponentFabricSlotAvailableForModel(piece.fabricSlot, basePattern.secondaryFabricSlots ?? 0) &&
-            isComponentColorSlotAvailableForModel(piece.colorSlot ?? (piece.colorId ? 'principal' : 'cualquiera'), basePattern.secondaryColorSlots ?? 0)
-          ));
-        }));
-      });
-      if (!productionSizeLinksValid || !componentPieceCatalogLinksValid || !componentPieceSlotsValidForProducts || !productMaterialSpecificationsValid || !productFabricLinksValid || !productColorLinksValid) throw new Error('Hay órdenes, movimientos, piezas auxiliares o telas de modelos vinculados a registros que no existen en este respaldo.');
+      const productBasePatternsExist = importedProduction.productModels.every((product) =>
+        importedModels.some((model) => model.id === product.baseModelId) &&
+        product.components.every((selection) => importedProduction.components.some((component) => component.id === selection.componentId))
+      );
+      if (!productionSizeLinksValid || !componentPieceCatalogLinksValid || !productBasePatternsExist || !productMaterialSpecificationsValid || !productFabricLinksValid || !productColorLinksValid) throw new Error('Hay órdenes, movimientos, piezas auxiliares, patrones o telas de modelos vinculados a registros que no existen en este respaldo.');
       if (!importedGroups.every((item) => hasText(item.name))) throw new Error('Hay grupos de tallas sin nombre.');
       if (!importedSizes.every((item) => hasText(item.label) && groupIds.has(item.groupId) && Number.isInteger(item.sortOrder))) throw new Error('Hay tallas incompletas o vinculadas a un grupo inexistente.');
       if (!importedModels.every((item) => hasText(item.name) && groupIds.has(item.sizeGroupId))) throw new Error('Hay modelos incompletos o vinculados a un grupo inexistente.');
