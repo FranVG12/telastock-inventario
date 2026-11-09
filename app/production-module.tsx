@@ -1880,14 +1880,21 @@ export function ProductionModule({
 
   const textileName = (textileId: string | null | undefined) => textileId ? textileContext.telas.find((x) => x.id === textileId)?.nombreTela ?? '' : 'Ninguna';
   const componentColorName = (colorId: string | null | undefined) => colorId ? textileContext.colores.find((x) => x.id === colorId)?.nombre ?? 'Color no disponible' : 'Sin color';
+  const editingProductForForm = data.productModels.find((product) => product.id === editingProductModelId && product.active);
   const selectedProductBasePattern = baseModels.find((model) => model.id === productBaseId);
   const selectedProductFabricSlots = selectedProductBasePattern ? productFabricSlotsForBaseModel(selectedProductBasePattern) : [];
-  const selectedProductComponents = data.components.filter((component) => component.active && productComponentIds.includes(component.id));
+  const selectedProductComponents = data.components.filter((component) =>
+    productComponentIds.includes(component.id) &&
+    (component.active || Boolean(editingProductForForm?.components.some((selection) => selection.componentId === component.id))),
+  );
+  const productFormComponents = data.components.filter((component) =>
+    component.active || Boolean(editingProductForForm?.components.some((selection) => selection.componentId === component.id)),
+  );
   const selectedProductColorSlots = selectedProductBasePattern ? productColorSlotsForConfiguredModel(selectedProductBasePattern.id, basePieces, selectedProductComponents) : [];
   const selectedProductBaseSizes = basePatternSizeOptions(selectedProductBasePattern);
   const selectedProductBaseWildcardPieces = selectedProductBasePattern ? basePieces.filter((piece) => piece.modelId === selectedProductBasePattern.id && !piece.archived && (piece.fabricSlot === 'cualquiera' || piece.colorSlot === 'cualquiera')) : [];
   const selectedProductComponentWildcardPieces = selectedProductComponents.flatMap((component) => component.pieces.filter((piece) => piece.fabricSlot === 'cualquiera' || (piece.colorSlot ?? (piece.colorId ? 'principal' : 'cualquiera')) === 'cualquiera').map((piece) => ({ component, piece })));
-  const selectedProductMaterialRows = data.components.filter((component) => component.active && productComponentIds.includes(component.id)).flatMap((component) => component.materials.filter((material) => Boolean(material.specificationLabel?.trim())).map((material) => ({ component, material })));
+  const selectedProductMaterialRows = selectedProductComponents.flatMap((component) => component.materials.filter((material) => Boolean(material.specificationLabel?.trim())).map((material) => ({ component, material })));
   const activeTextiles = textileContext.telas.filter((textile) => textile.activo !== false).slice().sort((a, b) => a.nombreTela.localeCompare(b.nombreTela, 'es'));
   const editingFabricProduct = data.productModels.find((product) => product.id === editingProductFabricId);
   const editingFabricBasePattern = editingFabricProduct ? baseModels.find((model) => model.id === editingFabricProduct.baseModelId) : undefined;
@@ -3568,11 +3575,14 @@ export function ProductionModule({
     }
 
     if (view === 'modelos-producto') return <section className="panel production-panel">
-      <div className="panel-heading"><div><h2>Crear modelo de prenda</h2><p>Selecciona un patrón base y agrega los componentes que distinguen el diseño.</p></div></div>
-      <form className="production-form" onSubmit={saveProduct}>
+      <div className="panel-heading">
+        <div><h2>{editingProductModelId ? 'Editar modelo configurado' : 'Crear modelo de prenda'}</h2><p>{editingProductModelId ? 'Modifica los datos de este modelo en el mismo formulario de configuración. Sus inventarios y movimientos se conservarán.' : 'Selecciona un patrón base y agrega los componentes que distinguen el diseño.'}</p></div>
+        {editingProductModelId && <button type="button" className="button secondary" onClick={resetProductEditor}>Cancelar edición</button>}
+      </div>
+      <form id="product-model-editor" className="production-form" onSubmit={saveProduct}>
         <div className="production-form-grid">
           <label className="field-label">Nombre comercial<input className="large-input" value={productName} onChange={(e) => setProductName(e.target.value)} placeholder="Ej. Polo escolar cuello camisero" required /></label>
-          <div className="field-label production-span-2"><span>Colección *</span><div className="production-collection-control"><select className="large-input" value={productCollectionId} onChange={(e) => setProductCollectionId(e.target.value)} required><option value="">Seleccionar colección guardada</option>{data.productCollections.filter((x) => x.active).slice().sort((a, b) => a.name.localeCompare(b.name, 'es')).map((collection) => <option value={collection.id} key={collection.id}>{collection.name}</option>)}</select><button type="button" className="button secondary" onClick={() => setShowProductCollectionCreator((current) => !current)}>＋ Nueva colección</button></div>{showProductCollectionCreator && <div className="production-collection-create"><input className="large-input" value={newProductCollectionName} onChange={(e) => setNewProductCollectionName(e.target.value)} placeholder="Nombre de la nueva colección" aria-label="Nombre de la nueva colección" /><div className="production-collection-actions"><button type="button" className="button primary" onClick={createProductCollection}>Guardar colección</button><button type="button" className="button secondary" onClick={() => { setShowProductCollectionCreator(false); setNewProductCollectionName(''); }}>Cancelar</button></div></div>}{data.productCollections.filter((x) => x.active).length === 0 && !showProductCollectionCreator && <small>Primero crea una colección; después podrás reutilizarla en otros modelos.</small>}</div>
+          <div className="field-label production-span-2"><span>Colección *</span><div className="production-collection-control"><select className="large-input" value={productCollectionId} onChange={(e) => setProductCollectionId(e.target.value)} required><option value="">Seleccionar colección guardada</option>{data.productCollections.filter((x) => x.active || x.id === editingProductForForm?.collectionId).slice().sort((a, b) => a.name.localeCompare(b.name, 'es')).map((collection) => <option value={collection.id} key={collection.id}>{collection.name}{collection.active ? '' : ' · Archivada'}</option>)}</select><button type="button" className="button secondary" onClick={() => setShowProductCollectionCreator((current) => !current)}>＋ Nueva colección</button></div>{showProductCollectionCreator && <div className="production-collection-create"><input className="large-input" value={newProductCollectionName} onChange={(e) => setNewProductCollectionName(e.target.value)} placeholder="Nombre de la nueva colección" aria-label="Nombre de la nueva colección" /><div className="production-collection-actions"><button type="button" className="button primary" onClick={createProductCollection}>Guardar colección</button><button type="button" className="button secondary" onClick={() => { setShowProductCollectionCreator(false); setNewProductCollectionName(''); }}>Cancelar</button></div></div>}{data.productCollections.filter((x) => x.active).length === 0 && !showProductCollectionCreator && <small>Primero crea una colección; después podrás reutilizarla en otros modelos.</small>}</div>
           <div className="product-base-pattern-field">
             <label className="field-label">Patrón base<select className="large-input" value={productBaseId} onChange={(e) => { setProductBaseId(e.target.value); setProductFabricAssignments({}); setProductColorAssignments({}); setProductPieceOverrides({}); }} required><option value="">Seleccionar patrón existente</option>{baseModels.map((x) => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label>
             <button type="button" className="text-action" onClick={() => onQuickCreateBaseModel((modelId) => { setProductBaseId(modelId); setProductFabricAssignments({}); setProductColorAssignments({}); setProductPieceOverrides({}); })}>＋ Crear patrón base</button>
@@ -3631,21 +3641,25 @@ export function ProductionModule({
         </section>}
         <label className="field-label">Descripción (opcional)<input className="large-input" value={productDescription} onChange={(e) => setProductDescription(e.target.value)} placeholder="Color, temporada, cliente…" /></label>
         <div className="production-subheading"><strong>Componentes y acabados</strong><span className="production-muted">Selecciona los que lleva esta prenda</span></div>
-        {data.components.filter((x) => x.active).length === 0 && <div className="notice info"><span>Esta prenda todavía no tiene componentes. Puedes continuar sin ellos o crear uno ahora.</span><button type="button" className="button secondary" onClick={createComponentFromProduct}>＋ Crear componente y volver</button></div>}
-        <div className="production-check-list">{data.components.filter((x) => x.active).map((component) => <label key={component.id}>
-          <input type="checkbox" checked={productComponentIds.includes(component.id)} onChange={(event) => {
-            const checked = event.target.checked;
-            setProductComponentIds((current) => checked ? [...current, component.id] : current.filter((x) => x !== component.id));
-            if (checked) setProductMaterialSpecsDraft((current) => {
-              const next = { ...current };
-              component.materials.filter((material) => material.specificationLabel?.trim()).forEach((material) => {
-                next[material.id] = next[material.id] ?? { label: material.specificationLabel ?? 'Medida', rules: [{ id: id(), value: '', sizeIds: [] }] };
+        {productFormComponents.length === 0 && <div className="notice info"><span>Esta prenda todavía no tiene componentes. Puedes continuar sin ellos o crear uno ahora.</span><button type="button" className="button secondary" onClick={createComponentFromProduct}>＋ Crear componente y volver</button></div>}
+        <div className="production-check-list">{productFormComponents.map((component) => {
+          const selected = productComponentIds.includes(component.id);
+          const archived = !component.active;
+          return <label key={component.id} className={archived ? 'production-component-option archived' : 'production-component-option'}>
+            <input type="checkbox" checked={selected} disabled={archived} onChange={(event) => {
+              const checked = event.target.checked;
+              setProductComponentIds((current) => checked ? [...current, component.id] : current.filter((x) => x !== component.id));
+              if (checked) setProductMaterialSpecsDraft((current) => {
+                const next = { ...current };
+                component.materials.filter((material) => material.specificationLabel?.trim()).forEach((material) => {
+                  next[material.id] = next[material.id] ?? { label: material.specificationLabel ?? 'Medida', rules: [{ id: id(), value: '', sizeIds: [] }] };
+                });
+                return next;
               });
-              return next;
-            });
-          }} />
-          <span><strong>{component.name}</strong><small>{component.type} · {component.materials.length} materiales asociados</small></span>
-        </label>)}</div>
+            }} />
+            <span><strong>{component.name}</strong><small>{component.type} · {component.pieces.length} piezas · {component.materials.length} materiales asociados{archived ? ' · Archivado (se conserva en este modelo)' : ''}</small></span>
+          </label>;
+        })}</div>
         {selectedProductComponentWildcardPieces.length > 0 && <section className="product-fabric-assignment-section">
           <div className="production-subheading"><strong>Asignaciones de componentes comodín</strong><span className="production-muted">Valores específicos de esta prenda</span></div>
           <p className="production-muted">Cuando una pieza de la biblioteca permite «Cualquier tela» o «Cualquier color», concreta aquí su material y color para este modelo.</p>
@@ -3706,7 +3720,10 @@ export function ProductionModule({
             </article>;
           })}
         </section>}
-        <div className="form-actions"><button className="button primary" disabled={baseModels.length === 0}>Guardar modelo configurado</button></div>
+        <div className="form-actions">
+          {editingProductModelId && <button type="button" className="button secondary" onClick={resetProductEditor}>Cancelar</button>}
+          <button className="button primary" disabled={baseModels.length === 0}>{editingProductModelId ? 'Guardar cambios del modelo' : 'Guardar modelo configurado'}</button>
+        </div>
       </form>
       <div className="production-subheading"><strong>Modelos configurados</strong><span className="count-badge">{data.productModels.filter((x) => x.active).length}</span></div>
       <div className="production-list">{data.productModels.filter((x) => x.active).map((product) => {
@@ -3734,10 +3751,9 @@ export function ProductionModule({
           <div className="production-card-heading"><div><strong>{product.name}</strong><div className="production-model-meta"><span className="production-family-tag">{familyLabel}</span><span>Colección: {collectionName}</span><span>Patrón: {base?.name ?? 'No disponible'}</span><span>Tallas: {productSizeGroup?.name ?? 'No disponible'}</span></div><small className="production-product-fabric-summary">{productFabricSummary}</small><small className="production-product-fabric-summary">{productColorSummary}</small></div></div>
           <div className="production-attributes">{product.components.map((x) => <span key={x.id}>{data.components.find((c) => c.id === x.componentId)?.name ?? 'Componente archivado'} ×{x.quantity}</span>)}</div>
           <div className="production-card-actions">
-            <button className="button secondary" onClick={() => openProductFabricEditor(product)}>Configurar telas</button>
-            <button className="button secondary" onClick={() => openProductColorEditor(product)}>Configurar colores</button>
-            <button className="button primary" onClick={() => setSelectedPieceConfigurationProductId(product.id)}>Ver piezas y materiales</button>
-            <button className="text-action danger-action" onClick={() => deleteProduct(product)}>Archivar</button>
+            <button type="button" className="button primary" onClick={() => openEditProduct(product)}>Editar modelo</button>
+            <button type="button" className="button secondary" onClick={() => setSelectedPieceConfigurationProductId(product.id)}>Ver piezas y materiales</button>
+            <button type="button" className="text-action danger-action" onClick={() => deleteProduct(product)}>Archivar</button>
           </div>
         </article>;
       })}</div>
