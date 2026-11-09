@@ -132,7 +132,12 @@ export function getCompleteUnits(pieces: ModelPiece[], movements: PieceMovement[
 
 export function getPieceShortages(pieces: ModelPiece[], movements: PieceMovement[], sizeId: string, targetUnits?: number): PieceShortage[] {
   const completeUnits = getCompleteUnits(pieces, movements, sizeId);
-  const target = Math.max(completeUnits + 1, Math.floor(targetUnits ?? completeUnits + 1));
+  // An explicit target may equal the current capacity; callers without a target
+  // retain the historical behavior of calculating the next garment.
+  const requestedTarget = targetUnits === undefined || !Number.isFinite(targetUnits)
+    ? completeUnits + 1
+    : Math.floor(targetUnits);
+  const target = Math.max(completeUnits, requestedTarget);
   return pieces.map((piece) => {
     const rawStock = Math.max(0, getPieceStock(movements, piece.id, sizeId));
     const required = requiredUnitsPerGarment(piece);
