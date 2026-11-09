@@ -1517,11 +1517,11 @@ export function ProductionModule({
     if (!selectedBaseModel.family) return tell('El patrón base no tiene familia asignada. Edítalo en Modelos antes de guardar el modelo comercial.', 'error');
     if (data.productModels.some((x) => x.id !== editingProduct?.id && x.name.toLocaleLowerCase('es') === productName.trim().toLocaleLowerCase('es'))) return tell('Ya existe otro modelo configurado con ese nombre.', 'error');
 
-    const requiredFabricSlots = productFabricSlotsForConfiguredModel(selectedBaseModel, selectedComponents);
     const selectedComponents = data.components.filter((component) =>
       productComponentIds.includes(component.id) &&
       (component.active || Boolean(editingProduct?.components.some((selection) => selection.componentId === component.id))),
     );
+    const requiredFabricSlots = productFabricSlotsForConfiguredModel(selectedBaseModel, selectedComponents);
     const requiredColorSlots = productColorSlotsForConfiguredModel(selectedBaseModel.id, basePieces, selectedComponents);
     const activeTextileIds = new Set(textileContext.telas.filter((textile) => textile.activo !== false).map((textile) => textile.id));
     const activeColorIds = new Set(textileContext.colores.map((color) => color.id));
