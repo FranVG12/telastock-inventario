@@ -1450,14 +1450,17 @@ export function ProductionModule({
     setProductMaterialSpecsDraft({});
   }
 
-  function openEditProduct(product: ConfiguredProductModel) {
+  function openEditProduct(
+    product: ConfiguredProductModel,
+    copiedAssignments?: { fabrics: ProductFabricAssignment[]; colors: ProductColorAssignment[] },
+  ) {
     const base = baseModels.find((model) => model.id === product.baseModelId);
     if (!base) return tell('No se encontró el patrón base de este modelo.', 'error');
     const fabricAssignments = Object.fromEntries(
-      data.productFabrics.filter((assignment) => assignment.productModelId === product.id).map((assignment) => [assignment.fabricSlot, assignment.textileId]),
+      (copiedAssignments?.fabrics ?? data.productFabrics.filter((assignment) => assignment.productModelId === product.id)).map((assignment) => [assignment.fabricSlot, assignment.textileId]),
     );
     const colorAssignments = Object.fromEntries(
-      data.productColors.filter((assignment) => assignment.productModelId === product.id).map((assignment) => [assignment.colorSlot, assignment.colorId]),
+      (copiedAssignments?.colors ?? data.productColors.filter((assignment) => assignment.productModelId === product.id)).map((assignment) => [assignment.colorSlot, assignment.colorId]),
     );
     const pieceOverrides: Record<string, ProductPieceOverride> = {};
     Object.entries(product.basePieceOverrides ?? {}).forEach(([pieceId, override]) => {
@@ -1504,6 +1507,83 @@ export function ProductionModule({
     setNewProductCollectionName('');
     setSelectedPieceConfigurationProductId('');
     document.getElementById('product-model-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function duplicateProduct(source: ConfiguredProductModel) {
+    const base = baseModels.find((model) => model.id === source.baseModelId);
+    if (!base) return tell('No se puede copiar: el patrón base del modelo original ya no está disponible.', 'error');
+
+    const timestamp = now();
+    const productModelId = id();
+    const baseName = source.name.trim() + ' (copia)';
+    let copyName = baseName;
+    let suffix = 2;
+    while (data.productModels.some((product) => product.name.trim().toLocaleLowerCase('es') === copyName.toLocaleLowerCase('es'))) {
+      copyName = source.name.trim() + ' (copia ' + suffix + ')';
+      suffix += 1;
+    }
+
+    const copy: ConfiguredProductModel = {
+      ...source,
+      id: productModelId,
+      name: copyName,
+      components: source.components.map((selection) => ({
+        ...selection,
+        id: id(),
+        variantOverrides: { ...selection.variantOverrides },
+        materialSpecifications: selection.materialSpecifications
+          ? Object.fromEntries(Object.entries(selection.materialSpecifications).map(([materialId, specification]) => [
+            materialId,
+            { ...specification, bySize: { ...specification.bySize } },
+          ]))
+          : undefined,
+        pieceOverrides: selection.pieceOverrides
+          ? Object.fromEntries(Object.entries(selection.pieceOverrides).map(([pieceId, override]) => [pieceId, { ...override }]))
+          : undefined,
+      })),
+      additionalMaterials: source.additionalMaterials.map((material) => ({
+        ...material,
+        id: id(),
+        bySize: { ...material.bySize },
+      })),
+      basePieceOverrides: source.basePieceOverrides
+        ? Object.fromEntries(Object.entries(source.basePieceOverrides).map(([pieceId, override]) => [pieceId, { ...override }]))
+        : undefined,
+      active: true,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+
+    const copiedFabrics: ProductFabricAssignment[] = data.productFabrics
+      .filter((assignment) => assignment.productModelId === source.id)
+      .map((assignment) => ({
+        ...assignment,
+        id: id(),
+        productModelId,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }));
+    const copiedColors: ProductColorAssignment[] = data.productColors
+      .filter((assignment) => assignment.productModelId === source.id)
+      .map((assignment) => ({
+        ...assignment,
+        id: id(),
+        productModelId,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }));
+
+    // Configuration is copied; inventory, finished garments, reservations, orders and movements are not.
+    setData((current) => ({
+      ...current,
+      productModels: [...current.productModels, copy],
+      productFabrics: [...current.productFabrics, ...copiedFabrics],
+      productColors: [...current.productColors, ...copiedColors],
+    }));
+    setSelectedProductId(productModelId);
+    setSelectedStockProductModelId(productModelId);
+    openEditProduct(copy, { fabrics: copiedFabrics, colors: copiedColors });
+    tell('Copia creada sin stock ni historial. Cambia su nombre, tela o color y guarda el nuevo modelo.');
   }
 
   function saveProduct(event: FormEvent) {
@@ -3879,6 +3959,7 @@ export function ProductionModule({
           <div className="production-attributes">{product.components.map((x) => <span key={x.id}>{data.components.find((c) => c.id === x.componentId)?.name ?? 'Componente archivado'} ×{x.quantity}</span>)}</div>
           <div className="production-card-actions">
             <button type="button" className="button primary" onClick={() => openEditProduct(product)}>Editar modelo</button>
+            <button type="button" className="button secondary" onClick={() => duplicateProduct(product)}>Duplicar</button>
             <button type="button" className="button secondary" onClick={() => setSelectedPieceConfigurationProductId(product.id)}>Ver piezas y materiales</button>
             <button type="button" className="text-action danger-action" onClick={() => deleteProduct(product)}>Archivar</button>
           </div>
