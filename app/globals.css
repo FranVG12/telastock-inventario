@@ -2155,3 +2155,64 @@
   }
   .product-piece-history-icon { width: 32px; height: 32px; }
 }
+
+
+/* Safe deletion affordance for base patterns. */
+.pattern-library-delete{
+  min-height:40px;
+  padding:8px 11px;
+  border-radius:10px;
+  border-color:#f0d8d7!important;
+  color:#a54e4a!important;
+  background:#fffafa!important;
+  font-size:10px;
+}
+.pattern-library-delete:hover{
+  border-color:#dfb8b6!important;
+  background:#fff3f2!important;
+}
+.pattern-library-protected{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:36px;
+  padding:6px 9px;
+  border:1px solid #e8ebf0;
+  border-radius:9px;
+  background:#f5f6f8;
+  color:#8992a1;
+  font-size:9px;
+  font-weight:800;
+  white-space:nowrap;
+}
+.pattern-library-delete-protection{
+  display:grid;
+  gap:4px;
+  padding:10px 11px;
+  border:1px solid #f0e4d9;
+  border-radius:11px;
+  background:#fffaf5;
+}
+.pattern-library-delete-protection strong{
+  color:#8e633e;
+  font-size:10px;
+}
+.pattern-library-delete-protection small{
+  color:#937c68;
+  font-size:9px;
+  line-height:1.45;
+}
+@media(max-width:720px){
+  .pattern-library-card-actions{gap:5px;flex-wrap:wrap;justify-content:flex-end}
+  .pattern-library-delete{min-height:40px;padding:7px 9px;font-size:9px}
+  .pattern-library-protected{min-height:36px;padding:6px 8px;font-size:8px}
+  .pattern-library-delete-protection{padding:9px 10px}
+  .pattern-library-delete-protection strong{font-size:10px}
+  .pattern-library-delete-protection small{font-size:9px}
+}
+@media(max-width:390px){
+  .pattern-library-card-actions{gap:4px}
+  .pattern-library-toggle{padding:6px 7px}
+  .pattern-library-edit{min-width:48px;padding:6px 7px}
+  .pattern-library-delete{padding:6px 7px}
+}
