@@ -41,6 +41,56 @@ const STORAGE = {
   movements: 'telastock-piece-movements-v1',
   families: 'telastock-pattern-families-v1',
 };
+type StoredProductModelReference = { id?: string; name?: string; baseModelId?: string; active?: boolean };
+type StoredProductionOrderReference = { id?: string; number?: string; baseModelId?: string; basePieces?: Array<{ pieceId?: string }> };
+type PatternDependencySnapshot = { productModels: StoredProductModelReference[]; productionOrders: StoredProductionOrderReference[] };
+
+function readPatternDependencySnapshot(): PatternDependencySnapshot | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const readRows = <T,>(key: string): T[] | null => {
+      const raw = window.localStorage.getItem(key);
+      if (raw === null) return [];
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed as T[] : null;
+    };
+    const productModels = readRows<StoredProductModelReference>(PRODUCTION_STORAGE_KEYS.productModels);
+    const productionOrders = readRows<StoredProductionOrderReference>(PRODUCTION_STORAGE_KEYS.productionOrders);
+    if (!productModels || !productionOrders) return null;
+    return { productModels, productionOrders };
+  } catch {
+    return null;
+  }
+}
+
+function patternDeletionBlockReason(
+  modelId: string,
+  pieces: ModelPiece[],
+  movements: PieceMovement[],
+  snapshot: PatternDependencySnapshot,
+): string | null {
+  const assignedProducts = snapshot.productModels.filter((product) => product.baseModelId === modelId);
+  if (assignedProducts.length > 0) {
+    const names = assignedProducts.slice(0, 2).map((product) => product.name?.trim() || 'Modelo sin nombre');
+    const extra = assignedProducts.length - names.length;
+    return 'Está asignado a ' + names.join(', ') + (extra > 0 ? ' y ' + extra + ' modelo(s) más' : '') + '.';
+  }
+
+  const pieceIds = new Set(pieces.filter((piece) => piece.modelId === modelId).map((piece) => piece.id));
+  const linkedOrders = snapshot.productionOrders.filter((order) =>
+    order.baseModelId === modelId || (Array.isArray(order.basePieces) && order.basePieces.some((line) => pieceIds.has(line.pieceId ?? '')))
+  );
+  if (linkedOrders.length > 0) {
+    return 'Tiene ' + linkedOrders.length + ' orden(es) de producción vinculada(s).';
+  }
+
+  const movementCount = movements.filter((movement) => pieceIds.has(movement.pieceId)).length;
+  if (movementCount > 0) {
+    return 'Sus moldes conservan ' + movementCount + ' movimiento(s) de stock en el historial.';
+  }
+  return null;
+}
+
 type PatternFamily = { value: string; label: string };
 const DEFAULT_PATTERN_FAMILIES: PatternFamily[] = [
   { value: 'polo', label: 'Polo' },
@@ -288,6 +338,16 @@ export default function Home() {
     return a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
   });
   const togglePatternExpanded = (modelId: string) => setExpandedPatternIds((current) => current.includes(modelId) ? current.filter((id) => id !== modelId) : [...current, modelId]);
+  const patternDeletionStatus = useMemo(() => {
+    const snapshot = ready ? readPatternDependencySnapshot() : null;
+    return new Map(models.map((model) => {
+      const reason = !snapshot
+        ? 'No se pudieron verificar las asignaciones y referencias históricas. Vuelve a cargar los datos antes de eliminar.'
+        : patternDeletionBlockReason(model.id, pieces, movements, snapshot);
+      return [model.id, { canDelete: Boolean(snapshot) && !reason, reason }] as const;
+    }));
+  }, [ready, view, models, pieces, movements]);
+
   const allPatternIdsExpanded = filteredPatterns.length > 0 && filteredPatterns.every((model) => expandedPatternIds.includes(model.id));
   const currentStockModel = models.find((model) => model.id === selectedModelId) ?? models[0];
   const currentModelPieces = currentStockModel ? modelPieces(currentStockModel.id) : [];
@@ -601,6 +661,42 @@ export default function Home() {
       setView('modelos');
       setNoticeMessage(modelForm.editingId ? 'Patrón actualizado.' : 'Patrón y moldes registrados.');
     }
+  }
+
+  function deleteUnusedBasePattern(model: ManufacturingModel) {
+    const snapshot = readPatternDependencySnapshot();
+    if (!snapshot) {
+      setNoticeMessage('No se pudo verificar el uso del patrón. No se eliminó ningún dato; vuelve a cargar la aplicación e inténtalo nuevamente.', 'error');
+      return;
+    }
+    const reason = patternDeletionBlockReason(model.id, pieces, movements, snapshot);
+    if (reason) {
+      setNoticeMessage('No se puede eliminar «' + model.name + '». ' + reason, 'error');
+      return;
+    }
+    const moldCount = pieces.filter((piece) => piece.modelId === model.id).length;
+    const confirmed = window.confirm(
+      '¿Eliminar definitivamente el patrón base «' + model.name + '» y sus ' + moldCount + ' molde(s)?\n\n' +
+      'Esta acción solo está disponible porque el patrón nunca fue asignado a un modelo comercial y no tiene movimientos ni órdenes vinculadas.\n\n' +
+      'No se puede deshacer.'
+    );
+    if (!confirmed) return;
+
+    // Recheck all references immediately before changing the local records.
+    const latestSnapshot = readPatternDependencySnapshot();
+    const latestReason = latestSnapshot
+      ? patternDeletionBlockReason(model.id, pieces, movements, latestSnapshot)
+      : 'No se pudieron verificar las referencias actuales.';
+    if (latestReason) {
+      setNoticeMessage('No se eliminó el patrón. ' + latestReason, 'error');
+      return;
+    }
+
+    setModels((current) => current.filter((item) => item.id !== model.id));
+    setPieces((current) => current.filter((piece) => piece.modelId !== model.id));
+    setExpandedPatternIds((current) => current.filter((id) => id !== model.id));
+    if (selectedModelId === model.id) setSelectedModelId('');
+    setNoticeMessage('Patrón base «' + model.name + '» eliminado correctamente.');
   }
 
   function moveMold(index: number, direction: -1 | 1) {
@@ -1285,6 +1381,7 @@ Esto reemplazará los datos del navegador actual. Exporta un respaldo previo si 
                 const colorPositions = [...new Set(modelPartList.map((piece) => colorSlotLabel(piece.colorSlot ?? 'ninguna')))];
                 const expanded = expandedPatternIds.includes(model.id);
                 const activeSizes = modelSizes(model);
+                const deletionStatus = patternDeletionStatus.get(model.id) ?? { canDelete: false, reason: 'Verificando referencias…' };
                 return <article className={`managed-model pattern-library-card ${expanded ? 'expanded' : 'collapsed'}`} key={model.id}>
                   <div className="pattern-library-card-header">
                     <span className="pattern-library-symbol" aria-hidden="true">◇</span>
@@ -1298,6 +1395,9 @@ Esto reemplazará los datos del navegador actual. Exporta un respaldo previo si 
                     <div className="pattern-library-card-actions">
                       <button type="button" className="pattern-library-toggle" onClick={() => togglePatternExpanded(model.id)} aria-expanded={expanded} aria-label={expanded ? 'Plegar detalles' : 'Expandir detalles'}><span>{expanded ? 'Menos' : 'Detalles'}</span><span aria-hidden="true">{expanded ? '⌃' : '⌄'}</span></button>
                       <button className="button secondary edit-model pattern-library-edit" onClick={() => openEditModel(model)}>Editar</button>
+                      {deletionStatus.canDelete
+                        ? <button type="button" className="button secondary pattern-library-delete" onClick={() => deleteUnusedBasePattern(model)}>Eliminar</button>
+                        : <span className="pattern-library-protected" title={deletionStatus.reason}>Protegido</span>}
                     </div>
                   </div>
 
@@ -1342,6 +1442,11 @@ Esto reemplazará los datos del navegador actual. Exporta un respaldo previo si 
                       <span aria-hidden="true">i</span>
                       <div><strong>Configuración por modelo</strong><small>La tela y el color reales se eligen al crear cada modelo comercial. Este patrón solo conserva sus posiciones.</small></div>
                     </div>
+                    {!deletionStatus.canDelete && <div className="pattern-library-delete-protection" role="note">
+                      <strong>Este patrón está protegido.</strong>
+                      <small>{deletionStatus.reason}</small>
+                      <small>Solo se pueden eliminar patrones que nunca se asignaron a un modelo y no tienen historial.</small>
+                    </div>}
                   </div>}
                 </article>;
               })}
