@@ -18,7 +18,8 @@ import {
   type Size,
   type SizeGroup,
 } from '@/lib/inventory-domain';
-import { demoModels, demoMovements, demoPieces, demoSizes, demoSizeGroups } from '@/lib/demo-data';
+import { demoModels, demoPieces, demoSizes, demoSizeGroups } from '@/lib/demo-data';
+import { resetLegacyInventoryMovementsOnce } from '@/lib/inventory-reset';
 import { isComponentFabricSlot, isComponentFabricSlotAvailableForModel, secondaryFabricSlotIndex } from '@/lib/component-fabric-slots';
 import { isComponentColorSlot, isComponentColorSlotAvailableForModel, secondaryColorSlotIndex } from '@/lib/component-color-slots';
 import { validateSizeSpecification } from '@/lib/material-size-specifications';
@@ -191,7 +192,7 @@ export default function Home() {
   const [families, setFamilies] = useState<PatternFamily[]>(DEFAULT_PATTERN_FAMILIES);
   const [pieces, setPieces] = useState<ModelPiece[]>(demoPieces);
   const [fabricColors, setFabricColors] = useState<ColorDefinition[]>([]);
-  const [movements, setMovements] = useState<PieceMovement[]>(demoMovements);
+  const [movements, setMovements] = useState<PieceMovement[]>([]);
   const [ready, setReady] = useState(false);
 
   const [search, setSearch] = useState('');
@@ -233,6 +234,8 @@ export default function Home() {
   // genérico anterior de TelaStock. En la etapa Supabase, estas entidades pasan al repositorio remoto.
   useEffect(() => {
     try {
+      // Remove pre-existing movement ledgers once before any module reads inventory.
+      resetLegacyInventoryMovementsOnce();
       const load = <T,>(key: string, fallback: T): T => {
         const raw = localStorage.getItem(key);
         return raw ? JSON.parse(raw) as T : fallback;
@@ -262,7 +265,7 @@ export default function Home() {
       const migratedModels = normalizeExcludedModelSizes(normalizeModelsWithSlots(migrateBaseModelFamilies(storedModels, legacyProductModels, storedFamilies), migratedPieces), load<Size[]>(STORAGE.sizes, demoSizes));
       setModels(migratedModels);
       if (migratedModels.some((model) => !model.family)) setNotice({ message: 'Hay patrones base sin familia asignada. Edítalos en Modelos para que los modelos configurados hereden la familia correcta.', kind: 'info' });
-      setMovements(load(STORAGE.movements, demoMovements));
+      setMovements(load(STORAGE.movements, []));
     } catch {
       setNotice({ message: 'No se pudo leer el almacenamiento del navegador. Se muestran los datos de demostración.', kind: 'info' });
     }
