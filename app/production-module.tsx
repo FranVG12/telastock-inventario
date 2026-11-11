@@ -850,6 +850,9 @@ export function ProductionModule({
   const [productCollectionId, setProductCollectionId] = useState('');
   const [showProductCollectionCreator, setShowProductCollectionCreator] = useState(false);
   const [newProductCollectionName, setNewProductCollectionName] = useState('');
+  const [showProductCollectionManager, setShowProductCollectionManager] = useState(false);
+  const [editingProductCollectionId, setEditingProductCollectionId] = useState('');
+  const [editingProductCollectionName, setEditingProductCollectionName] = useState('');
   const [productBaseId, setProductBaseId] = useState('');
   const [productFabricAssignments, setProductFabricAssignments] = useState<Record<string, string>>({});
   const [productColorAssignments, setProductColorAssignments] = useState<Record<string, string>>({});
@@ -1435,6 +1438,38 @@ export function ProductionModule({
     setShowProductCollectionCreator(false);
     setNewProductCollectionName('');
     tell('Colección creada y seleccionada.');
+  }
+
+  function startEditProductCollection(collection: ProductCollection) {
+    setEditingProductCollectionId(collection.id);
+    setEditingProductCollectionName(collection.name);
+    setShowProductCollectionManager(true);
+  }
+
+  function cancelEditProductCollection() {
+    setEditingProductCollectionId('');
+    setEditingProductCollectionName('');
+  }
+
+  function saveProductCollectionName(event: FormEvent, collectionId: string) {
+    event.preventDefault();
+    const cleanName = editingProductCollectionName.trim();
+    if (!cleanName) return tell('Escribe un nombre para la colección.', 'error');
+    const collection = data.productCollections.find((item) => item.id === collectionId);
+    if (!collection) return tell('La colección ya no está disponible. Actualiza la vista.', 'error');
+    const duplicate = data.productCollections.find((item) =>
+      item.id !== collectionId && item.name.trim().toLocaleLowerCase('es') === cleanName.toLocaleLowerCase('es')
+    );
+    if (duplicate) return tell('Ya existe otra colección con ese nombre' + (duplicate.active ? '.' : ' (archivada).'), 'error');
+
+    setData((current) => ({
+      ...current,
+      productCollections: current.productCollections.map((item) =>
+        item.id === collectionId ? { ...item, name: cleanName, updatedAt: now() } : item
+      ),
+    }));
+    cancelEditProductCollection();
+    tell('Colección renombrada. Los modelos asociados mantienen su colección.');
   }
 
   function ensureProductTextileColorAssociation(textileId: string | null | undefined, colorId: string | null | undefined) {
@@ -3828,7 +3863,22 @@ export function ProductionModule({
       <form id="product-model-editor" className="production-form" onSubmit={saveProduct}>
         <div className="production-form-grid">
           <label className="field-label">Nombre comercial<input className="large-input" value={productName} onChange={(e) => setProductName(e.target.value)} placeholder="Ej. Polo escolar cuello camisero" required /></label>
-          <div className="field-label production-span-2"><span>Colección *</span><div className="production-collection-control"><select className="large-input" value={productCollectionId} onChange={(e) => setProductCollectionId(e.target.value)} required><option value="">Seleccionar colección guardada</option>{data.productCollections.filter((x) => x.active || x.id === editingProductForForm?.collectionId).slice().sort((a, b) => a.name.localeCompare(b.name, 'es')).map((collection) => <option value={collection.id} key={collection.id}>{collection.name}{collection.active ? '' : ' · Archivada'}</option>)}</select><button type="button" className="button secondary" onClick={() => setShowProductCollectionCreator((current) => !current)}>＋ Nueva colección</button></div>{showProductCollectionCreator && <div className="production-collection-create"><input className="large-input" value={newProductCollectionName} onChange={(e) => setNewProductCollectionName(e.target.value)} placeholder="Nombre de la nueva colección" aria-label="Nombre de la nueva colección" /><div className="production-collection-actions"><button type="button" className="button primary" onClick={createProductCollection}>Guardar colección</button><button type="button" className="button secondary" onClick={() => { setShowProductCollectionCreator(false); setNewProductCollectionName(''); }}>Cancelar</button></div></div>}{data.productCollections.filter((x) => x.active).length === 0 && !showProductCollectionCreator && <small>Primero crea una colección; después podrás reutilizarla en otros modelos.</small>}</div>
+          <div className="field-label production-span-2"><span>Colección *</span><div className="production-collection-control"><select className="large-input" value={productCollectionId} onChange={(e) => setProductCollectionId(e.target.value)} required><option value="">Seleccionar colección guardada</option>{data.productCollections.filter((x) => x.active || x.id === editingProductForForm?.collectionId).slice().sort((a, b) => a.name.localeCompare(b.name, 'es')).map((collection) => <option value={collection.id} key={collection.id}>{collection.name}{collection.active ? '' : ' · Archivada'}</option>)}</select><button type="button" className="button secondary" onClick={() => setShowProductCollectionCreator((current) => !current)}>＋ Nueva colección</button><button type="button" className="button secondary" onClick={() => { setShowProductCollectionManager((current) => !current); cancelEditProductCollection(); }}>{showProductCollectionManager ? 'Cerrar gestión' : 'Administrar colecciones'}</button></div>{showProductCollectionCreator && <div className="production-collection-create"><input className="large-input" value={newProductCollectionName} onChange={(e) => setNewProductCollectionName(e.target.value)} placeholder="Nombre de la nueva colección" aria-label="Nombre de la nueva colección" /><div className="production-collection-actions"><button type="button" className="button primary" onClick={createProductCollection}>Guardar colección</button><button type="button" className="button secondary" onClick={() => { setShowProductCollectionCreator(false); setNewProductCollectionName(''); }}>Cancelar</button></div></div>}{showProductCollectionManager && <section className="production-collection-manager">
+            <div className="production-collection-manager-heading"><div><strong>Colecciones registradas</strong><small>Al cambiar el nombre, se actualiza en todos los modelos que utilizan esta colección.</small></div><span>{data.productCollections.length}</span></div>
+            {data.productCollections.length === 0 && <div className="empty">Todavía no hay colecciones guardadas.</div>}
+            {data.productCollections.slice().sort((a, b) => a.name.localeCompare(b.name, 'es')).map((collection) => {
+              const isEditing = editingProductCollectionId === collection.id;
+              const linkedModels = data.productModels.filter((product) => product.collectionId === collection.id).length;
+              return <div className="production-collection-manager-row" key={collection.id}>
+                {isEditing
+                  ? <form className="production-collection-rename-form" onSubmit={(event) => saveProductCollectionName(event, collection.id)}>
+                    <input className="large-input" value={editingProductCollectionName} onChange={(event) => setEditingProductCollectionName(event.target.value)} aria-label={'Nuevo nombre de ' + collection.name} autoFocus />
+                    <div className="production-collection-actions"><button className="button primary">Guardar nombre</button><button type="button" className="button secondary" onClick={cancelEditProductCollection}>Cancelar</button></div>
+                  </form>
+                  : <><div className="production-collection-manager-info"><strong>{collection.name}</strong><small>{collection.active ? 'Activa' : 'Archivada'} · {linkedModels} {linkedModels === 1 ? 'modelo asociado' : 'modelos asociados'}</small></div><button type="button" className="button secondary" onClick={() => startEditProductCollection(collection)}>Cambiar nombre</button></>}
+              </div>;
+            })}
+          </section>}{data.productCollections.filter((x) => x.active).length === 0 && !showProductCollectionCreator && !showProductCollectionManager && <small>Primero crea una colección; después podrás reutilizarla en otros modelos.</small>}</div>
           <div className="product-base-pattern-field">
             <label className="field-label">Patrón base<select className="large-input" value={productBaseId} onChange={(e) => { setProductBaseId(e.target.value); setProductFabricAssignments({}); setProductColorAssignments({}); setProductPieceOverrides({}); }} required><option value="">Seleccionar patrón existente</option>{baseModels.map((x) => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label>
             <button type="button" className="text-action" onClick={() => onQuickCreateBaseModel((modelId) => { setProductBaseId(modelId); setProductFabricAssignments({}); setProductColorAssignments({}); setProductPieceOverrides({}); })}>＋ Crear patrón base</button>
