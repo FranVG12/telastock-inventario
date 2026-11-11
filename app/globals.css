@@ -2327,3 +2327,99 @@
   }
   .production-component-quantity .large-input{width:76px;min-height:42px}
 }
+
+
+/* Product collection manager — compact inline rename flow. */
+.production-collection-manager{
+  display:grid;
+  gap:8px;
+  margin-top:9px;
+  padding:12px;
+  border:1px solid #e5eaf2;
+  border-radius:12px;
+  background:#f9faff;
+}
+.production-collection-manager-heading{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+  padding-bottom:7px;
+  border-bottom:1px solid #e9edf4;
+}
+.production-collection-manager-heading>div,
+.production-collection-manager-info{
+  display:grid;
+  gap:3px;
+  min-width:0;
+}
+.production-collection-manager-heading strong{
+  color:#354660;
+  font-size:11px;
+  font-weight:800;
+}
+.production-collection-manager-heading small{
+  color:#8792a4;
+  font-size:10px;
+  line-height:1.4;
+}
+.production-collection-manager-heading>span{
+  flex:0 0 auto;
+  padding:4px 8px;
+  border-radius:20px;
+  background:#eeefff;
+  color:#5d55bd;
+  font-size:10px;
+  font-weight:800;
+}
+.production-collection-manager-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  min-width:0;
+  padding:9px 0;
+  border-bottom:1px solid #edf0f5;
+}
+.production-collection-manager-row:last-child{border-bottom:0;padding-bottom:0}
+.production-collection-manager-info strong{
+  color:#40516c;
+  font-size:11px;
+  line-height:1.35;
+  overflow-wrap:anywhere;
+}
+.production-collection-manager-info small{
+  color:#8b95a5;
+  font-size:9px;
+  line-height:1.35;
+}
+.production-collection-manager-row>.button{
+  flex:0 0 auto;
+  min-height:36px;
+  padding:7px 10px;
+  border-radius:9px;
+  font-size:10px;
+}
+.production-collection-rename-form{
+  display:grid;
+  grid-template-columns:minmax(0,1fr);
+  gap:8px;
+  width:100%;
+}
+.production-collection-rename-form .large-input{
+  min-width:0;
+  width:100%;
+  min-height:42px;
+  font-size:12px;
+}
+.production-collection-rename-form .production-collection-actions .button{
+  min-height:38px;
+  font-size:10px;
+}
+@media(max-width:720px){
+  .production-collection-manager{gap:7px;padding:10px}
+  .production-collection-manager-row{gap:8px;padding:9px 0}
+  .production-collection-manager-row>.button{min-height:40px;padding:8px 10px}
+  .production-collection-rename-form .production-collection-actions{display:grid;grid-template-columns:1fr 1fr}
+  .production-collection-rename-form .production-collection-actions .button{width:100%;min-height:42px}
+}
