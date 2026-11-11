@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { resetLegacyInventoryMovementsOnce } from '@/lib/inventory-reset';
 
 export type FabricView = 'telas' | 'rollos' | 'compras' | 'proveedores';
 export type FabricUnit = 'KG' | 'M';
@@ -455,6 +456,15 @@ export function FabricModule({ view }: { view: FabricView }) {
   };
     const loadLocal = () => {
     const next = emptyFabricBackupData();
+    try {
+      resetLegacyInventoryMovementsOnce();
+    } catch (error) {
+      return {
+        data: next,
+        safe: false,
+        warning: error instanceof Error ? error.message : 'No se pudieron reiniciar los movimientos antiguos de rollos.',
+      };
+    }
     let safe = true;
     let warning = '';
     const storedVersion = Number(localStorage.getItem(FABRIC_STORAGE_KEYS.version) ?? '0');

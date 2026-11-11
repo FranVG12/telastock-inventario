@@ -18,9 +18,10 @@ import {
   type Size,
   type SizeGroup,
 } from '@/lib/inventory-domain';
-import { demoModels, demoMovements, demoPieces, demoSizes, demoSizeGroups } from '@/lib/demo-data';
-import { isComponentFabricSlotAvailableForModel, secondaryFabricSlotIndex } from '@/lib/component-fabric-slots';
-import { isComponentColorSlotAvailableForModel, secondaryColorSlotIndex } from '@/lib/component-color-slots';
+import { demoModels, demoPieces, demoSizes, demoSizeGroups } from '@/lib/demo-data';
+import { resetLegacyInventoryMovementsOnce } from '@/lib/inventory-reset';
+import { isComponentFabricSlot, isComponentFabricSlotAvailableForModel, secondaryFabricSlotIndex } from '@/lib/component-fabric-slots';
+import { isComponentColorSlot, isComponentColorSlotAvailableForModel, secondaryColorSlotIndex } from '@/lib/component-color-slots';
 import { validateSizeSpecification } from '@/lib/material-size-specifications';
 import { FabricModule, FABRIC_STORAGE_KEYS, emptyFabricBackupData, validateFabricBackupData, type FabricView, type ColorDefinition } from '@/app/fabric-module';
 import { ProductionModule, PRODUCTION_STORAGE_KEYS, emptyProductionBackupData, validateProductionBackupData, type ProductionView } from '@/app/production-module';
@@ -31,7 +32,7 @@ type SymmetricEntryMode = 'paridad' | 'lados';
 type StockSlot = 'paridad' | StockSide;
 type FabricSlot = string;
 type ModelFormPiece = { id: string; name: string; unitsPerGarment: string; laterality: Laterality; fabricSlot: FabricSlot; colorSlot: string; colorId: string; colorOverride: boolean; fabricType: string; color: string };
-type ModelFormState = { editingId: string | null; name: string; sizeGroupId: string; family: string; secondaryFabricSlots: number; secondaryColorSlots: number; pieces: ModelFormPiece[] };
+type ModelFormState = { editingId: string | null; name: string; sizeGroupId: string; family: string; excludedSizeIds: string[]; secondaryFabricSlots: number; secondaryColorSlots: number; pieces: ModelFormPiece[] };
 
 const STORAGE = {
   groups: 'telastock-size-groups-v1',
@@ -39,24 +40,99 @@ const STORAGE = {
   models: 'telastock-manufacturing-models-v1',
   pieces: 'telastock-model-pieces-v1',
   movements: 'telastock-piece-movements-v1',
+  families: 'telastock-pattern-families-v1',
 };
-const baseModelFamilies = [
+type StoredProductModelReference = { id?: string; name?: string; baseModelId?: string; active?: boolean };
+type StoredProductionOrderReference = { id?: string; number?: string; baseModelId?: string; basePieces?: Array<{ pieceId?: string }> };
+type PatternDependencySnapshot = { productModels: StoredProductModelReference[]; productionOrders: StoredProductionOrderReference[] };
+
+function readPatternDependencySnapshot(): PatternDependencySnapshot | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const readRows = <T,>(key: string): T[] | null => {
+      const raw = window.localStorage.getItem(key);
+      if (raw === null) return [];
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed as T[] : null;
+    };
+    const productModels = readRows<StoredProductModelReference>(PRODUCTION_STORAGE_KEYS.productModels);
+    const productionOrders = readRows<StoredProductionOrderReference>(PRODUCTION_STORAGE_KEYS.productionOrders);
+    if (!productModels || !productionOrders) return null;
+    return { productModels, productionOrders };
+  } catch {
+    return null;
+  }
+}
+
+function patternDeletionBlockReason(
+  modelId: string,
+  pieces: ModelPiece[],
+  movements: PieceMovement[],
+  snapshot: PatternDependencySnapshot,
+): string | null {
+  const assignedProducts = snapshot.productModels.filter((product) => product.baseModelId === modelId);
+  if (assignedProducts.length > 0) {
+    const names = assignedProducts.slice(0, 2).map((product) => product.name?.trim() || 'Modelo sin nombre');
+    const extra = assignedProducts.length - names.length;
+    return 'Está asignado a ' + names.join(', ') + (extra > 0 ? ' y ' + extra + ' modelo(s) más' : '') + '.';
+  }
+
+  const pieceIds = new Set(pieces.filter((piece) => piece.modelId === modelId).map((piece) => piece.id));
+  const linkedOrders = snapshot.productionOrders.filter((order) =>
+    order.baseModelId === modelId || (Array.isArray(order.basePieces) && order.basePieces.some((line) => pieceIds.has(line.pieceId ?? '')))
+  );
+  if (linkedOrders.length > 0) {
+    return 'Tiene ' + linkedOrders.length + ' orden(es) de producción vinculada(s).';
+  }
+
+  const movementCount = movements.filter((movement) => pieceIds.has(movement.pieceId)).length;
+  if (movementCount > 0) {
+    return 'Sus moldes conservan ' + movementCount + ' movimiento(s) de stock en el historial.';
+  }
+  return null;
+}
+
+type PatternFamily = { value: string; label: string };
+const DEFAULT_PATTERN_FAMILIES: PatternFamily[] = [
   { value: 'polo', label: 'Polo' },
   { value: 'buzo', label: 'Buzo' },
   { value: 'casaca', label: 'Casaca' },
   { value: 'otro', label: 'Otro' },
 ];
-const migrateBaseModelFamilies = (models: ManufacturingModel[], products: Array<{ baseModelId?: string; family?: string }>) => {
+const normalizePatternFamilies = (input: unknown, fallback: PatternFamily[] = DEFAULT_PATTERN_FAMILIES): PatternFamily[] => {
+  if (!Array.isArray(input)) return fallback.map((item) => ({ ...item }));
+  const result: PatternFamily[] = [];
+  const values = new Set<string>();
+  const labels = new Set<string>();
+  input.forEach((item) => {
+    if (!item || typeof item !== 'object') return;
+    const row = item as Record<string, unknown>;
+    const value = typeof row.value === 'string' ? row.value.trim() : '';
+    const label = typeof row.label === 'string' ? row.label.trim() : '';
+    const normalizedLabel = label.toLocaleLowerCase('es');
+    if (!value || !label || values.has(value) || labels.has(normalizedLabel)) return;
+    values.add(value);
+    labels.add(normalizedLabel);
+    result.push({ value, label });
+  });
+  return result.length > 0 ? result : fallback.map((item) => ({ ...item }));
+};
+const migrateBaseModelFamilies = (
+  models: ManufacturingModel[],
+  products: Array<{ baseModelId?: string; family?: string }>,
+  availableFamilies: PatternFamily[] = DEFAULT_PATTERN_FAMILIES,
+) => {
+  const validValues = new Set(availableFamilies.map((item) => item.value));
   const byBaseModel = new Map<string, Set<string>>();
   products.forEach((product) => {
     const family = typeof product.family === 'string' ? product.family.trim() : '';
-    if (!product.baseModelId || !baseModelFamilies.some((item) => item.value === family)) return;
+    if (!product.baseModelId || !validValues.has(family)) return;
     const values = byBaseModel.get(product.baseModelId) ?? new Set<string>();
     values.add(family);
     byBaseModel.set(product.baseModelId, values);
   });
   return models.map((model) => {
-    if (baseModelFamilies.some((item) => item.value === model.family)) return model;
+    if (typeof model.family === 'string' && validValues.has(model.family)) return model;
     const inferred = [...(byBaseModel.get(model.id) ?? [])];
     return { ...model, family: inferred.length === 1 ? inferred[0] : '' };
   });
@@ -90,11 +166,19 @@ const secondaryColorSlotCountForModel = (model: ManufacturingModel, modelPieces:
   Math.max(model.secondaryColorSlots ?? 0, ...modelPieces.filter((piece) => piece.modelId === model.id).map((piece) => secondaryColorSlotIndex(piece.colorSlot)), 0);
 const normalizeModelsWithSlots = (models: ManufacturingModel[], modelPieces: ModelPiece[]) =>
   models.map((model) => ({ ...model, secondaryFabricSlots: secondarySlotCountForModel(model, modelPieces), secondaryColorSlots: secondaryColorSlotCountForModel(model, modelPieces) }));
+const normalizeExcludedModelSizes = (models: ManufacturingModel[], masterSizes: Size[]) =>
+  models.map((model) => ({
+    ...model,
+    excludedSizeIds: Array.isArray(model.excludedSizeIds)
+      ? model.excludedSizeIds.filter((sizeId) => typeof sizeId === 'string' && masterSizes.some((size) => size.id === sizeId && size.groupId === model.sizeGroupId))
+      : [],
+  }));
 const blankModelForm = (sizeGroupId: string, colorId = ''): ModelFormState => ({
   editingId: null,
   name: '',
   sizeGroupId,
   family: '',
+  excludedSizeIds: [],
   secondaryFabricSlots: 0,
   secondaryColorSlots: 0,
   pieces: [{ id: '', name: 'Pecho', unitsPerGarment: '1', laterality: 'ninguna', fabricSlot: 'principal', colorSlot: 'principal', colorId, colorOverride: false, fabricType: 'Tela principal 1', color: '' }],
@@ -105,9 +189,10 @@ export default function Home() {
   const [sizeGroups, setSizeGroups] = useState<SizeGroup[]>(demoSizeGroups);
   const [sizes, setSizes] = useState<Size[]>(demoSizes);
   const [models, setModels] = useState<ManufacturingModel[]>(demoModels);
+  const [families, setFamilies] = useState<PatternFamily[]>(DEFAULT_PATTERN_FAMILIES);
   const [pieces, setPieces] = useState<ModelPiece[]>(demoPieces);
   const [fabricColors, setFabricColors] = useState<ColorDefinition[]>([]);
-  const [movements, setMovements] = useState<PieceMovement[]>(demoMovements);
+  const [movements, setMovements] = useState<PieceMovement[]>([]);
   const [ready, setReady] = useState(false);
 
   const [search, setSearch] = useState('');
@@ -124,6 +209,16 @@ export default function Home() {
   const [missingTarget, setMissingTarget] = useState<{ modelId: string; sizeId: string; targetUnits?: number } | null>(null);
   const [showModelForm, setShowModelForm] = useState(false);
   const [showSizeManager, setShowSizeManager] = useState(false);
+  const [showFamilyManager, setShowFamilyManager] = useState(false);
+  const [draftFamilies, setDraftFamilies] = useState<PatternFamily[]>([]);
+  const [newFamilyLabel, setNewFamilyLabel] = useState('');
+  const [draftSizeGroups, setDraftSizeGroups] = useState<SizeGroup[]>([]);
+  const [draftSizes, setDraftSizes] = useState<Size[]>([]);
+  const [expandedPatternIds, setExpandedPatternIds] = useState<string[]>([]);
+  const [patternSearch, setPatternSearch] = useState('');
+  const [patternFamilyFilter, setPatternFamilyFilter] = useState('Todas');
+  const [patternGroupFilter, setPatternGroupFilter] = useState('Todos');
+  const [patternSort, setPatternSort] = useState<'az' | 'za' | 'recent' | 'pieces'>('az');
   const [returnToModelFormAfterSizeManager, setReturnToModelFormAfterSizeManager] = useState(false);
   const [sizeManagerGroupId, setSizeManagerGroupId] = useState(demoSizeGroups[0].id);
   const [newSizeLabel, setNewSizeLabel] = useState('');
@@ -133,54 +228,44 @@ export default function Home() {
   const [showBackupModal, setShowBackupModal] = useState(false);
   const [modelForm, setModelForm] = useState<ModelFormState>(() => blankModelForm(demoSizeGroups[0].id));
   const [notice, setNotice] = useState<{ message: string; kind: 'success' | 'error' | 'info' } | null>(null);
-  const [historySearch, setHistorySearch] = useState('');
-  const [adminMode, setAdminMode] = useState(false);
   const quickBaseModelCreatedCallbackRef = useRef<((modelId: string) => void) | null>(null);
 
   // Cargar datos una sola vez. Las claves propias de este módulo no pisan el inventario
   // genérico anterior de TelaStock. En la etapa Supabase, estas entidades pasan al repositorio remoto.
   useEffect(() => {
     try {
+      // Remove pre-existing movement ledgers once before any module reads inventory.
+      resetLegacyInventoryMovementsOnce();
       const load = <T,>(key: string, fallback: T): T => {
         const raw = localStorage.getItem(key);
         return raw ? JSON.parse(raw) as T : fallback;
       };
       setSizeGroups(load(STORAGE.groups, demoSizeGroups));
       setSizes(load(STORAGE.sizes, demoSizes));
+      const storedFamilies = normalizePatternFamilies(load<unknown>(STORAGE.families, DEFAULT_PATTERN_FAMILIES));
+      setFamilies(storedFamilies);
       const storedModels = load<ManufacturingModel[]>(STORAGE.models, demoModels);
       const legacyProductModels = load<Array<{ baseModelId?: string; family?: string }>>(PRODUCTION_STORAGE_KEYS.productModels, []);
-      // The global color-name dictionary is shared with the textile module. Legacy mold color names
-      // are promoted into it once; their fabric-specific HEX/CMYK variant is resolved later by tela.
+      // A base pattern stores reusable textile/color positions, never concrete assignments.
+      // Old demo/legacy color names are intentionally not promoted into the shared color catalog.
       const storedColors = load<ColorDefinition[]>(FABRIC_STORAGE_KEYS.colores, []);
-      const colorMap = new Map(storedColors.map((color) => [color.nombre.toLocaleLowerCase('es'), color]));
       const storedPieces = load<ModelPiece[]>(STORAGE.pieces, demoPieces);
-      storedPieces.forEach((piece) => {
-        const legacyName = (piece.color ?? '').trim();
-        if (legacyName && legacyName !== 'Sin especificar' && !colorMap.has(legacyName.toLocaleLowerCase('es'))) {
-          const color = { id: newId(), nombre: legacyName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-          colorMap.set(legacyName.toLocaleLowerCase('es'), color);
-        }
-      });
-      const colors = [...colorMap.values()];
-      localStorage.setItem(FABRIC_STORAGE_KEYS.colores, JSON.stringify(colors));
-      setFabricColors(colors);
-      const migratedPieces = storedPieces.map((piece) => {
-        const legacyColorId = piece.colorId ?? colors.find((color) => color.nombre.toLocaleLowerCase('es') === (piece.color ?? '').toLocaleLowerCase('es'))?.id ?? null;
-        return {
-          ...piece,
-          fabricType: fabricSlotLabel(piece.fabricSlot ?? 'principal'),
-          fabricSlot: piece.fabricSlot ?? 'principal',
-          color: piece.color ?? 'Sin especificar',
-          colorSlot: piece.colorSlot ?? (legacyColorId ? 'principal' : 'ninguna'),
-          colorId: legacyColorId,
-          colorOverride: piece.colorOverride ?? true,
-        };
-      });
+      setFabricColors(storedColors);
+      const migratedPieces = storedPieces.map((piece) => ({
+        ...piece,
+        fabricType: fabricSlotLabel(piece.fabricSlot ?? 'principal'),
+        fabricSlot: piece.fabricSlot ?? 'principal',
+        color: 'Sin especificar',
+        // Preserve the old position (e.g. principal 1) while removing the actual legacy color.
+        colorSlot: piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna'),
+        colorId: null,
+        colorOverride: false,
+      }));
       setPieces(migratedPieces);
-      const migratedModels = normalizeModelsWithSlots(migrateBaseModelFamilies(storedModels, legacyProductModels), migratedPieces);
+      const migratedModels = normalizeExcludedModelSizes(normalizeModelsWithSlots(migrateBaseModelFamilies(storedModels, legacyProductModels, storedFamilies), migratedPieces), load<Size[]>(STORAGE.sizes, demoSizes));
       setModels(migratedModels);
       if (migratedModels.some((model) => !model.family)) setNotice({ message: 'Hay patrones base sin familia asignada. Edítalos en Modelos para que los modelos configurados hereden la familia correcta.', kind: 'info' });
-      setMovements(load(STORAGE.movements, demoMovements));
+      setMovements(load(STORAGE.movements, []));
     } catch {
       setNotice({ message: 'No se pudo leer el almacenamiento del navegador. Se muestran los datos de demostración.', kind: 'info' });
     }
@@ -203,20 +288,27 @@ export default function Home() {
   useEffect(() => { if (ready) localStorage.setItem(STORAGE.groups, JSON.stringify(sizeGroups)); }, [sizeGroups, ready]);
   useEffect(() => { if (ready) localStorage.setItem(STORAGE.sizes, JSON.stringify(sizes)); }, [sizes, ready]);
   useEffect(() => { if (ready) localStorage.setItem(STORAGE.models, JSON.stringify(models)); }, [models, ready]);
+  useEffect(() => { if (ready) localStorage.setItem(STORAGE.families, JSON.stringify(families)); }, [families, ready]);
   useEffect(() => { if (ready) localStorage.setItem(STORAGE.pieces, JSON.stringify(pieces)); }, [pieces, ready]);
   useEffect(() => { if (ready) localStorage.setItem(STORAGE.movements, JSON.stringify(movements)); }, [movements, ready]);
 
   const groupById = useMemo(() => new Map(sizeGroups.map((group) => [group.id, group])), [sizeGroups]);
   const fabricColorById = useMemo(() => new Map(fabricColors.map((color) => [color.id, color])), [fabricColors]);
-  const colorIdForName = (name: string) => fabricColors.find((color) => color.nombre.toLocaleLowerCase('es') === name.toLocaleLowerCase('es'))?.id ?? '';
   const modelPieces = (modelId: string) => pieces.filter((piece) => piece.modelId === modelId && !piece.archived).sort((a, b) => a.sortOrder - b.sortOrder);
   const groupSizes = (groupId: string) => sizes.filter((size) => size.groupId === groupId).sort((a, b) => a.sortOrder - b.sortOrder);
-  const modelSizes = (model: ManufacturingModel) => groupSizes(model.sizeGroupId);
+  const managerGroupSizes = (groupId: string) => draftSizes.filter((size) => size.groupId === groupId).sort((a, b) => a.sortOrder - b.sortOrder);
+  const selectedManagerGroup = draftSizeGroups.find((group) => group.id === sizeManagerGroupId);
+  const hasPendingSizeManagerChanges = JSON.stringify(draftSizeGroups) !== JSON.stringify(sizeGroups) || JSON.stringify(draftSizes) !== JSON.stringify(sizes);
+  const hasPendingFamilyChanges = JSON.stringify(draftFamilies) !== JSON.stringify(families);
+  const modelSizes = (model: ManufacturingModel) => {
+    const excluded = new Set(model.excludedSizeIds ?? []);
+    return groupSizes(model.sizeGroupId).filter((size) => !excluded.has(size.id));
+  };
   const stockForPiece = (pieceId: string, sizeId: string) => getPieceStock(movements, pieceId, sizeId);
   const hasStockForSize = (model: ManufacturingModel, sizeId: string) => sizeHasStock(modelPieces(model.id), movements, sizeId);
   const modelHasAnyStock = (model: ManufacturingModel) => modelSizes(model).some((size) => hasStockForSize(model, size.id));
   const completeForSize = (model: ManufacturingModel, sizeId: string) => getCompleteUnits(modelPieces(model.id), movements, sizeId);
-  const totalCurrentPieceStock = useMemo(() => pieces.reduce((sum, piece) => sum + sizes.filter((size) => size.groupId === models.find((m) => m.id === piece.modelId)?.sizeGroupId).reduce((sub, size) => sub + Math.max(0, getPieceStock(movements, piece.id, size.id)), 0), 0), [pieces, sizes, models, movements]);
+  const totalCurrentPieceStock = models.reduce((sum, model) => sum + modelPieces(model.id).reduce((pieceSum, piece) => pieceSum + modelSizes(model).reduce((sizeSum, size) => sizeSum + Math.max(0, getPieceStock(movements, piece.id, size.id)), 0), 0), 0);
   const modelCountWithStock = models.filter(modelHasAnyStock).length;
   const completeUnitsAll = models.reduce((grandTotal, model) => grandTotal + modelSizes(model).reduce((subtotal, size) => subtotal + completeForSize(model, size.id), 0), 0);
 
@@ -233,6 +325,33 @@ export default function Home() {
   // `modelSizes` is a stable helper over the current sizes array; include its underlying data.
   }, [models, search, stockFilter, groupById, sizes, pieces, movements]);
 
+  const patternSearchNormalized = patternSearch.trim().toLocaleLowerCase('es');
+  const filteredPatterns = models.filter((model) => {
+    const family = model.family ?? '';
+    const pieceNames = modelPieces(model.id).map((piece) => piece.name).join(' ');
+    const groupName = groupById.get(model.sizeGroupId)?.name ?? '';
+    const matchesSearch = !patternSearchNormalized || `${model.name} ${pieceNames} ${groupName}`.toLocaleLowerCase('es').includes(patternSearchNormalized);
+    const matchesFamily = patternFamilyFilter === 'Todas' || family === patternFamilyFilter;
+    const matchesGroup = patternGroupFilter === 'Todos' || model.sizeGroupId === patternGroupFilter;
+    return matchesSearch && matchesFamily && matchesGroup;
+  }).slice().sort((a, b) => {
+    if (patternSort === 'za') return b.name.localeCompare(a.name, 'es', { sensitivity: 'base' });
+    if (patternSort === 'recent') return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '');
+    if (patternSort === 'pieces') return modelPieces(b.id).length - modelPieces(a.id).length || a.name.localeCompare(b.name, 'es');
+    return a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
+  });
+  const togglePatternExpanded = (modelId: string) => setExpandedPatternIds((current) => current.includes(modelId) ? current.filter((id) => id !== modelId) : [...current, modelId]);
+  const patternDeletionStatus = useMemo(() => {
+    const snapshot = ready ? readPatternDependencySnapshot() : null;
+    return new Map(models.map((model) => {
+      const reason = !snapshot
+        ? 'No se pudieron verificar las asignaciones y referencias históricas. Vuelve a cargar los datos antes de eliminar.'
+        : patternDeletionBlockReason(model.id, pieces, movements, snapshot);
+      return [model.id, { canDelete: Boolean(snapshot) && !reason, reason }] as const;
+    }));
+  }, [ready, view, models, pieces, movements]);
+
+  const allPatternIdsExpanded = filteredPatterns.length > 0 && filteredPatterns.every((model) => expandedPatternIds.includes(model.id));
   const currentStockModel = models.find((model) => model.id === selectedModelId) ?? models[0];
   const currentModelPieces = currentStockModel ? modelPieces(currentStockModel.id) : [];
   const currentModelSizes = currentStockModel ? modelSizes(currentStockModel) : [];
@@ -372,17 +491,6 @@ export default function Home() {
     } catch { return 0; }
   }
 
-  function replaceBaseMovements(next: PieceMovement[]): boolean {
-    try {
-      localStorage.setItem(STORAGE.movements, JSON.stringify(next));
-      setMovements(next);
-      return true;
-    } catch {
-      setNoticeMessage('No se pudo guardar el consumo de moldes base en el navegador.', 'error');
-      return false;
-    }
-  }
-
   function productionOrdersSnapshot(): Array<{
     status?: string;
     baseModelId?: string;
@@ -487,9 +595,10 @@ export default function Home() {
       name: model.name,
       sizeGroupId: model.sizeGroupId,
       family: model.family ?? '',
+      excludedSizeIds: (model.excludedSizeIds ?? []).filter((sizeId) => sizes.some((size) => size.id === sizeId && size.groupId === model.sizeGroupId)),
       secondaryFabricSlots: secondarySlotCountForModel(model, pieces),
       secondaryColorSlots: secondaryColorSlotCountForModel(model, pieces),
-      pieces: modelPieces(model.id).map((piece) => ({ id: piece.id, name: piece.name, unitsPerGarment: String(piece.unitsPerGarment), laterality: piece.laterality, fabricSlot: piece.fabricSlot ?? 'principal', colorSlot: piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna'), colorId: piece.colorId ?? colorIdForName(piece.color ?? ''), colorOverride: piece.colorOverride ?? true, fabricType: piece.fabricType ?? '', color: piece.color ?? '' })),
+      pieces: modelPieces(model.id).map((piece) => ({ id: piece.id, name: piece.name, unitsPerGarment: String(piece.unitsPerGarment), laterality: piece.laterality, fabricSlot: piece.fabricSlot ?? 'principal', colorSlot: piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna'), colorId: '', colorOverride: false, fabricType: fabricSlotLabel(piece.fabricSlot ?? 'principal'), color: 'Sin especificar' })),
     });
     setShowModelForm(true);
   }
@@ -499,15 +608,13 @@ export default function Home() {
   function saveModel(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const cleanName = modelForm.name.trim();
-    const cleanPieces = modelForm.pieces.map((piece) => ({ ...piece, name: piece.name.trim(), fabricType: fabricSlotLabel(piece.fabricSlot), color: fabricColorById.get(piece.colorId)?.nombre ?? 'Sin especificar', units: Number(piece.unitsPerGarment) }));
+    const cleanPieces = modelForm.pieces.map((piece) => ({ ...piece, name: piece.name.trim(), fabricType: fabricSlotLabel(piece.fabricSlot), color: 'Sin especificar', colorId: '', colorOverride: false, units: Number(piece.unitsPerGarment) }));
     if (!cleanName) { setNoticeMessage('Escribe el nombre del modelo.', 'error'); return; }
     if (!modelForm.sizeGroupId) { setNoticeMessage('Selecciona un grupo de tallas.', 'error'); return; }
-    if (!baseModelFamilies.some((family) => family.value === modelForm.family)) { setNoticeMessage('Selecciona la familia del patrón base.', 'error'); return; }
+    if (!families.some((family) => family.value === modelForm.family)) { setNoticeMessage('Selecciona la familia del patrón base.', 'error'); return; }
+    if (groupSizes(modelForm.sizeGroupId).every((size) => modelForm.excludedSizeIds.includes(size.id))) { setNoticeMessage('Activa al menos una talla para este patrón.', 'error'); return; }
     if (cleanPieces.length === 0 || cleanPieces.some((piece) => !piece.name || !Number.isInteger(piece.units) || piece.units < 1 || !isValidFabricSlot(piece.fabricSlot, modelForm.secondaryFabricSlots) || !isValidColorSlot(piece.colorSlot, modelForm.secondaryColorSlots))) {
       setNoticeMessage('Cada molde debe tener nombre y una cantidad requerida entera mayor que cero.', 'error'); return;
-    }
-    if (cleanPieces.some((piece) => piece.colorId && !fabricColorById.has(piece.colorId))) {
-      setNoticeMessage('Uno de los colores seleccionados ya no existe en el catálogo central. Actualiza la selección.', 'error'); return;
     }
     if (cleanPieces.some((piece) => piece.laterality === 'simetrica' && piece.units % 2 !== 0)) {
       setNoticeMessage('Las piezas simétricas requieren una cantidad par por prenda (izquierda + derecha). Ejemplo: 2 = 1 por lado.', 'error'); return;
@@ -537,11 +644,12 @@ export default function Home() {
     }
 
     const modelId = modelForm.editingId ?? newId();
-    const savedModel: ManufacturingModel = { id: modelId, name: cleanName, sizeGroupId: modelForm.sizeGroupId, family: modelForm.family, secondaryFabricSlots: modelForm.secondaryFabricSlots, secondaryColorSlots: modelForm.secondaryColorSlots, updatedAt: new Date().toISOString() };
+    const validExcludedSizeIds = groupSizes(modelForm.sizeGroupId).filter((size) => modelForm.excludedSizeIds.includes(size.id)).map((size) => size.id);
+    const savedModel: ManufacturingModel = { id: modelId, name: cleanName, sizeGroupId: modelForm.sizeGroupId, family: modelForm.family, excludedSizeIds: validExcludedSizeIds, secondaryFabricSlots: modelForm.secondaryFabricSlots, secondaryColorSlots: modelForm.secondaryColorSlots, updatedAt: new Date().toISOString() };
     const savedPieces: ModelPiece[] = cleanPieces.map((formPiece, index) => ({
       id: formPiece.id || newId(), modelId, name: formPiece.name, unitsPerGarment: formPiece.units,
-      laterality: formPiece.laterality, fabricSlot: formPiece.fabricSlot, colorSlot: formPiece.colorSlot, colorId: formPiece.colorId || null,
-      fabricType: fabricSlotLabel(formPiece.fabricSlot), color: fabricColorById.get(formPiece.colorId)?.nombre ?? 'Sin especificar', colorOverride: formPiece.colorOverride, sortOrder: index + 1, archived: false,
+      laterality: formPiece.laterality, fabricSlot: formPiece.fabricSlot, colorSlot: formPiece.colorSlot, colorId: null,
+      fabricType: fabricSlotLabel(formPiece.fabricSlot), color: 'Sin especificar', colorOverride: false, sortOrder: index + 1, archived: false,
     }));
     setModels((previous) => modelForm.editingId ? previous.map((model) => model.id === modelId ? savedModel : model) : [...previous, savedModel]);
     setPieces((previous) => [...previous.filter((piece) => piece.modelId !== modelId || piece.archived || archivedRemovedIds.has(piece.id)).map((piece) => archivedRemovedIds.has(piece.id) ? { ...piece, archived: true } : piece), ...savedPieces]);
@@ -558,6 +666,42 @@ export default function Home() {
     }
   }
 
+  function deleteUnusedBasePattern(model: ManufacturingModel) {
+    const snapshot = readPatternDependencySnapshot();
+    if (!snapshot) {
+      setNoticeMessage('No se pudo verificar el uso del patrón. No se eliminó ningún dato; vuelve a cargar la aplicación e inténtalo nuevamente.', 'error');
+      return;
+    }
+    const reason = patternDeletionBlockReason(model.id, pieces, movements, snapshot);
+    if (reason) {
+      setNoticeMessage('No se puede eliminar «' + model.name + '». ' + reason, 'error');
+      return;
+    }
+    const moldCount = pieces.filter((piece) => piece.modelId === model.id).length;
+    const confirmed = window.confirm(
+      '¿Eliminar definitivamente el patrón base «' + model.name + '» y sus ' + moldCount + ' molde(s)?\n\n' +
+      'Esta acción solo está disponible porque el patrón nunca fue asignado a un modelo comercial y no tiene movimientos ni órdenes vinculadas.\n\n' +
+      'No se puede deshacer.'
+    );
+    if (!confirmed) return;
+
+    // Recheck all references immediately before changing the local records.
+    const latestSnapshot = readPatternDependencySnapshot();
+    const latestReason = latestSnapshot
+      ? patternDeletionBlockReason(model.id, pieces, movements, latestSnapshot)
+      : 'No se pudieron verificar las referencias actuales.';
+    if (latestReason) {
+      setNoticeMessage('No se eliminó el patrón. ' + latestReason, 'error');
+      return;
+    }
+
+    setModels((current) => current.filter((item) => item.id !== model.id));
+    setPieces((current) => current.filter((piece) => piece.modelId !== model.id));
+    setExpandedPatternIds((current) => current.filter((id) => id !== model.id));
+    if (selectedModelId === model.id) setSelectedModelId('');
+    setNoticeMessage('Patrón base «' + model.name + '» eliminado correctamente.');
+  }
+
   function moveMold(index: number, direction: -1 | 1) {
     setModelForm((previous) => {
       const next = [...previous.pieces];
@@ -568,90 +712,202 @@ export default function Home() {
     });
   }
 
+  function familyUsage(value: string) {
+    const savedPatternCount = models.filter((model) => model.family === value).length;
+    const editingModel = showModelForm && modelForm.editingId ? models.find((model) => model.id === modelForm.editingId) : undefined;
+    const newDraftUsesFamily = showModelForm && modelForm.family === value && (!editingModel || editingModel.family !== value) ? 1 : 0;
+    const patternCount = savedPatternCount + newDraftUsesFamily;
+    let recipeCount = 0;
+    try {
+      const raw = localStorage.getItem(PRODUCTION_STORAGE_KEYS.familyRecipes);
+      const recipes = raw ? JSON.parse(raw) as Array<{ family?: string }> : [];
+      recipeCount = Array.isArray(recipes) ? recipes.filter((recipe) => recipe.family === value).length : 0;
+    } catch { recipeCount = 0; }
+    return { patternCount, recipeCount, total: patternCount + recipeCount };
+  }
+
+  function openFamilyManager() {
+    setDraftFamilies(families.map((family) => ({ ...family })));
+    setNewFamilyLabel('');
+    setShowFamilyManager(true);
+  }
+
+  function addDraftFamily() {
+    const label = newFamilyLabel.trim();
+    if (!label) { setNoticeMessage('Escribe el nombre de la nueva familia.', 'error'); return; }
+    if (draftFamilies.some((family) => family.label.trim().toLocaleLowerCase('es') === label.toLocaleLowerCase('es'))) {
+      setNoticeMessage('Ya existe una familia con ese nombre.', 'error'); return;
+    }
+    setDraftFamilies((previous) => [...previous, { value: `family-${newId()}`, label }]);
+    setNewFamilyLabel('');
+  }
+
+  function removeDraftFamily(value: string) {
+    const family = draftFamilies.find((item) => item.value === value);
+    if (!family) return;
+    const usage = familyUsage(value);
+    if (usage.total > 0) {
+      setNoticeMessage(`No se puede eliminar «${family.label}»: está en uso por ${usage.patternCount} patrones y ${usage.recipeCount} recetas. Reasigna esos registros primero.`, 'error');
+      return;
+    }
+    setDraftFamilies((previous) => previous.filter((item) => item.value !== value));
+  }
+
+  function cancelFamilyManager() {
+    setShowFamilyManager(false);
+    setDraftFamilies([]);
+    setNewFamilyLabel('');
+  }
+
+  function applyFamilyManager() {
+    if (draftFamilies.length === 0) { setNoticeMessage('Debe existir al menos una familia.', 'error'); return; }
+    if (draftFamilies.some((family) => !family.label.trim())) { setNoticeMessage('Todas las familias deben tener un nombre.', 'error'); return; }
+    const labels = draftFamilies.map((family) => family.label.trim().toLocaleLowerCase('es'));
+    if (new Set(labels).size !== labels.length) { setNoticeMessage('Hay nombres de familia duplicados.', 'error'); return; }
+    const values = draftFamilies.map((family) => family.value);
+    if (new Set(values).size !== values.length) { setNoticeMessage('Hay identificadores de familia duplicados.', 'error'); return; }
+    const valueSet = new Set(values);
+    const removedInUse = families.find((family) => !valueSet.has(family.value) && familyUsage(family.value).total > 0);
+    if (removedInUse) { setNoticeMessage(`No se puede eliminar «${removedInUse.label}» porque todavía está asociada a patrones o recetas.`, 'error'); return; }
+    const nextFamilies = draftFamilies.map((family) => ({ ...family, label: family.label.trim() }));
+    setFamilies(nextFamilies);
+    if (!nextFamilies.some((family) => family.value === patternFamilyFilter)) setPatternFamilyFilter('Todas');
+    setShowFamilyManager(false);
+    setDraftFamilies([]);
+    setNewFamilyLabel('');
+    setNoticeMessage('Catálogo de familias actualizado.');
+  }
+
+  function beginSizeManager(groupId: string, returnToModelForm: boolean) {
+    setDraftSizeGroups(sizeGroups.map((group) => ({ ...group })));
+    setDraftSizes(sizes.map((size) => ({ ...size })));
+    setReturnToModelFormAfterSizeManager(returnToModelForm);
+    setSizeManagerGroupId(groupId || sizeGroups[0]?.id || '');
+    setNewSizeLabel('');
+    setNewGroupName('');
+    setShowSizeManager(true);
+  }
+
   function addSize() {
     const label = newSizeLabel.trim();
     if (!label || !sizeManagerGroupId) return;
-    if (sizes.some((size) => size.groupId === sizeManagerGroupId && size.label.toLocaleLowerCase('es') === label.toLocaleLowerCase('es'))) {
+    if (draftSizes.some((size) => size.groupId === sizeManagerGroupId && size.label.trim().toLocaleLowerCase('es') === label.toLocaleLowerCase('es'))) {
       setNoticeMessage('Ya existe esa talla en el grupo seleccionado.', 'error'); return;
     }
-    const sortOrder = Math.max(0, ...sizes.filter((size) => size.groupId === sizeManagerGroupId).map((size) => size.sortOrder)) + 1;
-    setSizes((previous) => [...previous, { id: newId(), groupId: sizeManagerGroupId, label, sortOrder }]);
+    const sortOrder = Math.max(0, ...managerGroupSizes(sizeManagerGroupId).map((size) => size.sortOrder)) + 1;
+    setDraftSizes((previous) => [...previous, { id: newId(), groupId: sizeManagerGroupId, label, sortOrder }]);
     setNewSizeLabel('');
-    setNoticeMessage(`Talla ${label} creada.`);
-  }
-
-  function renameSize(sizeId: string, label: string) {
-    const current = sizes.find((size) => size.id === sizeId);
-    if (!current) return;
-    const clean = label.trim().toLocaleLowerCase('es');
-    if (clean && sizes.some((size) => size.id !== sizeId && size.groupId === current.groupId && size.label.trim().toLocaleLowerCase('es') === clean)) {
-      setNoticeMessage('Ya existe una talla con ese nombre en este grupo.', 'error'); return;
-    }
-    setSizes((previous) => previous.map((size) => size.id === sizeId ? { ...size, label } : size));
   }
 
   function reorderSize(sizeId: string, direction: -1 | 1) {
-    const ordered = groupSizes(sizeManagerGroupId);
+    const ordered = managerGroupSizes(sizeManagerGroupId);
     const index = ordered.findIndex((size) => size.id === sizeId);
     const destination = index + direction;
     if (index < 0 || destination < 0 || destination >= ordered.length) return;
     const reordered = [...ordered];
     [reordered[index], reordered[destination]] = [reordered[destination], reordered[index]];
-    setSizes((previous) => previous.map((size) => {
+    setDraftSizes((previous) => previous.map((size) => {
       const position = reordered.findIndex((item) => item.id === size.id);
       return position >= 0 ? { ...size, sortOrder: position + 1 } : size;
     }));
   }
 
   function deleteSize(size: Size) {
-    if (movements.some((movement) => movement.sizeId === size.id)) {
-      setNoticeMessage(`No se puede borrar la talla ${size.label} porque tiene movimientos históricos. Renómbrala o déjala sin usar para conservar la trazabilidad.`, 'error'); return;
+    const existsInSavedSizes = sizes.some((item) => item.id === size.id);
+    if (existsInSavedSizes) {
+      if (movements.some((movement) => movement.sizeId === size.id)) {
+        setNoticeMessage(`No se puede borrar la talla ${size.label} porque tiene movimientos históricos. Renómbrala o déjala sin usar para conservar la trazabilidad.`, 'error'); return;
+      }
+      const orders = productionOrdersSnapshot();
+      if (!orders) { setNoticeMessage('No se pudo verificar las órdenes guardadas. Exporta un respaldo válido antes de borrar tallas.', 'error'); return; }
+      const referencedInProduction = orders.some((order) =>
+        Boolean(order.quantities?.[size.id]) ||
+        order.materials?.some((line) => line.sizeId === size.id) ||
+        order.basePieces?.some((line) => line.sizeId === size.id) ||
+        order.componentPieces?.some((line) => line.sizeId === size.id)
+      );
+      if (referencedInProduction) {
+        setNoticeMessage(`No se puede borrar la talla ${size.label}: está referenciada por una orden de producción. Renómbrala o déjala sin usar para conservar la trazabilidad.`, 'error'); return;
+      }
     }
-    const orders = productionOrdersSnapshot();
-    if (!orders) { setNoticeMessage('No se pudo verificar las órdenes guardadas. Exporta un respaldo válido antes de borrar tallas.', 'error'); return; }
-    const referencedInProduction = orders.some((order) =>
-      Boolean(order.quantities?.[size.id]) ||
-      order.materials?.some((line) => line.sizeId === size.id) ||
-      order.basePieces?.some((line) => line.sizeId === size.id) ||
-      order.componentPieces?.some((line) => line.sizeId === size.id)
-    );
-    if (referencedInProduction) {
-      setNoticeMessage(`No se puede borrar la talla ${size.label}: está referenciada por una orden de producción. Renómbrala o déjala sin usar para conservar la trazabilidad.`, 'error'); return;
-    }
-    setSizes((previous) => previous.filter((item) => item.id !== size.id));
-    setNoticeMessage(`Talla ${size.label} eliminada.`);
+    setDraftSizes((previous) => previous.filter((item) => item.id !== size.id));
   }
 
   function openSizeManagerFromModelForm() {
-    setReturnToModelFormAfterSizeManager(true);
-    setSizeManagerGroupId(modelForm.sizeGroupId || sizeGroups[0]?.id || '');
-    setShowSizeManager(true);
+    beginSizeManager(modelForm.sizeGroupId || sizeGroups[0]?.id || '', true);
   }
 
-  function closeSizeManager() {
+  function cancelSizeManager() {
     setShowSizeManager(false);
-    if (returnToModelFormAfterSizeManager && sizeManagerGroupId && sizeGroups.some((group) => group.id === sizeManagerGroupId)) {
-      setModelForm((previous) => ({ ...previous, sizeGroupId: sizeManagerGroupId }));
-    }
+    setDraftSizeGroups([]);
+    setDraftSizes([]);
+    setNewSizeLabel('');
+    setNewGroupName('');
     setReturnToModelFormAfterSizeManager(false);
+  }
+
+  function applySizeManager() {
+    const invalidGroup = draftSizeGroups.find((group) => !group.name.trim());
+    if (invalidGroup) { setNoticeMessage('Todos los grupos deben tener un nombre.', 'error'); return; }
+    const groupNames = draftSizeGroups.map((group) => group.name.trim().toLocaleLowerCase('es'));
+    if (new Set(groupNames).size !== groupNames.length) { setNoticeMessage('Ya existe un grupo con ese nombre.', 'error'); return; }
+    const invalidSize = draftSizes.find((size) => !size.label.trim());
+    if (invalidSize) { setNoticeMessage('Todas las tallas deben tener un nombre.', 'error'); return; }
+    for (const group of draftSizeGroups) {
+      const labels = draftSizes.filter((size) => size.groupId === group.id).map((size) => size.label.trim().toLocaleLowerCase('es'));
+      if (new Set(labels).size !== labels.length) { setNoticeMessage(`Hay nombres de talla duplicados en el grupo «${group.name}».`, 'error'); return; }
+    }
+    const removedIds = sizes.filter((size) => !draftSizes.some((draft) => draft.id === size.id)).map((size) => size.id);
+    if (removedIds.some((sizeId) => movements.some((movement) => movement.sizeId === sizeId))) {
+      setNoticeMessage('No se puede aplicar: una talla pendiente de eliminar tiene movimientos históricos.', 'error'); return;
+    }
+    if (removedIds.length > 0) {
+      const orders = productionOrdersSnapshot();
+      if (!orders) { setNoticeMessage('No se pudo verificar las órdenes guardadas. Exporta un respaldo válido antes de eliminar tallas.', 'error'); return; }
+      const referencedSize = removedIds.find((sizeId) => orders.some((order) =>
+        Boolean(order.quantities?.[sizeId]) ||
+        order.materials?.some((line) => line.sizeId === sizeId) ||
+        order.basePieces?.some((line) => line.sizeId === sizeId) ||
+        order.componentPieces?.some((line) => line.sizeId === sizeId)
+      ));
+      if (referencedSize) { setNoticeMessage('No se puede aplicar: una talla pendiente de eliminar está referenciada por una orden.', 'error'); return; }
+    }
+
+    const nextGroups = draftSizeGroups.map((group) => ({ ...group, name: group.name.trim() }));
+    const nextSizes = draftSizes.map((size) => ({ ...size, label: size.label.trim() }));
+    const selectedGroupId = sizeManagerGroupId;
+    setSizeGroups(nextGroups);
+    setSizes(nextSizes);
+    setShowSizeManager(false);
+    if (returnToModelFormAfterSizeManager && nextGroups.some((group) => group.id === selectedGroupId)) {
+      setModelForm((previous) => ({
+        ...previous,
+        sizeGroupId: selectedGroupId,
+        excludedSizeIds: previous.excludedSizeIds.filter((sizeId) => nextSizes.some((size) => size.id === sizeId && size.groupId === selectedGroupId)),
+      }));
+    }
+    setDraftSizeGroups([]);
+    setDraftSizes([]);
+    setNewSizeLabel('');
+    setNewGroupName('');
+    setReturnToModelFormAfterSizeManager(false);
+    setNoticeMessage('Cambios de grupos y tallas guardados correctamente.');
   }
 
   function addSizeGroup() {
     const name = newGroupName.trim();
     if (!name) return;
-    if (sizeGroups.some((group) => group.name.toLocaleLowerCase('es') === name.toLocaleLowerCase('es'))) {
+    if (draftSizeGroups.some((group) => group.name.trim().toLocaleLowerCase('es') === name.toLocaleLowerCase('es'))) {
       setNoticeMessage('Ya existe un grupo con ese nombre.', 'error'); return;
     }
     const group = { id: newId(), name };
-    setSizeGroups((previous) => [...previous, group]);
+    setDraftSizeGroups((previous) => [...previous, group]);
     setSizeManagerGroupId(group.id);
-    if (returnToModelFormAfterSizeManager) setModelForm((previous) => ({ ...previous, sizeGroupId: group.id }));
     setNewGroupName('');
-    setNoticeMessage(`Grupo de tallas ${name} creado.`);
   }
 
   function exportConfiguration() {
-    const payload = { schemaVersion: 3, exportedAt: new Date().toISOString(), sizeGroups, sizes, models, pieces: pieces.filter((piece) => !piece.archived), colors: fabricColors };
+    const payload = { schemaVersion: 4, exportedAt: new Date().toISOString(), sizeGroups, sizes, families, models, pieces: pieces.filter((piece) => !piece.archived), colors: fabricColors };
     const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' }));
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'telastock-moldes-y-tallas.json'; anchor.click(); URL.revokeObjectURL(url);
   }
@@ -660,7 +916,7 @@ export default function Home() {
   async function importConfiguration(file?: File) {
     if (!file) return;
     try {
-      const parsed = JSON.parse(await file.text()) as { sizeGroups?: SizeGroup[]; sizes?: Size[]; models?: ManufacturingModel[]; pieces?: ModelPiece[]; colors?: ColorDefinition[] };
+      const parsed = JSON.parse(await file.text()) as { sizeGroups?: SizeGroup[]; sizes?: Size[]; families?: PatternFamily[]; models?: ManufacturingModel[]; pieces?: ModelPiece[]; colors?: ColorDefinition[] };
       if (!Array.isArray(parsed.sizeGroups) || !Array.isArray(parsed.sizes) || !Array.isArray(parsed.models) || !Array.isArray(parsed.pieces)) {
         throw new Error('El archivo debe contener sizeGroups, sizes, models y pieces.');
       }
@@ -670,6 +926,10 @@ export default function Home() {
         incoming.forEach((item) => map.set(item.id, item));
         return [...map.values()];
       };
+      const familyMap = new Map(families.map((family) => [family.value, family]));
+      (parsed.families ?? []).forEach((family) => familyMap.set(family.value, family));
+      const mergedFamilies = normalizePatternFamilies([...familyMap.values()]);
+      setFamilies(mergedFamilies);
       const mergedColors = merge(fabricColors, parsed.colors ?? []);
       setFabricColors(mergedColors);
       localStorage.setItem(FABRIC_STORAGE_KEYS.colores, JSON.stringify(mergedColors));
@@ -695,12 +955,16 @@ export default function Home() {
         } catch { return []; }
       })();
       setModels((current) => {
-        const merged = merge(current, normalizeModelsWithSlots(parsed.models!, incomingPieces)).map((model) => ({ ...model, family: model.family || current.find((item) => item.id === model.id)?.family || '' }));
-        return migrateBaseModelFamilies(merged, legacyProductModels);
+        const merged = merge(current, normalizeModelsWithSlots(parsed.models!, incomingPieces)).map((model) => ({
+          ...model,
+          family: model.family || current.find((item) => item.id === model.id)?.family || '',
+          excludedSizeIds: Array.isArray(model.excludedSizeIds) ? model.excludedSizeIds.filter((sizeId) => typeof sizeId === 'string' && parsed.sizes!.some((size) => size.id === sizeId && size.groupId === model.sizeGroupId)) : [],
+        }));
+        return migrateBaseModelFamilies(merged, legacyProductModels, mergedFamilies);
       });
       setPieces((current) => merge(current, incomingPieces));
       window.dispatchEvent(new Event('telastock-fabric-data-updated'));
-      setNoticeMessage('Configuración importada. Se combinaron los modelos, moldes, colores y tallas por ID; el historial de movimientos existente se conservó.');
+      setNoticeMessage('Configuración importada. Se combinaron familias, modelos, moldes, colores y tallas; el historial de movimientos existente se conservó.');
     } catch (error) {
       setNoticeMessage(`No se pudo importar el archivo: ${error instanceof Error ? error.message : 'formato no válido'}`, 'error');
     } finally {
@@ -734,10 +998,10 @@ export default function Home() {
       const payload = {
         app: 'TelaStock',
         backupType: 'full',
-        schemaVersion: 13,
+        schemaVersion: 14,
         exportedAt: new Date().toISOString(),
         data: {
-          sizeGroups, sizes, models, pieces, movements, fabricInventory,
+          sizeGroups, sizes, families, models, pieces, movements, fabricInventory,
           production: Object.fromEntries((Object.keys(emptyProductionBackupData()) as (keyof ReturnType<typeof emptyProductionBackupData>)[]).map((key) => {
             const raw = localStorage.getItem(PRODUCTION_STORAGE_KEYS[key]);
             return [key, raw ? JSON.parse(raw) : []];
@@ -765,7 +1029,7 @@ export default function Home() {
       const raw = JSON.parse(await file.text()) as unknown;
       const isRecord = (value: unknown): value is Record<string, unknown> =>
         Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-      if (!isRecord(raw) || raw.app !== 'TelaStock' || raw.backupType !== 'full' || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].includes(Number(raw.schemaVersion)) || !isRecord(raw.data)) {
+      if (!isRecord(raw) || raw.app !== 'TelaStock' || raw.backupType !== 'full' || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14].includes(Number(raw.schemaVersion)) || !isRecord(raw.data)) {
         throw new Error('Este no es un respaldo completo de TelaStock compatible.');
       }
       const data = raw.data;
@@ -783,14 +1047,18 @@ export default function Home() {
       };
 
       const importedGroups = getRows('sizeGroups') as unknown as SizeGroup[];
+      const importedFamilies = normalizePatternFamilies(Array.isArray(data.families) && data.families.length > 0 ? data.families : DEFAULT_PATTERN_FAMILIES);
       const importedSizes = getRows('sizes') as unknown as Size[];
       const importedModelsRaw = getRows('models') as unknown as ManufacturingModel[];
       const importedPieces = getRows('pieces') as unknown as ModelPiece[];
-      const normalizedImportedPieces = importedPieces.map((piece) => ({ ...piece, colorSlot: piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna') }));
+      const normalizedImportedPieces = importedPieces.map((piece) => ({ ...piece, colorSlot: piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna'), colorId: null, color: 'Sin especificar', colorOverride: false }));
       const importedMovements = getRows('movements') as unknown as PieceMovement[];
-      let importedFabric = Number(raw.schemaVersion) >= 2 ? validateFabricBackupData(data.fabricInventory) : emptyFabricBackupData();
+      const importedFabric = Number(raw.schemaVersion) >= 2 ? validateFabricBackupData(data.fabricInventory) : emptyFabricBackupData();
       const importedProduction = Number(raw.schemaVersion) >= 4 ? validateProductionBackupData(data.production) : emptyProductionBackupData();
-      const importedModels = normalizeModelsWithSlots(migrateBaseModelFamilies(importedModelsRaw, importedProduction.productModels), normalizedImportedPieces);
+      const importedModels = normalizeModelsWithSlots(migrateBaseModelFamilies(importedModelsRaw, importedProduction.productModels, importedFamilies), normalizedImportedPieces).map((model) => ({
+        ...model,
+        excludedSizeIds: Array.isArray(model.excludedSizeIds) ? model.excludedSizeIds.filter((sizeId) => typeof sizeId === 'string' && importedSizes.some((size) => size.id === sizeId && size.groupId === model.sizeGroupId)) : [],
+      }));
       const hasText = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
       const groupIds = new Set(importedGroups.map((item) => item.id));
       const sizeIds = new Set(importedSizes.map((item) => item.id));
@@ -799,7 +1067,8 @@ export default function Home() {
       const productMaterialSpecificationsValid = importedProduction.productModels.every((product) => {
         const base = importedModels.find((model) => model.id === product.baseModelId);
         if (!base) return false;
-        const validSizeIds = importedSizes.filter((size) => size.groupId === base.sizeGroupId).map((size) => size.id);
+        const excludedSizeIds = new Set(base.excludedSizeIds ?? []);
+        const validSizeIds = importedSizes.filter((size) => size.groupId === base.sizeGroupId && !excludedSizeIds.has(size.id)).map((size) => size.id);
         return product.components.every((selection) => {
           const component = importedProduction.components.find((item) => item.id === selection.componentId);
           if (!component) return false;
@@ -813,14 +1082,14 @@ export default function Home() {
         const product = importedProduction.productModels.find((item) => item.id === assignment.productModelId);
         const baseModel = product ? importedModels.find((item) => item.id === product.baseModelId) : undefined;
         return Boolean(product && baseModel &&
-          isValidFabricSlot(assignment.fabricSlot, baseModel.secondaryFabricSlots ?? 0) &&
+          isComponentFabricSlot(assignment.fabricSlot) &&
           importedFabric.telas.some((textile) => textile.id === assignment.textileId));
       });
       const productColorLinksValid = importedProduction.productColors.every((assignment) => {
         const product = importedProduction.productModels.find((item) => item.id === assignment.productModelId);
         const baseModel = product ? importedModels.find((item) => item.id === product.baseModelId) : undefined;
         return Boolean(product && baseModel &&
-          isValidColorSlot(assignment.colorSlot, baseModel.secondaryColorSlots ?? 0) &&
+          isComponentColorSlot(assignment.colorSlot) &&
           importedFabric.colores.some((color) => color.id === assignment.colorId));
       });
       const productionSizeLinksValid =
@@ -842,27 +1111,11 @@ export default function Home() {
           (piece.colorId == null || importedFabric.colores.some((color) => color.id === piece.colorId))
         )
       );
-      const componentPieceSlotsValidForProducts = importedProduction.productModels.every((product) => {
-        const basePattern = importedModels.find((model) => model.id === product.baseModelId);
-        return Boolean(basePattern && product.components.every((selection) => {
-          const component = importedProduction.components.find((item) => item.id === selection.componentId);
-          return Boolean(component && component.pieces.every((piece) =>
-            isComponentFabricSlotAvailableForModel(piece.fabricSlot, basePattern.secondaryFabricSlots ?? 0) &&
-            isComponentColorSlotAvailableForModel(piece.colorSlot ?? (piece.colorId ? 'principal' : 'cualquiera'), basePattern.secondaryColorSlots ?? 0)
-          ));
-        }));
-      });
-      if (!productionSizeLinksValid || !componentPieceCatalogLinksValid || !componentPieceSlotsValidForProducts || !productMaterialSpecificationsValid || !productFabricLinksValid || !productColorLinksValid) throw new Error('Hay órdenes, movimientos, piezas auxiliares o telas de modelos vinculados a registros que no existen en este respaldo.');
-      const importedColorMap = new Map(importedFabric.colores.map((color) => [color.nombre.toLocaleLowerCase('es'), color]));
-      importedPieces.forEach((piece) => {
-        const legacyName = (piece.color ?? '').trim();
-        if (legacyName && legacyName !== 'Sin especificar' && !importedColorMap.has(legacyName.toLocaleLowerCase('es'))) {
-          const color = { id: newId(), nombre: legacyName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-          importedColorMap.set(legacyName.toLocaleLowerCase('es'), color);
-        }
-      });
-      importedFabric = { ...importedFabric, colores: [...importedColorMap.values()] };
-
+      const productBasePatternsExist = importedProduction.productModels.every((product) =>
+        importedModels.some((model) => model.id === product.baseModelId) &&
+        product.components.every((selection) => importedProduction.components.some((component) => component.id === selection.componentId))
+      );
+      if (!productionSizeLinksValid || !componentPieceCatalogLinksValid || !productBasePatternsExist || !productMaterialSpecificationsValid || !productFabricLinksValid || !productColorLinksValid) throw new Error('Hay órdenes, movimientos, piezas auxiliares, patrones o telas de modelos vinculados a registros que no existen en este respaldo.');
       if (!importedGroups.every((item) => hasText(item.name))) throw new Error('Hay grupos de tallas sin nombre.');
       if (!importedSizes.every((item) => hasText(item.label) && groupIds.has(item.groupId) && Number.isInteger(item.sortOrder))) throw new Error('Hay tallas incompletas o vinculadas a un grupo inexistente.');
       if (!importedModels.every((item) => hasText(item.name) && groupIds.has(item.sizeGroupId))) throw new Error('Hay modelos incompletos o vinculados a un grupo inexistente.');
@@ -890,21 +1143,30 @@ export default function Home() {
 
       const legacyWarning = raw.schemaVersion === 1 ? '\\nEste respaldo antiguo no contiene datos de telas, rollos ni compras; al restaurarlo, esas colecciones quedarán vacías.' : '';
       const confirmed = window.confirm(
-        `Vas a restaurar ${importedModels.length} modelos, ${importedPieces.length} moldes y ${importedMovements.length} movimientos, además de ${importedFabric.rollos.length} rollos, ${importedFabric.compras.length} compras y ${importedProduction.supplies.length} insumos. Esto reemplazará los datos del navegador actual. Exporta un respaldo previo si necesitas conservarlos.${legacyWarning} ¿Continuar?`
+        `Vas a restaurar:
+• ${importedFamilies.length} familias, ${importedGroups.length} grupos y ${importedSizes.length} tallas.
+• ${importedModels.length} patrones y ${importedPieces.length} moldes base.
+• ${importedProduction.productModels.length} modelos comerciales, ${importedProduction.components.length} componentes y ${importedProduction.productFabrics.length + importedProduction.productColors.length} asignaciones de tela/color.
+• ${importedMovements.length + importedProduction.productBasePieceMovements.length + importedProduction.componentPieceMovements.length + importedProduction.finishedGarmentMovements.length} movimientos de piezas y prendas terminadas.
+• ${importedFabric.telas.length} telas, ${importedFabric.rollos.length} rollos, ${importedFabric.compras.length} compras, ${importedFabric.proveedores.length} proveedores.
+• ${importedProduction.supplies.length} insumos, ${importedProduction.variants.length} variantes, ${importedProduction.supplyPurchases.length} compras de avíos y ${importedProduction.productionOrders.length} órdenes.
+Esto reemplazará los datos del navegador actual. Exporta un respaldo previo si necesitas conservarlos.${legacyWarning}
+¿Continuar?`
       );
       if (!confirmed) return;
 
       setSizeGroups(importedGroups);
       setSizes(importedSizes);
+      setFamilies(importedFamilies);
       setModels(importedModels);
       setPieces(normalizedImportedPieces.map((piece) => ({
         ...piece,
         fabricSlot: piece.fabricSlot ?? 'principal',
-        colorSlot: piece.colorSlot ?? (piece.colorId ? 'principal' : 'ninguna'),
+        colorSlot: piece.colorSlot ?? 'ninguna',
         fabricType: fabricSlotLabel(piece.fabricSlot ?? 'principal'),
-        color: piece.colorId ? importedFabric.colores.find((color) => color.id === piece.colorId)?.nombre ?? 'Sin especificar' : piece.color ?? 'Sin especificar',
-        colorId: piece.colorId ?? importedFabric.colores.find((color) => color.nombre.toLocaleLowerCase('es') === (piece.color ?? '').toLocaleLowerCase('es'))?.id ?? null,
-        colorOverride: piece.colorOverride ?? true,
+        color: 'Sin especificar',
+        colorId: null,
+        colorOverride: false,
       })));
       setFabricColors(importedFabric.colores);
       setMovements(importedMovements);
@@ -922,7 +1184,7 @@ export default function Home() {
       (Object.keys(emptyProductionBackupData()) as (keyof ReturnType<typeof emptyProductionBackupData>)[]).forEach((key) => {
         localStorage.setItem(PRODUCTION_STORAGE_KEYS[key], JSON.stringify(importedProduction[key]));
       });
-      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '6');
+      localStorage.setItem(PRODUCTION_STORAGE_KEYS.version, '11');
       window.dispatchEvent(new Event('telastock-production-data-restored'));
       window.dispatchEvent(new Event('telastock-fabric-data-updated'));
       window.dispatchEvent(new Event('telastock-fabric-data-restored'));
@@ -932,7 +1194,7 @@ export default function Home() {
       setStockAmounts({});
       setStockEntryModes({});
       setShowBackupModal(false);
-      setNoticeMessage(`Respaldo restaurado: ${importedModels.length} modelos, ${importedMovements.length} movimientos, ${importedFabric.rollos.length} rollos, ${importedFabric.compras.length} compras y ${importedProduction.supplies.length} insumos.`);
+      setNoticeMessage(`Respaldo restaurado: ${importedModels.length} patrones, ${importedProduction.productModels.length} modelos comerciales, ${importedProduction.components.length} componentes, ${importedFabric.rollos.length} rollos, ${importedProduction.productionOrders.length} órdenes y todos sus historiales.`);
     } catch (error) {
       setNoticeMessage(`No se pudo restaurar el respaldo: ${error instanceof Error ? error.message : 'archivo no válido'}`, 'error');
     } finally {
@@ -976,59 +1238,13 @@ export default function Home() {
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'inventario-piezas-fabricacion.csv'; anchor.click(); URL.revokeObjectURL(url);
   }
 
-  // Correcciones administrativas del ledger antiguo. Se valida que ningún saldo quede negativo.
-  function adminEditMovement(movement: PieceMovement) {
-    if (!adminMode) return;
-    const amountInput = window.prompt('Nueva cantidad del movimiento (positivo = entrada, negativo = salida):', String(movement.delta));
-    if (amountInput === null) return;
-    const nextDelta = Number(amountInput);
-    if (!Number.isInteger(nextDelta) || nextDelta === 0) {
-      setNoticeMessage('La cantidad debe ser un entero distinto de cero.', 'error'); return;
-    }
-    const nextNote = window.prompt('Motivo / observación corregida:', movement.note);
-    if (nextNote === null) return;
-    const candidate = movements.map((item) => item.id === movement.id ? { ...item, delta: nextDelta, kind: nextDelta > 0 ? 'entrada' as const : 'salida' as const, note: nextNote.trim() || 'Corrección administrativa' } : item);
-    const affectedPiece = pieces.find((item) => item.id === movement.pieceId);
-    if (!affectedPiece || !hasNonNegativeBalances(candidate, affectedPiece, movement.sizeId)) { setNoticeMessage('No se guardó: esta corrección dejaría el stock total o uno de los lados por debajo de cero.', 'error'); return; }
-    if (affectedPiece.laterality === 'simetrica') {
-      const balance = getSymmetricStock(candidate, affectedPiece.id, movement.sizeId);
-      if (balance.left < reservedBasePieceQuantity(affectedPiece.id, movement.sizeId, 'izquierda') || balance.right < reservedBasePieceQuantity(affectedPiece.id, movement.sizeId, 'derecha')) { setNoticeMessage('No se guardó: la corrección invadiría piezas reservadas para órdenes de producción.', 'error'); return; }
-    } else if (getPieceStock(candidate, affectedPiece.id, movement.sizeId) < reservedBasePieceQuantity(affectedPiece.id, movement.sizeId, null)) { setNoticeMessage('No se guardó: la corrección invadiría piezas reservadas para órdenes de producción.', 'error'); return; }
-    setMovements(candidate);
-    setNoticeMessage('Movimiento histórico corregido por administración.', 'success');
-  }
-
-  function adminDeleteMovement(movement: PieceMovement) {
-    if (!adminMode) return;
-    const piece = pieces.find((item) => item.id === movement.pieceId);
-    const size = sizes.find((item) => item.id === movement.sizeId);
-    if (!window.confirm(`¿Eliminar definitivamente este movimiento creado por error?\n${piece?.name ?? 'Molde'} · talla ${size?.label ?? '—'} · ${movement.delta > 0 ? '+' : ''}${movement.delta} piezas\nEl saldo se recalculará y esta acción no se puede deshacer.`)) return;
-    const candidate = movements.filter((item) => item.id !== movement.id);
-    if (!piece || !hasNonNegativeBalances(candidate, piece, movement.sizeId)) { setNoticeMessage('No se puede eliminar: el stock total o uno de los lados quedaría negativo. Corrige primero los movimientos relacionados.', 'error'); return; }
-    if (piece.laterality === 'simetrica') {
-      const balance = getSymmetricStock(candidate, piece.id, movement.sizeId);
-      if (balance.left < reservedBasePieceQuantity(piece.id, movement.sizeId, 'izquierda') || balance.right < reservedBasePieceQuantity(piece.id, movement.sizeId, 'derecha')) { setNoticeMessage('No se puede eliminar: ese movimiento respalda piezas reservadas para órdenes de producción.', 'error'); return; }
-    } else if (getPieceStock(candidate, piece.id, movement.sizeId) < reservedBasePieceQuantity(piece.id, movement.sizeId, null)) { setNoticeMessage('No se puede eliminar: ese movimiento respalda piezas reservadas para órdenes de producción.', 'error'); return; }
-    setMovements(candidate);
-    setNoticeMessage('Movimiento erróneo eliminado. El inventario se recalculó.', 'success');
-  }
-
-  const historyRows = useMemo(() => {
-    const q = historySearch.trim().toLocaleLowerCase('es');
-    return movements.filter((movement) => {
-      const piece = pieces.find((item) => item.id === movement.pieceId);
-      const model = piece ? models.find((item) => item.id === piece.modelId) : undefined;
-      const size = sizes.find((item) => item.id === movement.sizeId);
-      return !q || `${model?.name ?? ''} ${piece?.name ?? ''} ${size?.label ?? ''} ${movement.note}`.toLocaleLowerCase('es').includes(q);
-    }).sort((a, b) => b.date.localeCompare(a.date));
-  }, [movements, pieces, models, sizes, historySearch]);
-
   return (
     <main className="app-shell">
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark">T</div><div><strong>TelaStock</strong><span>GESTIÓN TEXTIL</span></div></div>
         <div className="side-label">FABRICACIÓN</div>
         <button className={`nav-item ${view === 'inventario' ? 'active' : ''}`} onClick={() => setView('inventario')}><span aria-hidden="true">▦</span> Inventario de piezas</button>
+        <button className={`nav-item ${view === 'inventario-prendas' ? 'active' : ''}`} onClick={() => setView('inventario-prendas')}><span aria-hidden="true">✓</span> Prendas terminadas</button>
         <button className={`nav-item ${view === 'modelos' ? 'active' : ''}`} onClick={() => setView('modelos')}><span aria-hidden="true">◇</span> Patrones</button>
         <button className={`nav-item ${view === 'historial' ? 'active' : ''}`} onClick={() => setView('historial')}><span aria-hidden="true">↔</span> Historial</button>
         <div className="side-label fabric-nav-label">INSUMOS</div>
@@ -1049,12 +1265,13 @@ export default function Home() {
 
       <section className="main-area">
         <header className="topbar">
-          <div className="crumb">TelaStock / <strong>{view === 'inventario' ? 'Inventario de piezas' : view === 'modelos' ? 'Patrones base' : view === 'historial' ? 'Historial' : view === 'telas' ? 'Catálogo de telas' : view === 'rollos' ? 'Inventario de rollos' : view === 'compras' ? 'Compras de telas' : view === 'proveedores' ? 'Proveedores' : view === 'insumos' ? 'Insumos y avíos' : view === 'compras-avios' ? 'Compras de avíos' : view === 'componentes' ? 'Componentes' : view === 'modelos-producto' ? 'Modelos configurados' : view === 'recetas' ? 'Recetas' : view === 'ordenes' ? 'Órdenes de producción' : 'Planificación'}</strong></div>
+          <div className="crumb">TelaStock / <strong>{view === 'inventario' ? 'Inventario de piezas' : view === 'inventario-prendas' ? 'Inventario de prendas terminadas' : view === 'modelos' ? 'Patrones base' : view === 'historial' ? 'Historial' : view === 'telas' ? 'Catálogo de telas' : view === 'rollos' ? 'Inventario de rollos' : view === 'compras' ? 'Compras de telas' : view === 'proveedores' ? 'Proveedores' : view === 'insumos' ? 'Insumos y avíos' : view === 'compras-avios' ? 'Compras de avíos' : view === 'componentes' ? 'Componentes' : view === 'modelos-producto' ? 'Modelos configurados' : view === 'recetas' ? 'Recetas' : view === 'ordenes' ? 'Órdenes de producción' : 'Planificación'}</strong></div>
           <div className="top-actions"><button className="backup-trigger" onClick={() => setShowBackupModal(true)} title="Importar o exportar todos los datos" aria-label="Importar o exportar todos los datos"><span aria-hidden="true">⇅</span><span className="backup-trigger-label">Respaldo</span></button><span className="local-pill"><i /> Prototipo local</span><button className="icon-button" title="Ayuda sobre cálculo" onClick={() => setNoticeMessage('Las unidades fabricables se calculan con el molde más limitante: todos los moldes requeridos deben alcanzar. Es una capacidad de fabricación con el stock actual, no una cantidad de prendas ya confeccionadas.', 'info')}>?</button></div>
         </header>
 
         <div className="mobile-nav fabric-mobile-nav" role="navigation" aria-label="Módulos">
           <button className={view === 'inventario' ? 'active' : ''} onClick={() => setView('inventario')}>Piezas</button>
+          <button className={view === 'inventario-prendas' ? 'active' : ''} onClick={() => setView('inventario-prendas')}>Prendas</button>
           <button className={view === 'modelos' ? 'active' : ''} onClick={() => setView('modelos')}>Patrones</button>
           <button className={view === 'historial' ? 'active' : ''} onClick={() => setView('historial')}>Historial</button>
           <button className={view === 'telas' ? 'active' : ''} onClick={() => setView('telas')}>Telas</button>
@@ -1072,14 +1289,13 @@ export default function Home() {
 
         <div className="content">
           <div className="page-heading">
-            <div><div className="eyebrow">{['telas','rollos','compras','proveedores','insumos','compras-avios'].includes(view) ? 'INVENTARIO DE INSUMOS' : ['componentes','modelos-producto','recetas','planificacion','ordenes'].includes(view) ? 'CONFIGURACIÓN DE CONFECCIÓN' : 'INVENTARIO DE FABRICACIÓN'}</div><h1>{view === 'inventario' ? 'Inventario por modelo' : view === 'modelos' ? 'Patrones base' : view === 'historial' ? 'Movimientos de piezas' : view === 'telas' ? 'Catálogo de telas' : view === 'rollos' ? 'Inventario de rollos' : view === 'compras' ? 'Compras de telas' : view === 'proveedores' ? 'Proveedores' : view === 'insumos' ? 'Insumos y avíos' : view === 'compras-avios' ? 'Compras de avíos' : view === 'componentes' ? 'Biblioteca de componentes' : view === 'modelos-producto' ? 'Modelos configurados' : view === 'recetas' ? 'Recetas estándar' : view === 'ordenes' ? 'Órdenes de producción' : 'Planificación de materiales'}</h1><p>{view === 'inventario' ? 'Controla todas las piezas de cada modelo comercial: moldes base y componentes auxiliares, con sus telas, colores y tallas.' : view === 'modelos' ? 'Define la estructura reutilizable de la prenda, sus moldes, posiciones de tela y color, y el grupo de tallas.' : view === 'historial' ? 'Revisa las entradas registradas y el detalle de cada molde y talla.' : view === 'telas' ? 'Administra los tipos de tela, unidades habituales y características.' : view === 'rollos' ? 'Controla cada rollo físico y sus mediciones reales en KG y metros.' : view === 'compras' ? 'Registra compras por proveedor y conserva sus precios históricos.' : view === 'proveedores' ? 'Administra contactos, teléfonos y rubros de proveedores.' : view === 'insumos' ? 'Administra avíos, consumibles, variantes y existencias.' : view === 'compras-avios' ? 'Registra comprobantes, precios históricos e ingresos de avíos al inventario.' : view === 'componentes' ? 'Crea cuellos, bolsillos, puños y acabados reutilizables.' : view === 'modelos-producto' ? 'Combina patrones base con los acabados que lleva cada prenda.' : view === 'recetas' ? 'Define consumos habituales por familia de prenda.' : view === 'ordenes' ? 'Controla las reservas, el avance y el consumo real de cada orden.' : 'Calcula materiales necesarios por talla y faltantes de compra.'}</p></div>
+            <div><div className="eyebrow">{view === 'inventario-prendas' ? 'INVENTARIO DE PRENDAS TERMINADAS' : ['telas','rollos','compras','proveedores','insumos','compras-avios'].includes(view) ? 'INVENTARIO DE INSUMOS' : ['componentes','modelos-producto','recetas','planificacion','ordenes'].includes(view) ? 'CONFIGURACIÓN DE CONFECCIÓN' : 'INVENTARIO DE FABRICACIÓN'}</div><h1>{view === 'inventario' ? 'Inventario por modelo' : view === 'inventario-prendas' ? 'Prendas terminadas' : view === 'modelos' ? 'Patrones base' : view === 'historial' ? 'Movimientos de piezas' : view === 'telas' ? 'Catálogo de telas' : view === 'rollos' ? 'Inventario de rollos' : view === 'compras' ? 'Compras de telas' : view === 'proveedores' ? 'Proveedores' : view === 'insumos' ? 'Insumos y avíos' : view === 'compras-avios' ? 'Compras de avíos' : view === 'componentes' ? 'Biblioteca de componentes' : view === 'modelos-producto' ? 'Modelos configurados' : view === 'recetas' ? 'Recetas estándar' : view === 'ordenes' ? 'Órdenes de producción' : 'Planificación de materiales'}</h1><p>{view === 'inventario' ? 'Controla todas las piezas de cada modelo comercial: moldes base y componentes auxiliares, con sus telas, colores y tallas.' : view === 'inventario-prendas' ? 'Consulta rápidamente cuántas prendas terminadas tienes de cada modelo y talla.' : view === 'modelos' ? 'Define la estructura reutilizable de la prenda. Las telas y los colores concretos se asignan en cada modelo comercial.' : view === 'historial' ? 'Consulta las entradas y salidas que has registrado en cada modelo comercial.' : view === 'telas' ? 'Administra los tipos de tela, unidades habituales y características.' : view === 'rollos' ? 'Controla cada rollo físico y sus mediciones reales en KG y metros.' : view === 'compras' ? 'Registra compras por proveedor y conserva sus precios históricos.' : view === 'proveedores' ? 'Administra contactos, teléfonos y rubros de proveedores.' : view === 'insumos' ? 'Administra avíos, consumibles, variantes y existencias.' : view === 'compras-avios' ? 'Registra comprobantes, precios históricos e ingresos de avíos al inventario.' : view === 'componentes' ? 'Crea cuellos, bolsillos, puños y acabados reutilizables.' : view === 'modelos-producto' ? 'Combina patrones base con los acabados que lleva cada prenda.' : view === 'recetas' ? 'Define consumos habituales por familia de prenda.' : view === 'ordenes' ? 'Controla las reservas, el avance y el consumo real de cada orden.' : 'Calcula materiales necesarios por talla y faltantes de compra.'}</p></div>
             <div className="heading-actions">
               {false && view === 'inventario' && <button className="button secondary" onClick={exportCsv}>↧ <span>Exportar</span></button>}
               {false && view === 'inventario' && <button className="button secondary" onClick={() => openStockForm('salida')}>− <span>Retirar / merma</span></button>}
               {false && view === 'inventario' && <button className="button primary" onClick={() => openStockForm('entrada')}>＋ <span>Registrar stock</span></button>}
-              {view === 'modelos' && <><button className="button secondary" onClick={() => { setSizeManagerGroupId(sizeGroups[0]?.id ?? ''); setShowSizeManager(true); }}>↕ <span>Editar tallas</span></button><button className="button secondary" onClick={exportConfiguration}>↧ <span>Exportar moldes/tallas</span></button><button className="button secondary" onClick={() => importInputRef.current?.click()}>↥ <span>Importar</span></button><input ref={importInputRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importConfiguration(event.target.files?.[0])} /><button className="button primary" onClick={() => openCreateModel()}>＋ <span>Nuevo patrón</span></button></>}
-              {view === 'historial' && <button className="button secondary" onClick={exportCsv}>↧ <span>Exportar inventario</span></button>}
-            </div>
+              {view === 'modelos' && <><button className="button secondary" onClick={openFamilyManager}>▦ <span>Familias</span></button><button className="button secondary" onClick={() => beginSizeManager(sizeGroups[0]?.id ?? '', false)}>↕ <span>Editar tallas</span></button><button className="button secondary" onClick={exportConfiguration}>↧ <span>Exportar moldes/tallas</span></button><button className="button secondary" onClick={() => importInputRef.current?.click()}>↥ <span>Importar</span></button><input ref={importInputRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importConfiguration(event.target.files?.[0])} /><button className="button primary" onClick={() => openCreateModel()}>＋ <span>Nuevo patrón</span></button></>}
+                </div>
           </div>
 
           {notice && <div className={`notice ${notice.kind}`} role="status"><span>{notice.message}</span><button onClick={() => setNotice(null)} aria-label="Cerrar aviso">×</button></div>}
@@ -1139,36 +1355,110 @@ export default function Home() {
             </section>
           </>}
 
-          {view === 'modelos' && <section className="panel models-panel">
-            <div className="panel-heading"><div><h2>Biblioteca de patrones</h2><p>Guarda estructuras reutilizables para crear distintos modelos comerciales con sus propias telas y colores.</p></div><span className="count-badge">{models.length} patrones</span></div>
-            <div className="model-management-list">{models.map((model) => {
-              const modelPartList = modelPieces(model.id);
-              const group = groupById.get(model.sizeGroupId);
-              return <article className="managed-model" key={model.id}>
-                <div className="managed-model-top"><span className="model-symbol" aria-hidden="true">◇</span><div className="managed-model-title"><strong>{model.name}</strong><span>{group?.name ?? 'Grupo no disponible'}</span></div><button className="button secondary edit-model" onClick={() => openEditModel(model)}>Editar</button></div>
-                <div className="piece-chip-list">{modelPartList.map((piece) => <span className="piece-chip" key={piece.id}><span>{piece.name}</span><strong>×{piece.unitsPerGarment}</strong><small>{fabricSlotLabel(piece.fabricSlot ?? 'principal')} · {fabricColorById.get(piece.colorId ?? '')?.nombre ?? piece.color}</small>{piece.laterality === 'simetrica' && <small>espejo</small>}</span>)}</div>
-                <div className="managed-model-bottom"><span>{modelPartList.length} moldes · {modelSizes(model).length} tallas disponibles</span><button className="text-action" onClick={() => openStockForm('entrada', model.id)}>Registrar stock →</button></div>
-              </article>;
-            })}</div>
-            <div className="schema-note"><span>ⓘ</span><p><strong>Nota de diseño:</strong> el grupo de tallas se define una sola vez y cada modelo lo referencia. No se duplican las tallas en cada modelo. En un molde simétrico, ×2 significa una pieza izquierda y una derecha por prenda; el stock se puede ingresar por paridad o por lado. Si los moldes difieren físicamente, usa moldes distintos para izquierda y derecha.</p></div>
-          </section>}
+          {view === 'modelos' && <section className="panel models-panel pattern-library-panel">
+            <div className="panel-heading">
+              <div><h2>Biblioteca de patrones</h2><p>Busca y filtra tus patrones. Abre una tarjeta solo cuando necesites consultar su composición.</p></div>
+              <span className="count-badge">{filteredPatterns.length} de {models.length}</span>
+            </div>
 
-          {view === 'historial' && <section className="panel history-panel">
-            <div className="panel-heading"><div><h2>Movimientos de inventario</h2><p>Consulta los registros anteriores. La edición y eliminación de errores están reservadas al administrador.</p></div><div className="history-heading-actions"><span className="count-badge">{historyRows.length} movimientos</span><button className={`button ${adminMode ? 'primary' : 'secondary'}`} onClick={() => setAdminMode((value) => !value)}>{adminMode ? '✓ Modo administrador activo' : '🔒 Administrar historial'}</button></div></div>
-            {adminMode && <div className="notice info"><span><strong>Modo administrador:</strong> puedes editar cantidades y observaciones o eliminar movimientos registrados por error. Los cambios afectan el saldo y no se permiten saldos negativos. Este control es solo visual mientras no exista autenticación; no es una barrera de seguridad real.</span></div>}
-            <div className="filters"><label className="search-box"><span aria-hidden="true">⌕</span><input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder="Buscar modelo, talla o molde…" aria-label="Buscar movimientos" /></label></div>
-            <div className="history-list">{historyRows.map((movement) => {
-              const piece = pieces.find((item) => item.id === movement.pieceId);
-              const model = piece ? models.find((item) => item.id === piece.modelId) : undefined;
-              const size = sizes.find((item) => item.id === movement.sizeId);
-              const sideLabel = piece?.laterality === 'simetrica' ? movement.side === 'izquierda' ? ' · Lado izquierdo' : movement.side === 'derecha' ? ' · Lado derecho' : ' · Histórico sin lado asignado' : '';
-              return <article className="history-row" key={movement.id}><span className={`movement-icon ${movement.delta < 0 ? 'movement-out' : ''}`}>{movement.delta < 0 ? '−' : '＋'}</span><div className="history-main"><strong>{piece?.name ?? 'Molde archivado'}{sideLabel}</strong><span>{model?.name ?? 'Modelo archivado'} · Talla {size?.label ?? '—'}</span><small>{movement.kind.toLocaleUpperCase('es')} · {movement.note}</small></div><div className="history-amount"><strong>{movement.delta > 0 ? '+' : ''}{fmt(movement.delta)}</strong><span>{new Date(movement.date).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' })}</span>{adminMode && <div className="history-admin-actions"><button className="text-action" onClick={() => adminEditMovement(movement)}>Editar</button><button className="text-action danger-action" onClick={() => adminDeleteMovement(movement)}>Eliminar</button></div>}</div></article>;
-            })}{historyRows.length === 0 && <div className="empty">No se encontraron movimientos.</div>}</div>
-            <div className="panel-footer"><span>Historial actual: almacenamiento del navegador.</span><span>Al conectar Supabase, cada movimiento tendrá fecha y usuario de origen.</span></div>
-          </section>}
+            <div className="pattern-library-toolbar">
+              <label className="search-box pattern-library-search"><span aria-hidden="true">⌕</span><input value={patternSearch} onChange={(event) => setPatternSearch(event.target.value)} placeholder="Buscar patrón o molde…" aria-label="Buscar patrón por nombre o molde" /></label>
+              <div className="pattern-library-filters">
+                <label className="pattern-filter-field"><span>Familia</span><select className="large-input" value={patternFamilyFilter} onChange={(event) => setPatternFamilyFilter(event.target.value)}><option value="Todas">Todas las familias</option>{families.map((family) => <option key={family.value} value={family.value}>{family.label}</option>)}</select></label>
+                <label className="pattern-filter-field"><span>Tabla de tallas</span><select className="large-input" value={patternGroupFilter} onChange={(event) => setPatternGroupFilter(event.target.value)}><option value="Todos">Todas las tablas</option>{sizeGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
+                <label className="pattern-filter-field"><span>Ordenar</span><select className="large-input" value={patternSort} onChange={(event) => setPatternSort(event.target.value as typeof patternSort)}><option value="az">Nombre · A–Z</option><option value="za">Nombre · Z–A</option><option value="recent">Más recientes</option><option value="pieces">Más moldes</option></select></label>
+              </div>
+              <div className="pattern-library-toolbar-footer">
+                <span>{filteredPatterns.length === 1 ? '1 patrón encontrado' : `${filteredPatterns.length} patrones encontrados`}</span>
+                <button type="button" className="text-action" onClick={() => setExpandedPatternIds(allPatternIdsExpanded ? [] : filteredPatterns.map((model) => model.id))} disabled={filteredPatterns.length === 0}>{allPatternIdsExpanded ? 'Plegar todas' : 'Expandir todas'}</button>
+              </div>
+            </div>
 
+            <div className="model-management-list pattern-library-list">
+              {filteredPatterns.map((model) => {
+                const modelPartList = modelPieces(model.id);
+                const group = groupById.get(model.sizeGroupId);
+                const family = families.find((item) => item.value === model.family);
+                const garmentPieceCount = modelPartList.reduce((sum, piece) => sum + piece.unitsPerGarment, 0);
+                const fabricPositions = [...new Set(modelPartList.map((piece) => fabricSlotLabel(piece.fabricSlot ?? 'principal')))];
+                const colorPositions = [...new Set(modelPartList.map((piece) => colorSlotLabel(piece.colorSlot ?? 'ninguna')))];
+                const expanded = expandedPatternIds.includes(model.id);
+                const activeSizes = modelSizes(model);
+                const deletionStatus = patternDeletionStatus.get(model.id) ?? { canDelete: false, reason: 'Verificando referencias…' };
+                return <article className={`managed-model pattern-library-card ${expanded ? 'expanded' : 'collapsed'}`} key={model.id}>
+                  <div className="pattern-library-card-header">
+                    <span className="pattern-library-symbol" aria-hidden="true">◇</span>
+                    <div className="pattern-library-title">
+                      <strong>{model.name}</strong>
+                      <div className="pattern-library-badges">
+                        <span className="pattern-family-badge">{family?.label ?? 'Familia pendiente'}</span>
+                        <span className="pattern-group-badge">{group?.name ?? 'Grupo no disponible'}</span>
+                      </div>
+                    </div>
+                    <div className="pattern-library-card-actions">
+                      <button type="button" className="pattern-library-toggle" onClick={() => togglePatternExpanded(model.id)} aria-expanded={expanded} aria-label={expanded ? 'Plegar detalles' : 'Expandir detalles'}><span>{expanded ? 'Menos' : 'Detalles'}</span><span aria-hidden="true">{expanded ? '⌃' : '⌄'}</span></button>
+                      <button className="button secondary edit-model pattern-library-edit" onClick={() => openEditModel(model)}>Editar</button>
+                      {deletionStatus.canDelete
+                        ? <button type="button" className="button secondary pattern-library-delete" onClick={() => deleteUnusedBasePattern(model)}>Eliminar</button>
+                        : <span className="pattern-library-protected" title={deletionStatus.reason ?? undefined}>Protegido</span>}
+                    </div>
+                  </div>
+
+                  <div className="pattern-library-quick-summary">
+                    <span><strong>{modelPartList.length}</strong> moldes</span><i />
+                    <span><strong>{fmt(garmentPieceCount)}</strong> piezas / prenda</span><i />
+                    <span><strong>{activeSizes.length}</strong> tallas activas</span>
+                  </div>
+
+                  {expanded && <div className="pattern-library-details">
+                    <div className="pattern-library-metrics" aria-label="Resumen del patrón">
+                      <div><strong>{modelPartList.length}</strong><span>Moldes</span></div>
+                      <div><strong>{fmt(garmentPieceCount)}</strong><span>Piezas / prenda</span></div>
+                      <div><strong>{activeSizes.length}</strong><span>Tallas activas</span></div>
+                    </div>
+
+                    <div className="pattern-library-composition">
+                      <div className="pattern-library-section-heading"><strong>Composición</strong><span>{modelPartList.length} {modelPartList.length === 1 ? 'parte' : 'partes'}</span></div>
+                      {modelPartList.length > 0 ? <div className="pattern-library-piece-list">
+                        {modelPartList.map((piece, index) => {
+                          const lateralityLabel = piece.laterality === 'simetrica' ? 'Par simétrico' : piece.laterality === 'izquierda' ? 'Lado izquierdo' : piece.laterality === 'derecha' ? 'Lado derecho' : '';
+                          return <div className="pattern-library-piece-row" key={piece.id}>
+                            <span className="pattern-library-piece-index">{String(index + 1).padStart(2, '0')}</span>
+                            <div className="pattern-library-piece-name"><strong>{piece.name}</strong>{lateralityLabel && <small>{lateralityLabel}</small>}</div>
+                            <span className="pattern-library-piece-quantity">×{piece.unitsPerGarment}</span>
+                          </div>;
+                        })}
+                      </div> : <div className="pattern-library-empty">Este patrón todavía no tiene moldes.</div>}
+                    </div>
+
+                    <div className="pattern-library-position-summary">
+                      <span className="pattern-library-position-title">Posiciones configuradas</span>
+                      <div className="pattern-library-position-tags">
+                        {fabricPositions.map((position) => <span className="pattern-library-position-tag" key={`tela-${position}`}><small>Tela</small>{position}</span>)}
+                        {colorPositions.map((position) => <span className="pattern-library-position-tag color-position" key={`color-${position}`}><small>Color</small>{position}</span>)}
+                      </div>
+                    </div>
+
+                    {activeSizes.length < groupSizes(model.sizeGroupId).length && <div className="pattern-library-disabled-sizes"><strong>{activeSizes.length} de {groupSizes(model.sizeGroupId).length} tallas habilitadas</strong><small>Hay tallas de la tabla maestra desactivadas para este patrón.</small></div>}
+
+                    <div className="pattern-library-assignment-note">
+                      <span aria-hidden="true">i</span>
+                      <div><strong>Configuración por modelo</strong><small>La tela y el color reales se eligen al crear cada modelo comercial. Este patrón solo conserva sus posiciones.</small></div>
+                    </div>
+                    {!deletionStatus.canDelete && <div className="pattern-library-delete-protection" role="note">
+                      <strong>Este patrón está protegido.</strong>
+                      <small>{deletionStatus.reason}</small>
+                      <small>Solo se pueden eliminar patrones que nunca se asignaron a un modelo y no tienen historial.</small>
+                    </div>}
+                  </div>}
+                </article>;
+              })}
+              {filteredPatterns.length === 0 && <div className="pattern-library-no-results"><strong>No encontramos patrones</strong><span>Prueba otro nombre o cambia los filtros seleccionados.</span><button type="button" className="text-action" onClick={() => { setPatternSearch(''); setPatternFamilyFilter('Todas'); setPatternGroupFilter('Todos'); setPatternSort('az'); }}>Limpiar filtros</button></div>}
+            </div>
+            <div className="schema-note"><span>ⓘ</span><p><strong>Cómo funciona la biblioteca:</strong> un patrón define sus piezas, cantidades, lateralidad y posiciones reutilizables. Las tallas activas determinan las variantes que estarán disponibles en los modelos comerciales.</p></div>
+          </section>}
           {(['telas', 'rollos', 'compras', 'proveedores'] as View[]).includes(view) && <FabricModule view={view as FabricView} />}
-          {(view === 'inventario' || (['insumos', 'compras-avios', 'componentes', 'modelos-producto', 'recetas', 'planificacion', 'ordenes'] as View[]).includes(view)) && <ProductionModule view={view === 'inventario' ? 'inventario-piezas' : view as ProductionView} baseModels={models} baseModelsReady={ready} basePieces={pieces} baseMovements={movements} sizes={sizes} sizeGroups={sizeGroups} onAddBaseMovements={replaceBaseMovements} onNavigate={(next) => setView(next)} onQuickCreateBaseModel={openCreateModel} />}
+          {(view === 'inventario' || view === 'inventario-prendas' || view === 'historial' || (['insumos', 'compras-avios', 'componentes', 'modelos-producto', 'recetas', 'planificacion', 'ordenes'] as View[]).includes(view)) && <ProductionModule view={view === 'inventario' ? 'inventario-piezas' : view === 'historial' ? 'historial-piezas' : view as ProductionView} families={families} baseModels={models} baseModelsReady={ready} basePieces={pieces} sizes={sizes} sizeGroups={sizeGroups} onNavigate={(next) => setView(next)} onQuickCreateBaseModel={openCreateModel} />}
 
           <div className="prototype-note"><span>ⓘ</span><div><strong>Prototipo de validación · datos de demostración</strong><p>Los registros se guardan en este navegador y no se sincronizan entre dispositivos todavía. El proyecto incluye una migración SQL normalizada para Supabase; antes de producción se deben configurar autenticación, políticas de acceso y pruebas de concurrencia.</p></div></div>
         </div>
@@ -1199,41 +1489,258 @@ export default function Home() {
         </section>
       </div>}
 
-      {showModelForm && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModelForm(); }}>
-        <section className="modal model-modal" role="dialog" aria-modal="true" aria-labelledby="model-modal-title">
-          <div className="modal-heading"><div><div className="eyebrow">PATRÓN BASE</div><h2 id="model-modal-title">{modelForm.editingId ? 'Editar patrón' : 'Crear patrón base'}</h2><p>Define las piezas necesarias por prenda y si su stock requiere control de lateralidad.</p></div><button className="icon-button" onClick={closeModelForm} aria-label="Cerrar">×</button></div>
-          <form onSubmit={saveModel} className="model-form">
-            <label className="field-label">Nombre del patrón<input className="large-input" required value={modelForm.name} onChange={(event) => setModelForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="Ej. Polo básico sublimado" /></label>
-            <label className="field-label">Familia del patrón base<select className="large-input" required value={modelForm.family} onChange={(event) => setModelForm((prev) => ({ ...prev, family: event.target.value }))}><option value="">Seleccionar familia</option>{baseModelFamilies.map((family) => <option key={family.value} value={family.value}>{family.label}</option>)}</select><small>La familia se define aquí y la heredan los modelos comerciales que usan este patrón.</small></label>
-            <label className="field-label">Grupo de tallas<select className="large-input" required value={modelForm.sizeGroupId} onChange={(event) => setModelForm((prev) => ({ ...prev, sizeGroupId: event.target.value }))} disabled={Boolean(modelForm.editingId && modelForm.pieces.some((piece) => movements.some((movement) => movement.pieceId === piece.id)))}><option value="">Seleccionar grupo</option>{sizeGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select><button type="button" className="text-action" disabled={Boolean(modelForm.editingId && modelForm.pieces.some((piece) => movements.some((movement) => movement.pieceId === piece.id)))} onClick={openSizeManagerFromModelForm}>＋ Crear grupo o administrar tallas</button><small>Las tallas pertenecen al grupo y se reutilizan en los modelos.</small></label>
-            <div className="form-section-heading"><div><strong>Moldes que componen una prenda</strong><small>Las posiciones de tela y color se resolverán al crear cada modelo comercial.</small></div><div className="mold-heading-actions"><button type="button" className="text-action" onClick={() => setModelForm((prev) => ({ ...prev, secondaryFabricSlots: prev.secondaryFabricSlots + 1 }))}>＋ Añadir tela secundaria</button><button type="button" className="text-action" onClick={() => setModelForm((prev) => ({ ...prev, secondaryColorSlots: prev.secondaryColorSlots + 1 }))}>＋ Añadir color secundario</button><button type="button" className="text-action" onClick={() => setModelForm((prev) => ({ ...prev, pieces: [...prev.pieces, { id: '', name: '', unitsPerGarment: '1', laterality: 'ninguna', fabricSlot: 'principal', colorSlot: 'principal', colorId: '', colorOverride: false, fabricType: 'Tela principal 1', color: '' }] }))}>＋ Añadir molde</button></div></div>
-            <div className="fabric-slot-summary"><strong>{modelForm.secondaryFabricSlots + 1} posiciones de tela</strong><span>Principal 1{modelForm.secondaryFabricSlots ? ' · ' + Array.from({ length: modelForm.secondaryFabricSlots }, (_, i) => `Secundaria ${i + 1}`).join(' · ') : ''}</span></div>
-            <div className="fabric-slot-summary"><strong>{modelForm.secondaryColorSlots + 1} posiciones de color disponibles</strong><span>Principal 1{modelForm.secondaryColorSlots ? ' · ' + Array.from({ length: modelForm.secondaryColorSlots }, (_, i) => `Secundario ${i + 1}`).join(' · ') : ''}</span></div>
-            <label className="field-label">Cantidad de colores secundarios
-              <input className="large-input" type="number" inputMode="numeric" min="0" max="99" step="1" value={modelForm.secondaryColorSlots} onChange={(event) => {
-                const nextCount = event.target.value === '' ? 0 : Number(event.target.value);
-                if (Number.isInteger(nextCount) && nextCount >= 0 && nextCount <= 99) setModelForm((prev) => ({ ...prev, secondaryColorSlots: nextCount }));
-              }} />
-              <small>Usa 0 si solo necesitas Color principal 1. Por ejemplo, 3 habilita Color secundario 1, 2 y 3 en los moldes y componentes.</small>
-            </label>
-            <div className="piece-editor-list">{modelForm.pieces.map((piece, index) => <div className="piece-editor" key={piece.id || `new-${index}`}><div className="piece-editor-top"><span>Molde {index + 1} · orden {index + 1}</span><div className="mold-order-actions"><button type="button" className="order-mold" disabled={index === 0} aria-label="Mover molde arriba" onClick={() => moveMold(index, -1)}>↑</button><button type="button" className="order-mold" disabled={index === modelForm.pieces.length - 1} aria-label="Mover molde abajo" onClick={() => moveMold(index, 1)}>↓</button>{modelForm.pieces.length > 1 && <button type="button" className="remove-piece" onClick={() => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.filter((_, pieceIndex) => pieceIndex !== index) }))}>Quitar</button>}</div></div><div className="piece-editor-fields mold-fields-row"><label className="field-label">Molde<input className="large-input" required value={piece.name} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => pieceIndex === index ? { ...item, name: event.target.value } : item) }))} placeholder="Pecho, cuello…" /></label><label className="field-label">Piezas/prenda<input className="large-input" required type="number" inputMode="numeric" min="1" step="1" value={piece.unitsPerGarment} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => pieceIndex === index ? { ...item, unitsPerGarment: event.target.value } : item) }))} /></label><label className="field-label">Lateralidad<select className="large-input" value={piece.laterality} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => { if (pieceIndex !== index) return item; const laterality = event.target.value as Laterality; const currentUnits = Number(item.unitsPerGarment); const unitsPerGarment = laterality === 'simetrica' && (!Number.isInteger(currentUnits) || currentUnits < 2 || currentUnits % 2 !== 0) ? String(Math.max(2, Math.ceil((currentUnits || 1) / 2) * 2)) : item.unitsPerGarment; return { ...item, laterality, unitsPerGarment }; }) }))}><option value="ninguna">Sin lado</option><option value="simetrica">Simétrica</option><option value="izquierda">Izquierda</option><option value="derecha">Derecha</option></select></label><label className="field-label">Posición de tela<select className="large-input" value={piece.fabricSlot} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => pieceIndex === index ? { ...item, fabricSlot: event.target.value as FabricSlot, fabricType: fabricSlotLabel(event.target.value as FabricSlot) } : item) }))}>{fabricSlotOptions(modelForm.secondaryFabricSlots).map((slot) => <option key={slot} value={slot}>{fabricSlotLabel(slot)}</option>)}</select><small>«Cualquier tela» deja el material abierto para resolverlo en cada modelo comercial.</small></label><label className="field-label">Posición de color<select className="large-input" value={piece.colorSlot} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => pieceIndex === index ? { ...item, colorSlot: event.target.value } : item) }))}>{colorSlotOptions(modelForm.secondaryColorSlots).map((slot) => <option key={slot} value={slot}>{colorSlotLabel(slot)}</option>)}</select><small>El color definitivo se asignará en cada modelo comercial; el patrón conserva solo la referencia.</small></label></div></div>)}</div>
-            <div className="symmetry-help"><strong>Cómo se cuenta la simetría:</strong> un par requiere 1 pieza izquierda y 1 derecha. El stock se registra por paridad de forma predeterminada; puedes cambiar a lados para registrar cantidades diferentes. En este molde, ×2 significa 1 pieza por lado.</div>
-            <div className="form-actions"><button type="button" className="button secondary" onClick={closeModelForm}>Cancelar</button><button type="submit" className="button primary">{modelForm.editingId ? 'Guardar cambios' : 'Crear modelo'}</button></div>
+      {showModelForm && <div className="modal-backdrop pattern-editor-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModelForm(); }}>
+        <section className="modal model-modal pattern-editor-modal" role="dialog" aria-modal="true" aria-labelledby="model-modal-title">
+          <div className="modal-heading">
+            <div>
+              <div className="eyebrow">PATRÓN BASE</div>
+              <h2 id="model-modal-title">{modelForm.editingId ? 'Editar patrón' : 'Crear patrón base'}</h2>
+              <p>Configura los datos y las piezas que forman una prenda.</p>
+            </div>
+            <button className="icon-button" onClick={closeModelForm} aria-label="Cerrar">×</button>
+          </div>
+
+          <form onSubmit={saveModel} className="model-form pattern-editor-form">
+            <section className="pattern-editor-section">
+              <div className="pattern-editor-section-heading">
+                <div><strong>1. Datos del patrón</strong><small>Identificación y tallaje que heredarán los modelos.</small></div>
+                <span className="pattern-editor-step">BÁSICO</span>
+              </div>
+              <div className="pattern-editor-basics-grid">
+                <label className="field-label pattern-editor-name-field">Nombre del patrón
+                  <input className="large-input" required value={modelForm.name} onChange={(event) => setModelForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="Ej. Polo básico sublimado" />
+                </label>
+                <label className="field-label">Familia del patrón
+                  <select className="large-input" required value={modelForm.family} onChange={(event) => setModelForm((prev) => ({ ...prev, family: event.target.value }))}>
+                    <option value="">Seleccionar familia</option>
+                    {families.map((family) => <option key={family.value} value={family.value}>{family.label}</option>)}
+                  </select>
+                  <button type="button" className="text-action pattern-editor-inline-action" onClick={openFamilyManager}>＋ Administrar familias</button>
+                  <small>La familia se hereda en los modelos comerciales.</small>
+                </label>
+                <label className="field-label">Grupo de tallas
+                  <select className="large-input" required value={modelForm.sizeGroupId} onChange={(event) => setModelForm((prev) => ({ ...prev, sizeGroupId: event.target.value, excludedSizeIds: prev.excludedSizeIds.filter((sizeId) => sizes.some((size) => size.id === sizeId && size.groupId === event.target.value)) }))} disabled={Boolean(modelForm.editingId && modelForm.pieces.some((piece) => movements.some((movement) => movement.pieceId === piece.id)))}>
+                    <option value="">Seleccionar grupo</option>
+                    {sizeGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+                  </select>
+                  <button type="button" className="text-action pattern-editor-inline-action" disabled={Boolean(modelForm.editingId && modelForm.pieces.some((piece) => movements.some((movement) => movement.pieceId === piece.id)))} onClick={openSizeManagerFromModelForm}>＋ Administrar tallas</button>
+                  <small>Las tallas se reutilizan entre patrones del mismo grupo.</small>
+                </label>
+              </div>
+            </section>
+
+            <section className="pattern-editor-section pattern-size-selection">
+              <div className="pattern-editor-section-heading">
+                <div><strong>2. Tallas habilitadas</strong><small>Por defecto se incluyen todas las tallas de la tabla. Desactiva las que este patrón no confecciona.</small></div>
+                <span className="pattern-editor-count">{groupSizes(modelForm.sizeGroupId).filter((size) => !modelForm.excludedSizeIds.includes(size.id)).length}/{groupSizes(modelForm.sizeGroupId).length}</span>
+              </div>
+              <div className="pattern-size-selection-actions">
+                <span>{groupSizes(modelForm.sizeGroupId).filter((size) => !modelForm.excludedSizeIds.includes(size.id)).length} tallas activas</span>
+                <button type="button" className="text-action" onClick={() => setModelForm((previous) => ({ ...previous, excludedSizeIds: [] }))}>Activar todas</button>
+                <button type="button" className="text-action" onClick={() => setModelForm((previous) => ({ ...previous, excludedSizeIds: groupSizes(previous.sizeGroupId).slice(1).map((size) => size.id) }))} disabled={groupSizes(modelForm.sizeGroupId).length <= 1}>Dejar solo la primera</button>
+              </div>
+              {groupSizes(modelForm.sizeGroupId).length > 0 ? <div className="pattern-size-check-grid">
+                {groupSizes(modelForm.sizeGroupId).map((size) => {
+                  const active = !modelForm.excludedSizeIds.includes(size.id);
+                  return <label className={`pattern-size-check ${active ? 'active' : ''}`} key={size.id}>
+                    <input type="checkbox" checked={active} onChange={() => setModelForm((previous) => ({ ...previous, excludedSizeIds: active ? [...previous.excludedSizeIds, size.id] : previous.excludedSizeIds.filter((id) => id !== size.id) }))} />
+                    <span>{size.label}</span>
+                  </label>;
+                })}
+              </div> : <div className="pattern-editor-empty"><strong>Esta tabla no tiene tallas</strong><span>Agrega tallas desde «Administrar tallas» para poder usar el patrón.</span></div>}
+              <small className="pattern-size-selection-help">Las tallas desactivadas no aparecerán en el modelo comercial, el registro de stock ni la planificación. No se borran de la tabla maestra ni se eliminan sus movimientos anteriores; puedes reactivarlas cuando lo necesites.</small>
+            </section>
+
+            <section className="pattern-editor-section">
+              <div className="pattern-editor-section-heading">
+                <div><strong>3. Piezas por prenda</strong><small>Define cuántas piezas requiere fabricar una unidad.</small></div>
+                <span className="pattern-editor-count">{modelForm.pieces.length} {modelForm.pieces.length === 1 ? 'pieza' : 'piezas'}</span>
+              </div>
+
+              <div className="pattern-editor-settings-grid">
+                <div className="pattern-editor-setting">
+                  <div><strong>{modelForm.secondaryFabricSlots + 1} posiciones de tela</strong><small>Principal 1{modelForm.secondaryFabricSlots ? ' · ' + Array.from({ length: modelForm.secondaryFabricSlots }, (_, i) => `Sec. ${i + 1}`).join(' · ') : ''}</small></div>
+                  <div className="pattern-editor-slot-stepper">
+                    <button type="button" aria-label="Quitar última tela secundaria" title="Quitar última posición de tela" disabled={modelForm.secondaryFabricSlots <= 0 || modelForm.pieces.some((piece) => secondaryFabricSlotIndex(piece.fabricSlot) === modelForm.secondaryFabricSlots)} onClick={() => setModelForm((prev) => ({ ...prev, secondaryFabricSlots: Math.max(0, prev.secondaryFabricSlots - 1) }))}>−</button>
+                    <button type="button" aria-label="Añadir tela secundaria" title="Añadir posición de tela" onClick={() => setModelForm((prev) => ({ ...prev, secondaryFabricSlots: prev.secondaryFabricSlots + 1 }))}>＋</button>
+                  </div>
+                </div>
+                <div className="pattern-editor-setting">
+                  <div><strong>{modelForm.secondaryColorSlots + 1} posiciones de color</strong><small>Principal 1{modelForm.secondaryColorSlots ? ' · ' + Array.from({ length: modelForm.secondaryColorSlots }, (_, i) => `Sec. ${i + 1}`).join(' · ') : ''}</small></div>
+                  <div className="pattern-editor-slot-stepper">
+                    <button type="button" aria-label="Quitar último color secundario" title="Quitar última posición de color" disabled={modelForm.secondaryColorSlots <= 0 || modelForm.pieces.some((piece) => secondaryColorSlotIndex(piece.colorSlot) === modelForm.secondaryColorSlots)} onClick={() => setModelForm((prev) => ({ ...prev, secondaryColorSlots: Math.max(0, prev.secondaryColorSlots - 1) }))}>−</button>
+                    <button type="button" aria-label="Añadir color secundario" title="Añadir posición de color" onClick={() => setModelForm((prev) => ({ ...prev, secondaryColorSlots: prev.secondaryColorSlots + 1 }))}>＋</button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pattern-editor-piece-heading">
+                <div><strong>Lista de moldes</strong><small>Orden de corte y configuración de cada pieza.</small></div>
+                <button type="button" className="button secondary pattern-editor-add-button" onClick={() => setModelForm((prev) => ({ ...prev, pieces: [...prev.pieces, { id: '', name: '', unitsPerGarment: '1', laterality: 'ninguna', fabricSlot: 'principal', colorSlot: 'principal', colorId: '', colorOverride: false, fabricType: 'Tela principal 1', color: '' }] }))}>＋ Añadir molde</button>
+              </div>
+
+              <div className="piece-editor-list pattern-editor-piece-list">
+                {modelForm.pieces.map((piece, index) => <article className="piece-editor pattern-editor-piece" key={piece.id || `new-${index}`}>
+                  <div className="piece-editor-top pattern-editor-piece-top">
+                    <div className="pattern-editor-piece-title"><span className="pattern-editor-piece-number">{String(index + 1).padStart(2, '0')}</span><div><strong>Molde {index + 1}</strong><small>Parte de la prenda</small></div></div>
+                    <div className="mold-order-actions">
+                      <button type="button" className="order-mold" disabled={index === 0} aria-label="Mover molde arriba" onClick={() => moveMold(index, -1)}>↑</button>
+                      <button type="button" className="order-mold" disabled={index === modelForm.pieces.length - 1} aria-label="Mover molde abajo" onClick={() => moveMold(index, 1)}>↓</button>
+                      {modelForm.pieces.length > 1 && <button type="button" className="remove-piece" onClick={() => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.filter((_, pieceIndex) => pieceIndex !== index) }))}>Quitar</button>}
+                    </div>
+                  </div>
+                  <div className="piece-editor-fields mold-fields-row pattern-editor-piece-fields">
+                    <label className="field-label">Nombre del molde
+                      <input className="large-input" required value={piece.name} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => pieceIndex === index ? { ...item, name: event.target.value } : item) }))} placeholder="Ej. Delantero, manga…" />
+                    </label>
+                    <label className="field-label">Piezas por prenda
+                      <input className="large-input" required type="number" inputMode="numeric" min="1" step="1" value={piece.unitsPerGarment} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => pieceIndex === index ? { ...item, unitsPerGarment: event.target.value } : item) }))} />
+                    </label>
+                    <label className="field-label">Lateralidad
+                      <select className="large-input" value={piece.laterality} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => { if (pieceIndex !== index) return item; const laterality = event.target.value as Laterality; const currentUnits = Number(item.unitsPerGarment); const unitsPerGarment = laterality === 'simetrica' && (!Number.isInteger(currentUnits) || currentUnits < 2 || currentUnits % 2 !== 0) ? String(Math.max(2, Math.ceil((currentUnits || 1) / 2) * 2)) : item.unitsPerGarment; return { ...item, laterality, unitsPerGarment }; }) }))}>
+                        <option value="ninguna">Sin lado</option><option value="simetrica">Simétrica (par)</option><option value="izquierda">Solo izquierda</option><option value="derecha">Solo derecha</option>
+                      </select>
+                    </label>
+                    <label className="field-label">Posición de tela
+                      <select className="large-input" value={piece.fabricSlot} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => pieceIndex === index ? { ...item, fabricSlot: event.target.value as FabricSlot, fabricType: fabricSlotLabel(event.target.value as FabricSlot) } : item) }))}>
+                        {fabricSlotOptions(modelForm.secondaryFabricSlots).map((slot) => <option key={slot} value={slot}>{fabricSlotLabel(slot)}</option>)}
+                      </select>
+                      <small>«Cualquier tela» permite decidirla en cada modelo comercial.</small>
+                    </label>
+                    <label className="field-label">Posición de color
+                      <select className="large-input" value={piece.colorSlot} onChange={(event) => setModelForm((prev) => ({ ...prev, pieces: prev.pieces.map((item, pieceIndex) => pieceIndex === index ? { ...item, colorSlot: event.target.value } : item) }))}>
+                        {colorSlotOptions(modelForm.secondaryColorSlots).map((slot) => <option key={slot} value={slot}>{colorSlotLabel(slot)}</option>)}
+                      </select>
+                      <small>El color definitivo se asigna al crear el modelo.</small>
+                    </label>
+                  </div>
+                </article>)}
+                {modelForm.pieces.length === 0 && <div className="pattern-editor-empty"><strong>Aún no hay moldes</strong><span>Añade la primera pieza para definir cómo se compone la prenda.</span><button type="button" className="button secondary" onClick={() => setModelForm((prev) => ({ ...prev, pieces: [...prev.pieces, { id: '', name: '', unitsPerGarment: '1', laterality: 'ninguna', fabricSlot: 'principal', colorSlot: 'principal', colorId: '', colorOverride: false, fabricType: 'Tela principal 1', color: '' }] }))}>＋ Añadir primer molde</button></div>}
+              </div>
+              <details className="pattern-editor-help">
+                <summary>¿Cómo funciona la lateralidad simétrica?</summary>
+                <p>Un par simétrico necesita una pieza izquierda y una derecha. Por eso, al elegir «Simétrica (par)», la cantidad por prenda debe ser par: ×2 representa una pieza por lado. El inventario puede registrar paridades o lados por separado.</p>
+              </details>
+            </section>
+
+            <div className="form-actions pattern-editor-actions">
+              <button type="button" className="button secondary" onClick={closeModelForm}>Cancelar</button>
+              <button type="submit" className="button primary">{modelForm.editingId ? 'Guardar cambios' : 'Crear patrón'}</button>
+            </div>
           </form>
         </section>
       </div>}
 
-      {showSizeManager && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeSizeManager(); }}>
-        <section className="modal size-manager-modal" role="dialog" aria-modal="true" aria-labelledby="size-manager-title">
-          <div className="modal-heading"><div><div className="eyebrow">CONFIGURACIÓN DE TALLAS</div><h2 id="size-manager-title">Editar grupos y tallas</h2><p>Las tallas se comparten entre modelos del mismo grupo. El orden aquí se usa en los selectores y en el inventario.</p></div><button className="icon-button" onClick={closeSizeManager} aria-label="Cerrar">×</button></div>
-          <div className="size-manager-groups"><label className="field-label">Grupo de tallas<select className="large-input" value={sizeManagerGroupId} onChange={(event) => setSizeManagerGroupId(event.target.value)}>{sizeGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label><div className="add-group-row"><input className="large-input" value={newGroupName} onChange={(event) => setNewGroupName(event.target.value)} placeholder="Nuevo grupo: p. ej. Medias" /><button type="button" className="button secondary" onClick={addSizeGroup}>Crear grupo</button></div></div>
-          <div className="add-size-row"><input className="large-input" value={newSizeLabel} onChange={(event) => setNewSizeLabel(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addSize(); } }} placeholder="Nueva talla: T4, S, M, 6 a 9 años…" /><button type="button" className="button primary" onClick={addSize}>＋ Agregar talla</button></div>
-          <div className="size-manager-list">{groupSizes(sizeManagerGroupId).map((size, index) => <div className="size-manager-row" key={size.id}><span className="size-order">{index + 1}</span><input className="large-input" aria-label={`Nombre de talla ${size.label}`} value={size.label} onChange={(event) => renameSize(size.id, event.target.value)} /><div className="size-manager-actions"><button type="button" className="order-mold" disabled={index === 0} onClick={() => reorderSize(size.id, -1)} aria-label="Subir talla">↑</button><button type="button" className="order-mold" disabled={index === groupSizes(sizeManagerGroupId).length - 1} onClick={() => reorderSize(size.id, 1)} aria-label="Bajar talla">↓</button><button type="button" className="remove-piece" onClick={() => deleteSize(size)}>Eliminar</button></div></div>)}{groupSizes(sizeManagerGroupId).length === 0 && <div className="empty">Este grupo todavía no tiene tallas. Agrega la primera arriba.</div>}</div>
-          <div className="symmetry-help">Si una talla ya tiene movimientos, no se elimina físicamente para no romper el historial. Puedes renombrarla o dejar de usarla. Los cambios de nombre y orden se guardan automáticamente en este prototipo.</div>
-          <div className="form-actions"><button type="button" className="button primary" onClick={closeSizeManager}>Listo</button></div>
+      {showFamilyManager && <div className="modal-backdrop family-manager-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) cancelFamilyManager(); }}>
+        <section className="modal family-manager-modal" role="dialog" aria-modal="true" aria-labelledby="family-manager-title">
+          <div className="modal-heading">
+            <div>
+              <div className="eyebrow">BIBLIOTECA DE PATRONES</div>
+              <h2 id="family-manager-title">Administrar familias</h2>
+              <p>Crea y organiza categorías que agrupan patrones y sus modelos comerciales.</p>
+            </div>
+            <button className="icon-button" onClick={cancelFamilyManager} aria-label="Cerrar y descartar cambios">×</button>
+          </div>
+
+          <div className="family-manager-add">
+            <label className="field-label">Nueva familia
+              <input className="large-input" value={newFamilyLabel} onChange={(event) => setNewFamilyLabel(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addDraftFamily(); } }} placeholder="Ej. Medias, gorros, capas…" />
+            </label>
+            <button type="button" className="button primary" onClick={addDraftFamily}>＋ Agregar</button>
+          </div>
+
+          <div className="family-manager-list">
+            <div className="family-manager-list-heading"><strong>Familias disponibles</strong><span>{draftFamilies.length} categorías</span></div>
+            {draftFamilies.map((family) => {
+              const usage = familyUsage(family.value);
+              return <article className="family-manager-row" key={family.value}>
+                <div className="family-manager-symbol" aria-hidden="true">◇</div>
+                <div className="family-manager-row-content">
+                  <label className="field-label">Nombre visible
+                    <input className="large-input" value={family.label} onChange={(event) => setDraftFamilies((previous) => previous.map((item) => item.value === family.value ? { ...item, label: event.target.value } : item))} />
+                  </label>
+                  <small className={usage.total > 0 ? 'family-manager-usage is-used' : 'family-manager-usage'}>
+                    {usage.total > 0
+                      ? `En uso: ${usage.patternCount} patrones · ${usage.recipeCount} recetas`
+                      : 'Sin patrones ni recetas asociadas'}
+                  </small>
+                </div>
+                <button type="button" className="remove-piece family-manager-delete" disabled={usage.total > 0} onClick={() => removeDraftFamily(family.value)} title={usage.total > 0 ? 'Reasigna primero los patrones y recetas asociados' : 'Eliminar familia'}>Eliminar</button>
+              </article>;
+            })}
+            {draftFamilies.length === 0 && <div className="pattern-editor-empty"><strong>No hay familias</strong><span>Agrega al menos una familia para clasificar tus patrones.</span></div>}
+          </div>
+
+          <div className={`size-manager-pending ${hasPendingFamilyChanges ? 'has-changes' : ''}`}>
+            <span aria-hidden="true">{hasPendingFamilyChanges ? '●' : '○'}</span>
+            <div><strong>{hasPendingFamilyChanges ? 'Cambios pendientes por aplicar' : 'Sin cambios pendientes'}</strong><small>{hasPendingFamilyChanges ? 'Los nombres y nuevas familias se guardarán al confirmar.' : 'Puedes renombrar familias sin perder sus vínculos.'}</small></div>
+          </div>
+
+          <div className="form-actions family-manager-footer">
+            <button type="button" className="button secondary" onClick={cancelFamilyManager}>Cancelar</button>
+            <button type="button" className="button primary" onClick={applyFamilyManager}>Guardar familias</button>
+          </div>
         </section>
       </div>}
 
+      {showSizeManager && <div className="modal-backdrop size-manager-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) cancelSizeManager(); }}>
+        <section className="modal size-manager-modal size-manager-transactional" role="dialog" aria-modal="true" aria-labelledby="size-manager-title">
+          <div className="modal-heading">
+            <div>
+              <div className="eyebrow">CONFIGURACIÓN DE TALLAS</div>
+              <h2 id="size-manager-title">Editar grupos y tallas</h2>
+              <p>Los cambios se preparan aquí y solo se aplican cuando pulsas «Listo».</p>
+            </div>
+            <button className="icon-button" onClick={cancelSizeManager} aria-label="Cerrar y descartar cambios">×</button>
+          </div>
+
+          <div className="size-manager-groups">
+            <label className="field-label">Grupo de tallas
+              <select className="large-input" value={sizeManagerGroupId} onChange={(event) => setSizeManagerGroupId(event.target.value)}>
+                {draftSizeGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+              </select>
+            </label>
+            {selectedManagerGroup && <label className="field-label size-group-name-editor">Nombre del grupo seleccionado
+              <input className="large-input" value={selectedManagerGroup.name} onChange={(event) => setDraftSizeGroups((previous) => previous.map((group) => group.id === sizeManagerGroupId ? { ...group, name: event.target.value } : group))} placeholder="Ej. Tallas comerciales 4–XL" />
+              <small>Renombrar no cambia el ID: los patrones y modelos asociados seguirán vinculados. Se aplicará al pulsar «Listo».</small>
+            </label>}
+            <div className="add-group-row">
+              <input className="large-input" value={newGroupName} onChange={(event) => setNewGroupName(event.target.value)} placeholder="Nuevo grupo: p. ej. Medias" aria-label="Nombre del nuevo grupo" />
+              <button type="button" className="button secondary" onClick={addSizeGroup}>＋ Crear grupo</button>
+            </div>
+          </div>
+
+          <div className="add-size-row">
+            <input className="large-input" value={newSizeLabel} onChange={(event) => setNewSizeLabel(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addSize(); } }} placeholder="Nueva talla: T4, S, M, 6 a 9 años…" aria-label="Nombre de la nueva talla" />
+            <button type="button" className="button primary" onClick={addSize}>＋ Agregar talla</button>
+          </div>
+
+          <div className="size-manager-list">
+            {managerGroupSizes(sizeManagerGroupId).map((size, index) => <div className="size-manager-row" key={size.id}>
+              <span className="size-order">{index + 1}</span>
+              <label className="size-name-label">Nombre visible
+                <input className="large-input" aria-label={`Nombre de talla ${size.label}`} title="El cambio queda pendiente hasta pulsar Listo." value={size.label} onChange={(event) => setDraftSizes((previous) => previous.map((item) => item.id === size.id ? { ...item, label: event.target.value } : item))} />
+              </label>
+              <div className="size-manager-actions">
+                <button type="button" className="order-mold" disabled={index === 0} onClick={() => reorderSize(size.id, -1)} aria-label="Subir talla">↑</button>
+                <button type="button" className="order-mold" disabled={index === managerGroupSizes(sizeManagerGroupId).length - 1} onClick={() => reorderSize(size.id, 1)} aria-label="Bajar talla">↓</button>
+                <button type="button" className="remove-piece" onClick={() => deleteSize(size)}>Eliminar</button>
+              </div>
+            </div>)}
+            {managerGroupSizes(sizeManagerGroupId).length === 0 && <div className="empty">Este grupo todavía no tiene tallas. Agrega la primera arriba.</div>}
+          </div>
+
+          <div className={`size-manager-pending ${hasPendingSizeManagerChanges ? 'has-changes' : ''}`}>
+            <span aria-hidden="true">{hasPendingSizeManagerChanges ? '●' : '○'}</span>
+            <div><strong>{hasPendingSizeManagerChanges ? 'Cambios pendientes por aplicar' : 'Sin cambios pendientes'}</strong><small>{hasPendingSizeManagerChanges ? 'Nada se modifica en el inventario hasta pulsar «Listo».' : 'Puedes editar nombres, agregar, eliminar u ordenar tallas.'}</small></div>
+          </div>
+
+          <div className="form-actions size-manager-footer">
+            <button type="button" className="button secondary" onClick={cancelSizeManager}>Cancelar</button>
+            <button type="button" className="button primary" onClick={applySizeManager}>Listo · aplicar cambios</button>
+          </div>
+        </section>
+      </div>}
       {missingTarget && (() => {
         const model = models.find((item) => item.id === missingTarget.modelId);
         const size = sizes.find((item) => item.id === missingTarget.sizeId);

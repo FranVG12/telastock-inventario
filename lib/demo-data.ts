@@ -18,26 +18,26 @@ export const demoModels: ManufacturingModel[] = [
 ];
 
 export const demoPieces: ModelPiece[] = [
-  { id: 'piece-polo-pecho', modelId: 'model-polo', name: 'Pecho', unitsPerGarment: 1, laterality: 'ninguna', fabricType: 'Poliéster deportivo', color: 'Rojo', sortOrder: 1 },
-  { id: 'piece-polo-espalda', modelId: 'model-polo', name: 'Espalda', unitsPerGarment: 1, laterality: 'ninguna', fabricType: 'Poliéster deportivo', color: 'Rojo', sortOrder: 2 },
+  { id: 'piece-polo-pecho', modelId: 'model-polo', name: 'Pecho', unitsPerGarment: 1, laterality: 'ninguna', fabricType: 'Tela principal 1', color: 'Sin especificar', sortOrder: 1 },
+  { id: 'piece-polo-espalda', modelId: 'model-polo', name: 'Espalda', unitsPerGarment: 1, laterality: 'ninguna', fabricType: 'Tela principal 1', color: 'Sin especificar', sortOrder: 2 },
   // El molde es simétrico, pero el stock se lleva por lados independientes.
   // unitsPerGarment=2 equivale a una manga izquierda y una derecha por prenda.
-  { id: 'piece-polo-mangas', modelId: 'model-polo', name: 'Mangas (par simétrico)', unitsPerGarment: 2, laterality: 'simetrica', fabricType: 'Poliéster deportivo', color: 'Rojo', sortOrder: 3 },
+  { id: 'piece-polo-mangas', modelId: 'model-polo', name: 'Mangas (par simétrico)', unitsPerGarment: 2, laterality: 'simetrica', fabricType: 'Tela principal 1', color: 'Sin especificar', sortOrder: 3 },
 
-  { id: 'piece-casaca-del-i', modelId: 'model-casaca', name: 'Delantero izquierdo', unitsPerGarment: 1, laterality: 'izquierda', fabricType: 'Poliéster deportivo', color: 'Rojo', sortOrder: 1 },
-  { id: 'piece-casaca-del-d', modelId: 'model-casaca', name: 'Delantero derecho', unitsPerGarment: 1, laterality: 'derecha', fabricType: 'Poliéster deportivo', color: 'Rojo', sortOrder: 2 },
-  { id: 'piece-casaca-espalda', modelId: 'model-casaca', name: 'Espalda', unitsPerGarment: 1, laterality: 'ninguna', fabricType: 'Poliéster deportivo', color: 'Rojo', sortOrder: 3 },
-  { id: 'piece-casaca-mangas', modelId: 'model-casaca', name: 'Mangas (par simétrico)', unitsPerGarment: 2, laterality: 'simetrica', fabricType: 'Poliéster deportivo', color: 'Rojo', sortOrder: 4 },
-  { id: 'piece-casaca-cuello', modelId: 'model-casaca', name: 'Cuello', unitsPerGarment: 1, laterality: 'ninguna', fabricType: 'Rib', color: 'Negro', sortOrder: 5 },
+  { id: 'piece-casaca-del-i', modelId: 'model-casaca', name: 'Delantero izquierdo', unitsPerGarment: 1, laterality: 'izquierda', fabricType: 'Tela principal 1', color: 'Sin especificar', sortOrder: 1 },
+  { id: 'piece-casaca-del-d', modelId: 'model-casaca', name: 'Delantero derecho', unitsPerGarment: 1, laterality: 'derecha', fabricType: 'Tela principal 1', color: 'Sin especificar', sortOrder: 2 },
+  { id: 'piece-casaca-espalda', modelId: 'model-casaca', name: 'Espalda', unitsPerGarment: 1, laterality: 'ninguna', fabricType: 'Tela principal 1', color: 'Sin especificar', sortOrder: 3 },
+  { id: 'piece-casaca-mangas', modelId: 'model-casaca', name: 'Mangas (par simétrico)', unitsPerGarment: 2, laterality: 'simetrica', fabricType: 'Tela principal 1', color: 'Sin especificar', sortOrder: 4 },
+  { id: 'piece-casaca-cuello', modelId: 'model-casaca', name: 'Cuello', unitsPerGarment: 1, laterality: 'ninguna', fabricType: 'Tela principal 1', color: 'Sin especificar', sortOrder: 5 },
 
-  { id: 'piece-buzo-del-i', modelId: 'model-buzo', name: 'Pierna delantera izquierda', unitsPerGarment: 1, laterality: 'izquierda', fabricType: 'Poliéster deportivo', color: 'Rojo', sortOrder: 1 },
-  { id: 'piece-buzo-del-d', modelId: 'model-buzo', name: 'Pierna delantera derecha', unitsPerGarment: 1, laterality: 'derecha', fabricType: 'Poliéster deportivo', color: 'Rojo', sortOrder: 2 },
-  { id: 'piece-buzo-tras-i', modelId: 'model-buzo', name: 'Pierna posterior izquierda', unitsPerGarment: 1, laterality: 'izquierda', fabricType: 'Poliéster deportivo', color: 'Rojo', sortOrder: 3 },
-  { id: 'piece-buzo-tras-d', modelId: 'model-buzo', name: 'Pierna posterior derecha', unitsPerGarment: 1, laterality: 'derecha', fabricType: 'Poliéster deportivo', color: 'Rojo', sortOrder: 4 },
-  { id: 'piece-buzo-cintura', modelId: 'model-buzo', name: 'Pretina', unitsPerGarment: 1, laterality: 'ninguna', fabricType: 'Poliéster deportivo', color: 'Rojo', sortOrder: 5 },
+  { id: 'piece-buzo-del-i', modelId: 'model-buzo', name: 'Pierna delantera izquierda', unitsPerGarment: 1, laterality: 'izquierda', fabricType: 'Tela principal 1', color: 'Sin especificar', sortOrder: 1 },
+  { id: 'piece-buzo-del-d', modelId: 'model-buzo', name: 'Pierna delantera derecha', unitsPerGarment: 1, laterality: 'derecha', fabricType: 'Tela principal 1', color: 'Sin especificar', sortOrder: 2 },
+  { id: 'piece-buzo-tras-i', modelId: 'model-buzo', name: 'Pierna posterior izquierda', unitsPerGarment: 1, laterality: 'izquierda', fabricType: 'Tela principal 1', color: 'Sin especificar', sortOrder: 3 },
+  { id: 'piece-buzo-tras-d', modelId: 'model-buzo', name: 'Pierna posterior derecha', unitsPerGarment: 1, laterality: 'derecha', fabricType: 'Tela principal 1', color: 'Sin especificar', sortOrder: 4 },
+  { id: 'piece-buzo-cintura', modelId: 'model-buzo', name: 'Pretina', unitsPerGarment: 1, laterality: 'ninguna', fabricType: 'Tela principal 1', color: 'Sin especificar', sortOrder: 5 },
 
-  { id: 'piece-medias-cana', modelId: 'model-medias', name: 'Caña', unitsPerGarment: 2, laterality: 'simetrica', fabricType: 'Poliéster deportivo', color: 'Rojo', sortOrder: 1 },
-  { id: 'piece-medias-pie', modelId: 'model-medias', name: 'Planta y talón', unitsPerGarment: 2, laterality: 'simetrica', fabricType: 'Poliéster deportivo', color: 'Rojo', sortOrder: 2 },
+  { id: 'piece-medias-cana', modelId: 'model-medias', name: 'Caña', unitsPerGarment: 2, laterality: 'simetrica', fabricType: 'Tela principal 1', color: 'Sin especificar', sortOrder: 1 },
+  { id: 'piece-medias-pie', modelId: 'model-medias', name: 'Planta y talón', unitsPerGarment: 2, laterality: 'simetrica', fabricType: 'Tela principal 1', color: 'Sin especificar', sortOrder: 2 },
 ];
 
 const stamp = '2026-10-25T09:00:00.000Z';
