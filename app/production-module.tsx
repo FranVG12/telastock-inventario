@@ -3124,7 +3124,8 @@ export function ProductionModule({
 
   const pieceHistoryRows = (() => {
     type HistoryRow = {
-      id: string; productName: string; pieceName: string; ownerName: string; sizeLabel: string;
+      id: string; productModelId: string; pieceId: string; sizeId: string;
+      productName: string; pieceName: string; ownerName: string; sizeLabel: string;
       kind: 'entrada' | 'salida' | 'ajuste'; delta: number; side?: 'izquierda' | 'derecha';
       note: string; date: string; origin: string;
     };
