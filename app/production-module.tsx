@@ -223,6 +223,8 @@ type ProductMaterialPieceRow = {
   selectionId: string;
   pieceName: string;
   groupName: string;
+  unitsPerGarment: number;
+  laterality: ModelPiece['laterality'];
   fabricSlot: string;
   colorSlot: ComponentColorSlot;
   textileId: string | null;
@@ -860,6 +862,7 @@ export function ProductionModule({
   const [quickProductColorName, setQuickProductColorName] = useState('');
   const [productDescription, setProductDescription] = useState('');
   const [productComponentIds, setProductComponentIds] = useState<string[]>([]);
+  const [productComponentQuantities, setProductComponentQuantities] = useState<Record<string, string>>({});
   const [productMaterialSpecsDraft, setProductMaterialSpecsDraft] = useState<Record<string, ProductMaterialSpecDraft>>({});
   const [selectedProductId, setSelectedProductId] = useState('');
   const [planCounts, setPlanCounts] = useState<Record<string, string>>({});
@@ -1361,6 +1364,7 @@ export function ProductionModule({
     setComponentDraft(null);
     if (returnToProductAfterComponentCreate) {
       setProductComponentIds((current) => current.includes(row.id) ? current : [...current, row.id]);
+      setProductComponentQuantities((current) => ({ ...current, [row.id]: current[row.id] ?? '1' }));
       setReturnToProductAfterComponentCreate(false);
       onNavigate('modelos-producto');
       tell('Componente creado, añadido a la prenda y listo para continuar.');
@@ -1457,6 +1461,7 @@ export function ProductionModule({
     setProductPieceOverrides({});
     setProductDescription('');
     setProductComponentIds([]);
+    setProductComponentQuantities({});
     setProductMaterialSpecsDraft({});
   }
 
@@ -1512,6 +1517,7 @@ export function ProductionModule({
     setProductPieceOverrides(pieceOverrides);
     setProductDescription(product.description ?? '');
     setProductComponentIds(product.components.map((selection) => selection.componentId));
+    setProductComponentQuantities(Object.fromEntries(product.components.map((selection) => [selection.componentId, String(selection.quantity ?? 1)])));
     setProductMaterialSpecsDraft(materialSpecs);
     setShowProductCollectionCreator(false);
     setNewProductCollectionName('');
@@ -1673,6 +1679,10 @@ export function ProductionModule({
     const componentSelections: ProductComponentSelection[] = [];
     for (const component of selectedComponents) {
       const previousSelection = editingProduct?.components.find((selection) => selection.componentId === component.id);
+      const componentQuantity = Number(productComponentQuantities[component.id] ?? previousSelection?.quantity ?? 1);
+      if (!Number.isInteger(componentQuantity) || componentQuantity < 1 || componentQuantity > 99) {
+        return tell('Indica una cantidad entera de 1 a 99 para el componente «' + component.name + '».', 'error');
+      }
       const materialSpecifications: Record<string, SizeSpecification> = { ...(previousSelection?.materialSpecifications ?? {}) };
       const pieceOverrides: Record<string, ProductPieceOverride> = { ...(previousSelection?.pieceOverrides ?? {}) };
       for (const piece of component.pieces) {
@@ -1702,6 +1712,7 @@ export function ProductionModule({
         ...(previousSelection ?? {
           id: id(), componentId: component.id, quantity: 1, location: '', variantOverrides: {},
         }),
+        quantity: componentQuantity,
         materialSpecifications,
         pieceOverrides,
       });
@@ -3651,6 +3662,8 @@ export function ProductionModule({
             selectionId: '',
             pieceName: piece.name,
             groupName: 'Molde del patrón base',
+            unitsPerGarment: piece.unitsPerGarment,
+            laterality: piece.laterality,
             fabricSlot,
             colorSlot,
             textileId: hasTextileOverride ? override?.textileId ?? null : defaultTextileId,
@@ -3684,6 +3697,8 @@ export function ProductionModule({
             selectionId: selection.id,
             pieceName: piece.name,
             groupName: component.name,
+            unitsPerGarment: piece.unitsPerGarment * selection.quantity,
+            laterality: piece.laterality,
             fabricSlot: piece.fabricSlot,
             colorSlot,
             textileId: hasTextileOverride ? override?.textileId ?? null : defaultTextileId,
@@ -3697,10 +3712,24 @@ export function ProductionModule({
         return rows.length > 0 ? [{ selection, component, rows }] : [];
       });
       const totalPieces = basePieceRows.length + componentPieceGroups.reduce((sum, group) => sum + group.rows.length, 0);
+      const pieceRequirementLabel = (units: number, laterality: ModelPiece['laterality']) => {
+        if (laterality === 'simetrica') {
+          const eachSide = units / 2;
+          const pairLabel = eachSide === 1 ? '1 par' : eachSide + ' pares';
+          return units + ' piezas por prenda · ' + pairLabel + ' (' + eachSide + ' izquierda + ' + eachSide + ' derecha)';
+        }
+        if (laterality === 'izquierda') return units + ' piezas por prenda · solo lado izquierdo';
+        if (laterality === 'derecha') return units + ' piezas por prenda · solo lado derecho';
+        return units + ' piezas por prenda';
+      };
       const renderMaterialPiece = (row: ProductMaterialPieceRow) => <article className="piece-material-card" key={row.key}>
         <div className="piece-material-card-heading">
           <div className="piece-material-icon"><span>◇</span></div>
           <div className="piece-material-card-title"><strong>{row.pieceName}</strong><small>{row.groupName}</small></div>
+        </div>
+        <div className="piece-material-requirement">
+          <span>Necesita por prenda</span>
+          <strong>{pieceRequirementLabel(row.unitsPerGarment, row.laterality)}</strong>
         </div>
         <div className="piece-material-fields">
           <label className="field-label">
@@ -3771,7 +3800,10 @@ export function ProductionModule({
           </div>}
         </section>
         {componentPieceGroups.map(({ selection, component, rows }) => <section className="piece-material-group piece-material-auxiliary-group" key={selection.id}>
-          <div className="piece-material-group-heading"><h3>{component.name}</h3><span>{rows.length} piezas</span></div>
+          <div className="piece-material-group-heading">
+            <h3>{component.name}{selection.quantity > 1 ? ' ×' + selection.quantity : ''}</h3>
+            <span>{rows.length} moldes · {rows.reduce((sum, row) => sum + row.unitsPerGarment, 0)} piezas por prenda</span>
+          </div>
           {rows.map(renderMaterialPiece)}
         </section>)}
         {linkedComponentsWithoutPieces.map(({ selection, component }) => <section className="piece-material-group piece-material-auxiliary-group piece-material-missing-component" key={selection.id}>
@@ -3858,21 +3890,34 @@ export function ProductionModule({
         <div className="production-check-list">{productFormComponents.map((component) => {
           const selected = productComponentIds.includes(component.id);
           const archived = !component.active;
-          return <label key={component.id} className={archived ? 'production-component-option archived' : 'production-component-option'}>
-            <input type="checkbox" checked={selected} disabled={archived} onChange={(event) => {
-              const checked = event.target.checked;
-              setProductComponentIds((current) => checked ? [...current, component.id] : current.filter((x) => x !== component.id));
-              if (checked) setProductMaterialSpecsDraft((current) => {
-                const next = { ...current };
-                component.materials.filter((material) => material.specificationLabel?.trim()).forEach((material) => {
-                  next[material.id] = next[material.id] ?? { label: material.specificationLabel ?? 'Medida', rules: [{ id: id(), value: '', sizeIds: [] }] };
+          return <article key={component.id} className={'production-component-option-card' + (selected ? ' selected' : '') + (archived ? ' archived' : '')}>
+            <label className="production-component-option-choice">
+              <input type="checkbox" checked={selected} disabled={archived} onChange={(event) => {
+                const checked = event.target.checked;
+                setProductComponentIds((current) => checked ? [...current, component.id] : current.filter((x) => x !== component.id));
+                setProductComponentQuantities((current) => {
+                  const next = { ...current };
+                  if (checked) next[component.id] = next[component.id] ?? '1';
+                  else delete next[component.id];
+                  return next;
                 });
-                return next;
-              });
-            }} />
-            <span><strong>{component.name}</strong><small>{component.type} · {component.pieces.length} piezas · {component.materials.length} materiales asociados{archived ? ' · Archivado (se conserva en este modelo)' : ''}</small></span>
-          </label>;
+                if (checked) setProductMaterialSpecsDraft((current) => {
+                  const next = { ...current };
+                  component.materials.filter((material) => material.specificationLabel?.trim()).forEach((material) => {
+                    next[material.id] = next[material.id] ?? { label: material.specificationLabel ?? 'Medida', rules: [{ id: id(), value: '', sizeIds: [] }] };
+                  });
+                  return next;
+                });
+              }} />
+              <span><strong>{component.name}</strong><small>{component.type} · {component.pieces.length} moldes · {component.materials.length} materiales asociados{archived ? ' · Archivado (se conserva en este modelo)' : ''}</small></span>
+            </label>
+            {selected && <label className="production-component-quantity">
+              <span>Unidades de este componente por prenda</span>
+              <input className="large-input" type="number" min="1" max="99" step="1" inputMode="numeric" value={productComponentQuantities[component.id] ?? '1'} onChange={(event) => setProductComponentQuantities((current) => ({ ...current, [component.id]: event.target.value }))} aria-label={'Cantidad de ' + component.name + ' por prenda'} />
+            </label>}
+          </article>;
         })}</div>
+        {productComponentIds.length > 0 && <small className="production-muted">La cantidad multiplica todas las piezas del componente y sus consumos de materiales. Ejemplo: bolsillo ×2 = dos juegos de sus moldes por cada casaca.</small>}
         {selectedProductComponentWildcardPieces.length > 0 && <section className="product-fabric-assignment-section">
           <div className="production-subheading"><strong>Asignaciones de componentes comodín</strong><span className="production-muted">Valores específicos de esta prenda</span></div>
           <p className="production-muted">Cuando una pieza de la biblioteca permite «Cualquier tela» o «Cualquier color», concreta aquí su material y color para este modelo.</p>
