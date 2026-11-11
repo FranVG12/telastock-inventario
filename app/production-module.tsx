@@ -3285,7 +3285,6 @@ export function ProductionModule({
           <label className="search-box"><span aria-hidden="true">⌕</span><input value={inventorySearch} onChange={(event) => setInventorySearch(event.target.value)} placeholder="Buscar modelo, pieza o tela…" aria-label="Buscar modelo, pieza o tela" /></label>
           <div className="filter-segment" aria-label="Filtrar por stock">{(['Con stock', 'Vacío', 'Todos'] as const).map((filter) => <button key={filter} className={inventoryFilter === filter ? 'selected' : ''} onClick={() => setInventoryFilter(filter)}>{filter}</button>)}</div>
         </div>
-        <label className="toggle-empty"><input type="checkbox" checked={inventoryIncludeEmptySizes} onChange={(event) => setInventoryIncludeEmptySizes(event.target.checked)} /><span>Mostrar también tallas vacías en cada modelo</span></label>
         <div className="model-list product-model-inventory-list">
           {filteredInventoryProducts.map(({ product, base, productPieces, productSizes, hasStock }) => {
             const expanded = inventoryExpandedProducts.includes(product.id);
@@ -3308,8 +3307,6 @@ export function ProductionModule({
               sizesWithStock[0] ??
               visibleSizeSummaries[0];
             const emptySizeCount = sizeSummaries.length - sizesWithStock.length;
-            const fabrics = [...new Set(productPieces.map((piece) => piece.textileName).filter((name) => name && name !== 'Sin asignar' && name !== 'Sin tela definida'))];
-            const colors = [...new Set(productPieces.map((piece) => piece.colorName).filter((name) => name && name !== 'Sin asignar' && name !== 'Sin color'))];
             return <article className={'model-card product-model-inventory-card ' + (expanded ? 'expanded' : '')} key={product.id}>
               <button className="model-card-trigger" onClick={() => setInventoryExpandedProducts((previous) => previous.includes(product.id) ? [] : [product.id])} aria-expanded={expanded}>
                 <span className="model-symbol" aria-hidden="true">▧</span>
