@@ -791,6 +791,8 @@ export function ProductionModule({
   const [inventoryFilter, setInventoryFilter] = useState<'Con stock' | 'Vacío' | 'Todos'>('Con stock');
   const [inventoryIncludeEmptySizes, setInventoryIncludeEmptySizes] = useState(false);
   const [inventoryExpandedProducts, setInventoryExpandedProducts] = useState<string[]>([]);
+  const [inventorySelectedSizeByProduct, setInventorySelectedSizeByProduct] = useState<Record<string, string>>({});
+  const [inventoryPieceFilter, setInventoryPieceFilter] = useState<'Con stock' | 'Faltantes' | 'Todas'>('Con stock');
   const [inventoryProductId, setInventoryProductId] = useState('');
   const [inventoryOperation, setInventoryOperation] = useState<'entrada' | 'salida'>('entrada');
   const [inventorySizeIds, setInventorySizeIds] = useState<string[]>([]);
@@ -3289,20 +3291,32 @@ export function ProductionModule({
             const expanded = inventoryExpandedProducts.includes(product.id);
             const collection = data.productCollections.find((item) => item.id === product.collectionId)?.name ?? 'Sin colección';
             const sizeGroup = sizeGroups.find((group) => group.id === base?.sizeGroupId)?.name ?? 'Grupo de tallas no disponible';
-            const sizesWithStock = productSizes.filter((size) => productPieces.some((piece) =>
-              getPieceStock(productPieceDomainLedger(product.id, piece, size.id), piece.id, size.id) > 0
-            ));
-            const visibleSizes = inventoryIncludeEmptySizes ? productSizes : sizesWithStock;
+            const sizeSummaries = productSizes.map((size) => {
+              const ledger = productInventoryEffectiveLedger(product, productPieces, size.id);
+              const physicalTotal = productPieces.reduce((sum, piece) => {
+                const pieceLedger = productPieceDomainLedger(product.id, piece, size.id);
+                return sum + (piece.laterality === 'simetrica'
+                  ? getSymmetricStock(pieceLedger, piece.id, size.id).physicalTotal
+                  : Math.max(0, getPieceStock(pieceLedger, piece.id, size.id)));
+              }, 0);
+              return { size, ledger, physicalTotal, complete: getCompleteUnits(productPieces, ledger, size.id) };
+            });
+            const sizesWithStock = sizeSummaries.filter((item) => item.physicalTotal > 0);
+            const visibleSizeSummaries = inventoryIncludeEmptySizes ? sizeSummaries : sizesWithStock;
+            const selectedSizeSummary =
+              visibleSizeSummaries.find((item) => item.size.id === inventorySelectedSizeByProduct[product.id]) ??
+              sizesWithStock[0] ??
+              visibleSizeSummaries[0];
+            const emptySizeCount = sizeSummaries.length - sizesWithStock.length;
             const fabrics = [...new Set(productPieces.map((piece) => piece.textileName).filter((name) => name && name !== 'Sin asignar' && name !== 'Sin tela definida'))];
             const colors = [...new Set(productPieces.map((piece) => piece.colorName).filter((name) => name && name !== 'Sin asignar' && name !== 'Sin color'))];
             return <article className={'model-card product-model-inventory-card ' + (expanded ? 'expanded' : '')} key={product.id}>
-              <button className="model-card-trigger" onClick={() => setInventoryExpandedProducts((previous) => previous.includes(product.id) ? previous.filter((id) => id !== product.id) : [...previous, product.id])} aria-expanded={expanded}>
+              <button className="model-card-trigger" onClick={() => setInventoryExpandedProducts((previous) => previous.includes(product.id) ? [] : [product.id])} aria-expanded={expanded}>
                 <span className="model-symbol" aria-hidden="true">▧</span>
                 <span className="model-main">
                   <strong>{product.name}</strong>
                   <small>{base?.name ?? 'Patrón no disponible'} · {collection} · {sizeGroup}</small>
                   <span className="model-tags"><span>{productPieces.length} piezas</span><span>{sizesWithStock.length} tallas con stock</span><span>{hasStock ? 'Con existencias' : 'Sin existencias'}</span></span>
-                  <small className="inventory-product-material-summary">{fabrics.length ? 'Telas: ' + fabrics.join(' · ') : 'Telas sin asignar'}{colors.length ? ' · Colores: ' + colors.join(' · ') : ''}</small>
                 </span>
                 <span className={'chevron ' + (expanded ? 'up' : '')} aria-hidden="true">⌄</span>
               </button>
@@ -3311,16 +3325,43 @@ export function ProductionModule({
                   <button className="button secondary" onClick={() => openProductInventoryForm('entrada', product.id)}>＋ Registrar stock</button>
                   <button className="button secondary" onClick={() => openProductInventoryForm('salida', product.id)}>− Retirar / merma</button>
                 </div>
-                {visibleSizes.length === 0 ? <div className="empty size-empty">Este modelo todavía no tiene piezas registradas en ninguna talla. <button className="text-action" onClick={() => openProductInventoryForm('entrada', product.id)}>Registrar stock</button></div> : <div className="size-list">
-                  {visibleSizes.map((size) => {
-                    const ledger = productInventoryEffectiveLedger(product, productPieces, size.id);
-                    const complete = getCompleteUnits(productPieces, ledger, size.id);
-                    const physicalTotal = productPieces.reduce((sum, piece) => {
-                      const pieceLedger = productPieceDomainLedger(product.id, piece, size.id);
-                      return sum + (piece.laterality === 'simetrica'
-                        ? getSymmetricStock(pieceLedger, piece.id, size.id).physicalTotal
-                        : Math.max(0, getPieceStock(pieceLedger, piece.id, size.id)));
-                    }, 0);
+
+                <section className="inventory-size-browser" aria-label={'Tallas con stock de ' + product.name}>
+                  <div className="inventory-size-browser-heading">
+                    <div><strong>Stock por talla</strong><small>Selecciona una talla para revisar sus piezas</small></div>
+                    <span>{sizesWithStock.length} / {productSizes.length}</span>
+                  </div>
+                  <div className="inventory-size-tabs">
+                    {visibleSizeSummaries.map(({ size, physicalTotal, complete }) => {
+                      const active = selectedSizeSummary?.size.id === size.id;
+                      return <button type="button" key={size.id}
+                        className={'inventory-size-tab ' + (active ? 'active' : '') + (physicalTotal === 0 ? ' empty-size' : '')}
+                        onClick={() => setInventorySelectedSizeByProduct((current) => ({ ...current, [product.id]: size.id }))}
+                        aria-pressed={active}>
+                        <strong>{size.label}</strong>
+                        <span>{physicalTotal > 0 ? format(physicalTotal) + ' pzas.' : 'Sin stock'}</span>
+                        {physicalTotal > 0 && <small>{format(complete)} fabricables</small>}
+                      </button>;
+                    })}
+                  </div>
+                  {emptySizeCount > 0 && <button type="button" className="inventory-show-empty-sizes"
+                    onClick={() => setInventoryIncludeEmptySizes((current) => !current)}>
+                    {inventoryIncludeEmptySizes ? 'Ocultar tallas sin stock' : 'Ver ' + format(emptySizeCount) + ' tallas sin stock'}
+                  </button>}
+                </section>
+
+                {!selectedSizeSummary
+                  ? <div className="inventory-focus-empty">
+                      <strong>Este modelo todavía no tiene piezas registradas.</strong>
+                      <span>Registra una entrada para que aparezcan aquí las tallas con existencias.</span>
+                      <button type="button" className="button primary" onClick={() => openProductInventoryForm('entrada', product.id)}>＋ Registrar stock</button>
+                      {emptySizeCount > 0 && !inventoryIncludeEmptySizes && <button type="button" className="text-action" onClick={() => setInventoryIncludeEmptySizes(true)}>Ver la tabla completa de tallas</button>}
+                    </div>
+                  : (() => {
+                    const size = selectedSizeSummary.size;
+                    const ledger = selectedSizeSummary.ledger;
+                    const complete = selectedSizeSummary.complete;
+                    const physicalTotal = selectedSizeSummary.physicalTotal;
                     const shortages = getPieceShortages(productPieces, ledger, size.id, complete + 1);
                     const maximumTarget = getMaximumTargetUnits(productPieces, ledger, size.id);
                     const targetKey = product.id + '::' + size.id;
@@ -3331,77 +3372,135 @@ export function ProductionModule({
                     const targetShortages = getPieceShortages(productPieces, ledger, size.id, targetUnits);
                     const missingToTarget = targetShortages.filter((item) => item.missing > 0);
                     const totalMissingToTarget = missingToTarget.reduce((sum, item) => sum + item.missing, 0);
-                    const baseRows = productPieces.filter((piece) => piece.scope === 'base');
+                    const finishedCount = finishedGarmentStock(product.id, size.id);
+                    const getPieceStatus = (piece: ProductInventoryPiece) => {
+                      const pieceLedger = productPieceDomainLedger(product.id, piece, size.id);
+                      const symmetricStock = piece.laterality === 'simetrica' ? getSymmetricStock(pieceLedger, piece.id, size.id) : undefined;
+                      const hasPhysicalStock = symmetricStock
+                        ? symmetricStock.left > 0 || symmetricStock.right > 0
+                        : getPieceStock(pieceLedger, piece.id, size.id) > 0;
+                      const availableStock = symmetricStock
+                        ? Math.max(0, Math.min(symmetricStock.left, symmetricStock.right) - Math.max(
+                            inventoryReservedPieceQuantity(product.id, piece, size.id, 'izquierda'),
+                            inventoryReservedPieceQuantity(product.id, piece, size.id, 'derecha')
+                          ))
+                        : Math.max(0, getPieceStock(pieceLedger, piece.id, size.id) - inventoryReservedPieceQuantity(product.id, piece, size.id, null));
+                      const shortage = shortages.find((item) => item.piece.id === piece.id);
+                      return { pieceLedger, symmetricStock, hasPhysicalStock, availableStock, shortage };
+                    };
+                    const inStockCount = productPieces.filter((piece) => getPieceStatus(piece).hasPhysicalStock).length;
+                    const missingCount = productPieces.filter((piece) => (getPieceStatus(piece).shortage?.missing ?? 0) > 0).length;
+                    const filteredPieces = productPieces.filter((piece) => {
+                      const status = getPieceStatus(piece);
+                      if (inventoryPieceFilter === 'Con stock') return status.hasPhysicalStock;
+                      if (inventoryPieceFilter === 'Faltantes') return (status.shortage?.missing ?? 0) > 0;
+                      return true;
+                    });
+                    const baseRows = filteredPieces.filter((piece) => piece.scope === 'base');
                     const componentGroups = product.components.flatMap((selection) => {
                       const component = data.components.find((item) => item.id === selection.componentId);
                       if (!component) return [];
-                      const rows = productPieces.filter((piece) => piece.scope === 'component' && piece.selectionId === selection.id);
+                      const rows = filteredPieces.filter((piece) => piece.scope === 'component' && piece.selectionId === selection.id);
                       return rows.length > 0 ? [{ selection, component, rows }] : [];
                     });
                     const renderPiece = (piece: ProductInventoryPiece) => {
-                      const pieceLedger = productPieceDomainLedger(product.id, piece, size.id);
-                      const stock = piece.laterality === 'simetrica' ? getSymmetricStock(pieceLedger, piece.id, size.id) : undefined;
-                      const availableStock = piece.laterality === 'simetrica'
-                        ? Math.max(0, Math.min(stock?.left ?? 0, stock?.right ?? 0) - Math.max(inventoryReservedPieceQuantity(product.id, piece, size.id, 'izquierda'), inventoryReservedPieceQuantity(product.id, piece, size.id, 'derecha')))
-                        : Math.max(0, getPieceStock(pieceLedger, piece.id, size.id) - inventoryReservedPieceQuantity(product.id, piece, size.id, null));
-                      const shortage = shortages.find((item) => item.piece.id === piece.id);
-                      const missingText = shortage && shortage.missing > 0
+                      const { pieceLedger, symmetricStock, hasPhysicalStock, availableStock, shortage } = getPieceStatus(piece);
+                      const balanceLabel = symmetricStock
+                        ? (symmetricStock.left === symmetricStock.right
+                          ? format(symmetricStock.parity ?? 0) + ' pares'
+                          : 'I ' + format(symmetricStock.left) + ' · D ' + format(symmetricStock.right))
+                        : format(Math.max(0, getPieceStock(pieceLedger, piece.id, size.id))) + ' und.';
+                      const statusLabel = shortage && shortage.missing > 0
                         ? shortage.symmetricStock
-                          ? 'Falta I:' + format(shortage.missingLeft ?? 0) + ' · D:' + format(shortage.missingRight ?? 0)
-                          : 'Faltan ' + format(shortage.missing) + ' pzas.'
-                        : 'Disponible para otra prenda';
-                      return <article className="inventory-product-piece-row" key={piece.id}>
-                        <div className="inventory-product-piece-main">
-                          <strong>{piece.name}</strong>
-                          <small>{piece.scope === 'base' ? 'Molde del patrón base' : piece.componentName}</small>
-                        </div>
-                        <div className="inventory-product-piece-materials">
+                          ? 'Falta I ' + format(shortage.missingLeft ?? 0) + ' · D ' + format(shortage.missingRight ?? 0)
+                          : 'Faltan ' + format(shortage.missing) + ' und.'
+                        : availableStock > 0 ? 'Disponible' : hasPhysicalStock ? 'Comprometido' : 'Sin stock';
+                      const statusTone = shortage && shortage.missing > 0 ? 'missing' : availableStock > 0 ? 'available' : 'neutral';
+                      return <details className="inventory-product-piece-row" key={piece.id}>
+                        <summary className="inventory-product-piece-summary">
+                          <span className="inventory-piece-title">
+                            <strong>{piece.name}</strong>
+                            <small>{piece.scope === 'base' ? 'Molde base' : piece.componentName}</small>
+                          </span>
+                          <span className="inventory-piece-balance">{balanceLabel}</span>
+                          <span className={'inventory-piece-status ' + statusTone}>{statusLabel}</span>
+                          <span className="inventory-piece-chevron" aria-hidden="true">⌄</span>
+                        </summary>
+                        <div className="inventory-piece-extra">
                           <span><small>Tela</small><strong>{piece.textileName || 'Sin asignar'}</strong></span>
                           <span><small>Color</small><strong>{piece.colorName || 'Sin asignar'}</strong></span>
-                          <span><small>Necesita por prenda</small><strong>{piece.unitsPerGarment} {piece.laterality === 'simetrica' ? 'piezas (' + piece.unitsPerGarment / 2 + ' por lado)' : 'piezas'}</strong></span>
+                          <span><small>Necesita por prenda</small><strong>{piece.unitsPerGarment} piezas{piece.laterality === 'simetrica' ? ' · ' + piece.unitsPerGarment / 2 + ' por lado' : ''}</strong></span>
+                          <span><small>Disponible tras reservas</small><strong>{format(availableStock)} {symmetricStock ? 'pares' : 'unidades'}</strong></span>
                         </div>
-                        <div className="inventory-product-piece-stock">
-                          <strong>{piece.laterality === 'simetrica'
-                            ? (stock?.left === stock?.right ? format(stock?.parity ?? 0) + ' par.' : format(stock?.left ?? 0) + '/' + format(stock?.right ?? 0))
-                            : format(Math.max(0, getPieceStock(pieceLedger, piece.id, size.id)))}</strong>
-                          <small>{availableStock > 0 ? format(availableStock) + ' disponibles tras reservas' : 'Sin saldo libre'}</small>
-                          <small className={shortage && shortage.missing > 0 ? 'inventory-shortage' : 'inventory-stock-ok'}>{missingText}</small>
-                        </div>
-                      </article>;
+                      </details>;
                     };
-                    return <div className="size-card product-inventory-size-card" key={size.id}>
-                      <div className="size-card-main">
-                        <div className="size-label-block"><span className="size-pill">{size.label}</span><span className="size-stock-note">{format(physicalTotal)} piezas físicas</span></div>
-                        <div className="complete-count"><strong>{format(complete)}</strong><span>prendas fabricables</span></div>
-                      </div>
-                      <div className="completion-status-row"><span className={'completion-status ' + (complete > 0 ? 'ready' : physicalTotal > 0 ? 'partial' : 'empty-status')}><i />{complete > 0 ? 'Fabricable' : physicalTotal > 0 ? 'Incompleto' : 'Vacío'}</span></div>
-                      <div className="finished-conversion-action">
-                        <div><strong>{format(finishedGarmentStock(product.id, size.id))}</strong><small>prendas terminadas de esta talla</small></div>
+
+                    return <>
+                      <section className="inventory-selected-size">
+                        <div className="inventory-selected-size-main">
+                          <span className="size-pill">{size.label}</span>
+                          <span className="inventory-selected-size-count"><strong>{format(complete)}</strong><small>prendas fabricables</small></span>
+                          <span className="inventory-selected-size-physical">{format(physicalTotal)} piezas físicas</span>
+                          {finishedCount > 0 && <span className="inventory-selected-size-finished">{format(finishedCount)} terminadas</span>}
+                        </div>
                         <button type="button" className="button primary" disabled={complete < 1} onClick={() => convertPieceSetToFinishedGarment(product, size.id)}>⇢ Convertir 1 prenda</button>
-                      </div>
-                      <section className="inventory-target-planner" aria-label={'Meta de fabricación para talla ' + size.label}>
-                        <div className="inventory-target-heading"><strong>Meta de fabricación</strong><b>{format(targetUnits)} conjuntos</b></div>
-                        <input className="inventory-target-slider" type="range" min={complete} max={Math.max(complete, maximumTarget)} step="1" value={targetUnits} disabled={maximumTarget <= complete || productPieces.length === 0} aria-label={'Cantidad objetivo de conjuntos para talla ' + size.label} onChange={(event) => setInventoryTargetUnits((previous) => ({ ...previous, [targetKey]: Number(event.target.value) }))} />
-                        <div className="inventory-target-limits"><span>Actual: {format(complete)}</span><span>Máximo: {format(maximumTarget)}</span></div>
-                        {targetUnits > complete ? missingToTarget.length > 0 ? <>
-                          <div className="inventory-target-shortages">
-                            {missingToTarget.map((item) => {
-                              const productPiece = productPieces.find((piece) => piece.id === item.piece.id);
-                              return <div className="inventory-target-shortage" key={item.piece.id}>
-                                <span><strong>{item.piece.name}</strong><small>{productPiece?.scope === 'base' ? 'Molde del patrón base' : productPiece?.componentName ?? 'Pieza auxiliar'}</small></span>
-                                <b>{item.symmetricStock ? 'I: ' + format(item.missingLeft ?? 0) + ' · D: ' + format(item.missingRight ?? 0) : format(item.missing) + ' pzas.'}</b>
-                              </div>;
-                            })}
-                          </div>
-                          <div className="inventory-target-actions"><span>{format(totalMissingToTarget)} piezas por reponer</span><button type="button" className="button primary" onClick={() => openProductInventoryShortages(product.id, size.id, targetUnits, targetShortages)}>Registrar piezas faltantes</button></div>
-                        </> : <p className="inventory-target-hint success">La disponibilidad actual permite alcanzar esta meta.</p> : <p className="inventory-target-hint">Desliza para estimar las piezas necesarias para una meta mayor.</p>}
-                        {maximumTarget <= complete && <p className="inventory-target-hint">No hay capacidad adicional estimable con el stock actual.</p>}
                       </section>
-                      {baseRows.length > 0 && <section className="inventory-product-piece-group"><h4>Moldes del patrón base <span>{baseRows.length}</span></h4>{baseRows.map(renderPiece)}</section>}
-                      {componentGroups.map(({ selection, component, rows }) => <section className="inventory-product-piece-group" key={selection.id}><h4>{component.name} <span>{rows.length} piezas</span></h4>{rows.map(renderPiece)}</section>)}
-                    </div>;
-                  })}
-                </div>}
+
+                      <div className="inventory-piece-list-heading">
+                        <div><strong>Piezas de talla {size.label}</strong><small>Abre una pieza para ver tela, color y consumo</small></div>
+                        <div className="inventory-piece-filter" role="group" aria-label="Filtrar piezas">
+                          {([
+                            ['Con stock', inStockCount],
+                            ['Faltantes', missingCount],
+                            ['Todas', productPieces.length],
+                          ] as const).map(([filter, count]) => <button type="button" key={filter}
+                            className={inventoryPieceFilter === filter ? 'active' : ''}
+                            onClick={() => setInventoryPieceFilter(filter)} aria-pressed={inventoryPieceFilter === filter}>
+                            {filter} <span>{format(count)}</span>
+                          </button>)}
+                        </div>
+                      </div>
+
+                      {filteredPieces.length === 0
+                        ? <div className="inventory-focus-empty">
+                            {inventoryPieceFilter === 'Con stock'
+                              ? 'No hay piezas con existencias en esta talla. Revisa «Faltantes» para saber qué necesitas reponer.'
+                              : 'No hay piezas que coincidan con este filtro.'}
+                          </div>
+                        : <>
+                          {baseRows.length > 0 && <section className="inventory-product-piece-group">
+                            <h4>Molde base <span>{baseRows.length}</span></h4>
+                            {baseRows.map(renderPiece)}
+                          </section>}
+                          {componentGroups.map(({ selection, component, rows }) => <section className="inventory-product-piece-group" key={selection.id}>
+                            <h4>{component.name} <span>{rows.length} piezas</span></h4>
+                            {rows.map(renderPiece)}
+                          </section>)}
+                        </>}
+
+                      <details className="inventory-planning-disclosure">
+                        <summary><span><strong>Planificar fabricación</strong><small>Estimar faltantes para una meta mayor</small></span><b>＋</b></summary>
+                        <section className="inventory-target-planner" aria-label={'Meta de fabricación para talla ' + size.label}>
+                          <div className="inventory-target-heading"><strong>Meta de fabricación</strong><b>{format(targetUnits)} prendas</b></div>
+                          <input className="inventory-target-slider" type="range" min={complete} max={Math.max(complete, maximumTarget)} step="1" value={targetUnits} disabled={maximumTarget <= complete || productPieces.length === 0} aria-label={'Cantidad objetivo de prendas para talla ' + size.label} onChange={(event) => setInventoryTargetUnits((previous) => ({ ...previous, [targetKey]: Number(event.target.value) }))} />
+                          <div className="inventory-target-limits"><span>Actual: {format(complete)}</span><span>Máximo: {format(maximumTarget)}</span></div>
+                          {targetUnits > complete ? missingToTarget.length > 0 ? <>
+                            <div className="inventory-target-shortages">
+                              {missingToTarget.map((item) => {
+                                const productPiece = productPieces.find((piece) => piece.id === item.piece.id);
+                                return <div className="inventory-target-shortage" key={item.piece.id}>
+                                  <span><strong>{item.piece.name}</strong><small>{productPiece?.scope === 'base' ? 'Molde base' : productPiece?.componentName ?? 'Pieza auxiliar'}</small></span>
+                                  <b>{item.symmetricStock ? 'I: ' + format(item.missingLeft ?? 0) + ' · D: ' + format(item.missingRight ?? 0) : format(item.missing) + ' und.'}</b>
+                                </div>;
+                              })}
+                            </div>
+                            <div className="inventory-target-actions"><span>{format(totalMissingToTarget)} piezas por reponer</span><button type="button" className="button primary" onClick={() => openProductInventoryShortages(product.id, size.id, targetUnits, targetShortages)}>Registrar piezas faltantes</button></div>
+                          </> : <p className="inventory-target-hint success">La disponibilidad actual permite alcanzar esta meta.</p> : <p className="inventory-target-hint">Desliza para estimar las piezas necesarias para una meta mayor.</p>}
+                          {maximumTarget <= complete && <p className="inventory-target-hint">No hay capacidad adicional estimable con el stock actual.</p>}
+                        </section>
+                      </details>
+                    </>;
+                  })()}
               </div>}
             </article>;
           })}
