@@ -3145,7 +3145,8 @@ export function ProductionModule({
       const piece = resolvePieces(movement.productModelId).find((item) => item.scope === 'base' && item.sourcePieceId === movement.pieceId);
       const size = sizes.find((item) => item.id === movement.sizeId);
       rows.push({
-        id: 'base:' + movement.id, productName: product?.name ?? 'Modelo archivado',
+        id: 'base:' + movement.id, productModelId: movement.productModelId, pieceId: movement.pieceId, sizeId: movement.sizeId,
+        productName: product?.name ?? 'Modelo archivado',
         pieceName: piece?.name ?? 'Pieza archivada', ownerName: 'Molde del patrón base',
         sizeLabel: size?.label ?? '—', kind: movement.kind, delta: movement.delta,
         side: movement.side, note: movement.note, date: movement.date,
@@ -3160,7 +3161,8 @@ export function ProductionModule({
       );
       const size = sizes.find((item) => item.id === movement.sizeId);
       rows.push({
-        id: 'component:' + movement.id, productName: product?.name ?? 'Modelo archivado',
+        id: 'component:' + movement.id, productModelId: movement.productModelId, pieceId: movement.pieceId, sizeId: movement.sizeId,
+        productName: product?.name ?? 'Modelo archivado',
         pieceName: piece?.name ?? 'Pieza auxiliar archivada', ownerName: piece?.componentName ?? 'Componente archivado',
         sizeLabel: size?.label ?? '—', kind: movement.kind, delta: movement.delta,
         side: movement.side, note: movement.note, date: movement.date,
@@ -3175,10 +3177,56 @@ export function ProductionModule({
       .join(' ').toLocaleLowerCase('es').includes(pieceHistoryQuery)
   );
 
+  function deletePieceHistoryMovement(row: {
+    id: string; productModelId: string; pieceId: string; sizeId: string;
+    productName: string; pieceName: string; ownerName: string; sizeLabel: string;
+    origin: string; delta: number;
+  }) {
+    if (row.origin !== 'Registro manual') {
+      return tell('Este movimiento pertenece a una orden de producción. Corrígelo desde la orden para conservar la trazabilidad.', 'info');
+    }
+    const separator = row.id.indexOf(':');
+    const scope = row.id.slice(0, separator);
+    const movementId = row.id.slice(separator + 1);
+    if (!movementId || (scope !== 'base' && scope !== 'component')) return tell('No se pudo identificar el movimiento que deseas eliminar.', 'error');
+
+    const referencedByOpenOrder = ordersHoldingStock.some((order) =>
+      order.productModelId === row.productModelId &&
+      (scope === 'base' ? order.basePieces : order.componentPieces).some((line) =>
+        line.pieceId === row.pieceId && line.sizeId === row.sizeId
+      )
+    );
+    if (referencedByOpenOrder) {
+      return tell('No se puede eliminar este movimiento mientras una orden reservada o en proceso utiliza esa pieza y talla. Libera o finaliza primero la orden.', 'error');
+    }
+
+    const signedQuantity = row.delta > 0 ? '+' + format(row.delta) : format(row.delta);
+    if (!window.confirm(
+      '¿Eliminar este movimiento manual?\n\n' +
+      row.productName + ' · ' + row.ownerName + '\n' +
+      row.pieceName + ' · Talla ' + row.sizeLabel + '\n' +
+      'Cantidad: ' + signedQuantity + '\n\n' +
+      'El saldo se recalculará automáticamente. Esta acción no se puede deshacer.'
+    )) return;
+
+    if (scope === 'base') {
+      setData((current) => ({
+        ...current,
+        productBasePieceMovements: current.productBasePieceMovements.filter((movement) => movement.id !== movementId),
+      }));
+    } else {
+      setData((current) => ({
+        ...current,
+        componentPieceMovements: current.componentPieceMovements.filter((movement) => movement.id !== movementId),
+      }));
+    }
+    tell('Movimiento eliminado. El saldo de piezas se ha recalculado.', 'success');
+  }
+
   const mainPanel = (() => {
     if (view === 'historial-piezas') return <section className="panel production-panel product-piece-history">
       <div className="panel-heading">
-        <div><h2>Historial de movimientos</h2><p>Entradas y salidas registradas en los modelos comerciales. Los movimientos antiguos de patrones base no se mezclan con este historial.</p></div>
+        <div><h2>Historial de movimientos</h2><p>Entradas y salidas registradas en los modelos comerciales. Puedes eliminar registros manuales; los movimientos vinculados a órdenes se gestionan desde su orden.</p></div>
         <span className="count-badge">{visiblePieceHistory.length} movimientos</span>
       </div>
       <div className="filters inventory-filters">
@@ -3201,6 +3249,7 @@ export function ProductionModule({
             <div className="product-piece-history-amount">
               <strong>{row.delta > 0 ? '+' : ''}{format(row.delta)}</strong>
               <small>{dateLabel}</small>
+              {row.origin === 'Registro manual' && <button type="button" className="product-piece-history-delete" onClick={() => deletePieceHistoryMovement(row)} aria-label={'Eliminar movimiento de ' + row.pieceName} title="Eliminar movimiento manual">Eliminar</button>}
             </div>
           </article>;
         })}
