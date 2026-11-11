@@ -1397,7 +1397,7 @@ Esto reemplazará los datos del navegador actual. Exporta un respaldo previo si 
                       <button className="button secondary edit-model pattern-library-edit" onClick={() => openEditModel(model)}>Editar</button>
                       {deletionStatus.canDelete
                         ? <button type="button" className="button secondary pattern-library-delete" onClick={() => deleteUnusedBasePattern(model)}>Eliminar</button>
-                        : <span className="pattern-library-protected" title={deletionStatus.reason}>Protegido</span>}
+                        : <span className="pattern-library-protected" title={deletionStatus.reason ?? undefined}>Protegido</span>}
                     </div>
                   </div>
 
