@@ -6,6 +6,7 @@ import { FABRIC_STORAGE_KEYS, createGlobalColorQuickly, createTextileColorQuickl
 import { componentFabricSlotLabel, isComponentFabricSlot, normalizeComponentFabricSlot, resolveComponentPieceTextileId, secondaryFabricSlotIndex, type ComponentFabricSlot } from '@/lib/component-fabric-slots';
 import { componentColorSlotLabel, isComponentColorSlot, normalizeComponentColorSlot, requiredProductColorSlots, resolveComponentPieceColorId, secondaryColorSlotIndex, type ComponentColorSlot } from '@/lib/component-color-slots';
 import { mapSizeSpecificationRules, validateSizeSpecification, type SizeSpecification, type SizeSpecificationRule } from '@/lib/material-size-specifications';
+import { resetLegacyInventoryMovementsOnce } from '@/lib/inventory-reset';
 
 export type ProductionView = 'inventario-piezas' | 'historial-piezas' | 'inventario-prendas' | 'insumos' | 'compras-avios' | 'componentes' | 'modelos-producto' | 'recetas' | 'planificacion' | 'ordenes';
 export type StockUnit = 'und' | 'm' | 'cm' | 'g' | 'kg' | 'l' | 'ml';
@@ -879,6 +880,15 @@ export function ProductionModule({
 
   const loadLocal = () => {
     const empty = emptyProductionBackupData();
+    try {
+      resetLegacyInventoryMovementsOnce();
+    } catch (error) {
+      return {
+        data: empty,
+        safe: false,
+        warning: error instanceof Error ? error.message : 'No se pudieron reiniciar los movimientos antiguos del inventario.',
+      };
+    }
     const next = {} as ProductionBackupData;
     let safe = true;
     let warning = '';
