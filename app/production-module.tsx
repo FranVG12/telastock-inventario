@@ -546,7 +546,7 @@ export function validateProductionBackupData(value: unknown): ProductionBackupDa
   if (!output.familyRecipes.every((x) => x.family.trim() && x.name.trim() && validMaterials(x.materials))) {
     throw new Error('Hay recetas generales con materiales inválidos.');
   }
-  if (!output.productModels.every((x) => x.name.trim() && (x.collectionId === null || x.collectionId === undefined || productCollectionIds.has(x.collectionId)) && typeof x.baseModelId === 'string' && Array.isArray(x.components) && x.components.every((c) => componentIds.has(c.componentId) && Number.isFinite(c.quantity) && c.quantity > 0 && validPieceOverrides(c.pieceOverrides) && (c.materialSpecifications === undefined || (c.materialSpecifications && typeof c.materialSpecifications === 'object' && Object.entries(c.materialSpecifications).every(([materialId, spec]) => typeof materialId === 'string' && spec && typeof spec.label === 'string' && typeof spec.bySize === 'object' && validateSizeSpecification(spec, Object.keys(spec.bySize)) && Object.values(spec.bySize).every((value) => typeof value === 'string' && value.trim().length > 0))))) && validPieceOverrides(x.basePieceOverrides) && validMaterials(x.additionalMaterials))) {
+  if (!output.productModels.every((x) => x.name.trim() && (x.collectionId === null || x.collectionId === undefined || productCollectionIds.has(x.collectionId)) && typeof x.baseModelId === 'string' && Array.isArray(x.components) && x.components.every((c) => componentIds.has(c.componentId) && Number.isInteger(c.quantity) && c.quantity > 0 && validPieceOverrides(c.pieceOverrides) && (c.materialSpecifications === undefined || (c.materialSpecifications && typeof c.materialSpecifications === 'object' && Object.entries(c.materialSpecifications).every(([materialId, spec]) => typeof materialId === 'string' && spec && typeof spec.label === 'string' && typeof spec.bySize === 'object' && validateSizeSpecification(spec, Object.keys(spec.bySize)) && Object.values(spec.bySize).every((value) => typeof value === 'string' && value.trim().length > 0))))) && validPieceOverrides(x.basePieceOverrides) && validMaterials(x.additionalMaterials))) {
     throw new Error('Hay modelos configurados con componentes o materiales inválidos.');
   }
   const productModelIds = new Set(output.productModels.map((product) => product.id));
@@ -3712,6 +3712,7 @@ export function ProductionModule({
         return rows.length > 0 ? [{ selection, component, rows }] : [];
       });
       const totalPieces = basePieceRows.length + componentPieceGroups.reduce((sum, group) => sum + group.rows.length, 0);
+      const totalUnitsPerGarment = basePieceRows.reduce((sum, piece) => sum + piece.unitsPerGarment, 0) + componentPieceGroups.reduce((sum, group) => sum + group.rows.reduce((groupSum, piece) => groupSum + piece.unitsPerGarment, 0), 0);
       const pieceRequirementLabel = (units: number, laterality: ModelPiece['laterality']) => {
         if (laterality === 'simetrica') {
           const eachSide = units / 2;
@@ -3762,7 +3763,7 @@ export function ProductionModule({
           <h2>Materiales por pieza</h2>
           <p><strong>{product.name}</strong> · {base.name}</p>
           <span className="piece-material-help">Cambia la tela o el color de una pieza sin modificar el patrón base ni la biblioteca de componentes. Los cambios se guardan automáticamente en este modelo.</span>
-          <div className="piece-material-summary"><span>{basePieceRows.length} moldes base</span><span>{componentPieceGroups.reduce((sum, group) => sum + group.rows.length, 0)} piezas auxiliares</span><span>{totalPieces} piezas en total</span></div>
+          <div className="piece-material-summary"><span>{basePieceRows.length} moldes base</span><span>{componentPieceGroups.reduce((sum, group) => sum + group.rows.length, 0)} moldes auxiliares</span><span>{format(totalUnitsPerGarment)} unidades por prenda</span></div>
         </div>
         {basePieceRows.length > 0 && <section className="piece-material-group">
           <div className="piece-material-group-heading"><h3>Moldes del patrón base</h3><span>{basePieceRows.length}</span></div>
