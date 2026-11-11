@@ -2423,3 +2423,34 @@
   .production-collection-rename-form .production-collection-actions{display:grid;grid-template-columns:1fr 1fr}
   .production-collection-rename-form .production-collection-actions .button{width:100%;min-height:42px}
 }
+
+
+/* Acciones del historial de piezas: eliminar únicamente registros manuales. */
+.product-piece-history-delete {
+  min-height: 30px;
+  margin-top: 3px;
+  padding: 5px 9px;
+  border: 1px solid #f0d5d3;
+  border-radius: 8px;
+  background: #fff8f7;
+  color: #ad514b;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.product-piece-history-delete:hover {
+  border-color: #d99a95;
+  background: #fff0ee;
+}
+.product-piece-history-delete:focus-visible {
+  outline: 2px solid #ad514b;
+  outline-offset: 2px;
+}
+@media (max-width: 390px) {
+  .product-piece-history-delete {
+    min-height: 28px;
+    padding: 4px 7px;
+    font-size: 9px;
+  }
+}
